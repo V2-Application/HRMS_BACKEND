@@ -1,0 +1,12 @@
+﻿public class ReturnByBankDTO
+{
+    public long ReturnByBankId { get; set; }
+    public string? Ecode { get; set; }
+    public string? AC { get; set; }
+    public string? ReturnByBank { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTime? CreatedOn { get; set; }
+    public string? LastUpdatedBy { get; set; }
+    public DateTime? LastUpdatedOn { get; set; }
+    public DateTime? Date { get; set; }
+}

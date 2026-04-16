@@ -1,0 +1,5 @@
+Job Position,Department,Designation,Preferred Job Location,Status,Full Name,Phone,Email,Previous Salary,Salary Expectation,Interviewer-1
+RH01,IT,Software Engineer,Mumbai,Applied,John O'Brien-Smith,9876543210,test+email@domain.co.in,₹8,00,000,INR 1000000,Interviewer 1, Interviewer 2
+RH01,IT,Software Engineer,Mumbai,Applied,José María García,123456789012345,email@test.com,800000.50,1000000.75,Interviewer 1; Interviewer 2
+RH01,IT,Software Engineer,Mumbai,Applied,   John Doe   ,9876543210,,,,
+

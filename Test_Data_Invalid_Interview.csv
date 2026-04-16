@@ -1,0 +1,5 @@
+Job Position,Department,Designation,Preferred Job Location,Status,Full Name,Phone,Interview-1 ACT,Interviewer-1,Interviewer-1 Status
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,,Interviewer Name 1,Selected
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,15-01-2025 10:00,,Selected
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,15-01-2025 10:00,INVALID_INTERVIEWER,Selected
+

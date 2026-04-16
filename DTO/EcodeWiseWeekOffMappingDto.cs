@@ -1,0 +1,40 @@
+using System;
+
+namespace HRMSAPI.DTO
+{
+    public class EcodeWiseWeekOffMappingUpsertDto
+    {
+        public long? Id { get; set; }
+        public string Ecode { get; set; }
+        public string MONTH { get; set; }
+        public string TotalAttendance { get; set; }
+        public decimal? WeeklyOff { get; set; }
+    }
+
+    public class EcodeWiseWeekOffMappingResponseDto
+    {
+        public long Id { get; set; }
+        public string Ecode { get; set; }
+        public string MONTH { get; set; }
+        public string TotalAttendance { get; set; }
+        public decimal? WeeklyOff { get; set; }
+        public string CreatedBy { get; set; }
+        public DateTime? CreatedOn { get; set; }
+        public string UpdatedBy { get; set; }
+        public DateTime? UpdatedOn { get; set; }
+        public bool? IsActive { get; set; }
+        public bool? IsDeleted { get; set; }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+

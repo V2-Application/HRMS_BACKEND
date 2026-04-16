@@ -1,0 +1,24 @@
+{
+  "name": "Upsert with Missing Ecode (Validation Error)",
+  "description": "Test case for validation error when Ecode is missing",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "ecode": "",
+      "bonusProvisioningPolicyMaster": "550e8400-e29b-41d4-a716-446655440000"
+    }
+  },
+  "expectedResponse": {
+    "status": false,
+    "message": "Ecode is required",
+    "code": 400
+  },
+  "notes": "This test case validates that the API returns an error when Ecode is missing or empty."
+}
+

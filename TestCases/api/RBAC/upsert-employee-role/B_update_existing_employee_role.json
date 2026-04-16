@@ -1,0 +1,26 @@
+{
+  "name": "Update Existing Employee Role Assignment",
+  "description": "Test case for updating an existing role assignment for an employee",
+  "endpoint": "POST /api/RBAC/upsert-employee-role",
+  "request": {
+    "method": "POST",
+    "url": "/api/RBAC/upsert-employee-role",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "employeeRoleId": 0,
+      "employeeId": 12345,
+      "roleId": 2,
+      "assignedBy": "admin@company.com",
+      "lastUpdatedBy": "manager@company.com"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Employee role updated successfully",
+    "code": 200
+  },
+  "notes": "When updating an existing role assignment, the system will update the LastUpdatedBy and LastUpdatedOn fields. The employeeRoleId is not used for updates - the system identifies existing assignments by EmployeeId and RoleId combination."
+}

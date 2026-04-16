@@ -1,0 +1,32 @@
+{
+  "name": "Get Employee Roles",
+  "description": "Test case for retrieving all roles assigned to a specific employee",
+  "endpoint": "GET /api/RBAC/employee-roles/{employeeId}",
+  "request": {
+    "method": "GET",
+    "url": "/api/RBAC/employee-roles/12345",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Found X role(s) for employee 12345",
+    "code": 200,
+    "data": [
+      {
+        "employeeRoleId": 1,
+        "employeeId": 12345,
+        "roleId": 1,
+        "roleName": "Admin",
+        "roleDescription": "Administrator role",
+        "assignedOn": "2024-01-01T00:00:00",
+        "assignedBy": "admin@company.com",
+        "lastUpdatedOn": "2024-01-01T00:00:00",
+        "lastUpdatedBy": "admin@company.com"
+      }
+    ]
+  },
+  "notes": "This endpoint returns all roles assigned to the specified employee with full role details including role name and description."
+}

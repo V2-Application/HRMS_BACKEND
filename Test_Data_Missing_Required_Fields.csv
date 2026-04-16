@@ -1,0 +1,9 @@
+Job Position,Department,Designation,Preferred Job Location,Status,Full Name,Phone
+,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210
+RH01,,Software Engineer,Mumbai,Applied,John Doe,9876543210
+RH01,IT,,Mumbai,Applied,John Doe,9876543210
+RH01,IT,Software Engineer,,Applied,John Doe,9876543210
+RH01,IT,Software Engineer,Mumbai,,John Doe,9876543210
+RH01,IT,Software Engineer,Mumbai,Applied,,9876543210
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,
+

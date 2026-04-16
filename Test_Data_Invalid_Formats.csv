@@ -1,0 +1,6 @@
+Job Position,Department,Designation,Preferred Job Location,Status,Full Name,Phone,DOB,Total Experience (Years),Previous Salary,Salary Expectation
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,INVALID_DATE,5.5,800000,1000000
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,15-05-1990,INVALID_NUMBER,800000,1000000
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,15-05-1990,5.5,INVALID_SALARY,1000000
+RH01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210,15-05-1990,5.5,800000,INVALID_EXPECTATION
+

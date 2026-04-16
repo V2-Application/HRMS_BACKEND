@@ -1,0 +1,116 @@
+### EcodeWise Bonus Provisioning Policy Mapping API Test Cases
+### Use this file with VS Code REST Client extension or similar HTTP client
+
+@baseUrl = http://localhost:5151
+@token = your_jwt_token_here
+
+### Variables
+@ecode = E-001
+@mappingId = 550e8400-e29b-41d4-a716-446655440000
+@bonusPolicyId = 550e8400-e29b-41d4-a716-446655440000
+
+###############################################
+### GET - Get All Active Mappings
+###############################################
+GET {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+###############################################
+### POST - Create New Mapping
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "ecode": "{{ecode}}",
+  "bonusProvisioningPolicyMaster": "{{bonusPolicyId}}"
+}
+
+###############################################
+### POST - Update Existing Mapping
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "ecode": "{{ecode}}",
+  "bonusProvisioningPolicyMaster": "660e8400-e29b-41d4-a716-446655440000"
+}
+
+###############################################
+### POST - Upsert with Missing Ecode (Validation Error)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "ecode": "",
+  "bonusProvisioningPolicyMaster": "{{bonusPolicyId}}"
+}
+
+###############################################
+### POST - Upsert with Null Body (Validation Error)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+null
+
+###############################################
+### POST - Upsert without Authentication (Unauthorized)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert
+Content-Type: application/json
+
+{
+  "ecode": "{{ecode}}",
+  "bonusProvisioningPolicyMaster": "{{bonusPolicyId}}"
+}
+
+###############################################
+### POST - Delete Existing Mapping
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "id": "{{mappingId}}"
+}
+
+###############################################
+### POST - Delete with Invalid ID (Validation Error)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "id": "00000000-0000-0000-0000-000000000000"
+}
+
+###############################################
+### POST - Delete Non-existent Mapping (Not Found)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "id": "99999999-9999-9999-9999-999999999999"
+}
+
+###############################################
+### POST - Delete with Null Body (Validation Error)
+###############################################
+POST {{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+null
+

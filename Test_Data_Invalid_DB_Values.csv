@@ -1,0 +1,6 @@
+Job Position,Department,Designation,Preferred Job Location,Status,Full Name,Phone
+INVALID01,IT,Software Engineer,Mumbai,Applied,John Doe,9876543210
+RH01,INVALID_DEPT,Software Engineer,Mumbai,Applied,John Doe,9876543210
+RH01,IT,INVALID_DESIG,Mumbai,Applied,John Doe,9876543210
+RH01,IT,Software Engineer,Mumbai,INVALID_STATUS,John Doe,9876543210
+

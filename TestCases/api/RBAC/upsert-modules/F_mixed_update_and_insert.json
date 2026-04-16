@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "moduleName": "Employee",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 10,
+        "subModuleName": "Profile",
+        "createdBy": "tester",
+        "actions": [
+          {
+            "id": 100,
+            "actionName": "Edit Profile (renamed)",
+            "createdBy": "tester",
+            "furtherParts": [
+              {
+                "id": 1000,
+                "actionFurtherPartName": "Contact Tab (renamed)",
+                "createdBy": "tester"
+              },
+              {
+                "id": 0,
+                "actionFurtherPartName": "Documents Tab",
+                "createdBy": "tester"
+              }
+            ]
+          },
+          {
+            "id": 0,
+            "actionName": "Archive Profile",
+            "createdBy": "tester",
+            "furtherParts": []
+          }
+        ]
+      },
+      {
+        "id": 0,
+        "subModuleName": "Onboarding",
+        "createdBy": "tester",
+        "actions": [
+          {
+            "id": 0,
+            "actionName": "Start Onboarding",
+            "createdBy": "tester",
+            "furtherParts": []
+          }
+        ]
+      }
+    ]
+  }
+] 

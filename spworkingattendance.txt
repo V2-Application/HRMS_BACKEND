@@ -1,0 +1,496 @@
+USE [HRMS]
+GO
+/****** Object:  UserDefinedFunction [dbo].[fn_GetMonthlyPunchesRange_productionnewnick]    Script Date: 23-09-2025 14:57:58 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER FUNCTION [dbo].[fn_GetMonthlyPunchesRange_productionnewnick]
+(
+    @FromDate DATE,
+    @ToDate   DATE,
+    @ECode    NVARCHAR(50) = NULL
+)
+RETURNS TABLE
+AS
+RETURN
+(
+    WITH Numbers AS (
+        SELECT 0 AS n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9 UNION ALL
+        SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 UNION ALL SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18 UNION ALL SELECT 19 UNION ALL
+        SELECT 20 UNION ALL SELECT 21 UNION ALL SELECT 22 UNION ALL SELECT 23 UNION ALL SELECT 24 UNION ALL SELECT 25 UNION ALL SELECT 26 UNION ALL SELECT 27 UNION ALL SELECT 28 UNION ALL SELECT 29 UNION ALL
+        SELECT 30 UNION ALL SELECT 31 UNION ALL SELECT 32 UNION ALL SELECT 33 UNION ALL SELECT 34 UNION ALL SELECT 35 UNION ALL SELECT 36 UNION ALL SELECT 37 UNION ALL SELECT 38 UNION ALL SELECT 39 UNION ALL
+        SELECT 40 UNION ALL SELECT 41 UNION ALL SELECT 42 UNION ALL SELECT 43 UNION ALL SELECT 44 UNION ALL SELECT 45 UNION ALL SELECT 46 UNION ALL SELECT 47 UNION ALL SELECT 48 UNION ALL SELECT 49 UNION ALL
+        SELECT 50 UNION ALL SELECT 51 UNION ALL SELECT 52 UNION ALL SELECT 53 UNION ALL SELECT 54 UNION ALL SELECT 55 UNION ALL SELECT 56 UNION ALL SELECT 57 UNION ALL SELECT 58 UNION ALL SELECT 59 UNION ALL
+        SELECT 60 UNION ALL SELECT 61 UNION ALL SELECT 62 UNION ALL SELECT 63 UNION ALL SELECT 64 UNION ALL SELECT 65 UNION ALL SELECT 66 UNION ALL SELECT 67 UNION ALL SELECT 68 UNION ALL SELECT 69 UNION ALL
+        SELECT 70 UNION ALL SELECT 71 UNION ALL SELECT 72 UNION ALL SELECT 73 UNION ALL SELECT 74 UNION ALL SELECT 75 UNION ALL SELECT 76 UNION ALL SELECT 77 UNION ALL SELECT 78 UNION ALL SELECT 79 UNION ALL
+        SELECT 80 UNION ALL SELECT 81 UNION ALL SELECT 82 UNION ALL SELECT 83 UNION ALL SELECT 84 UNION ALL SELECT 85 UNION ALL SELECT 86 UNION ALL SELECT 87 UNION ALL SELECT 88 UNION ALL SELECT 89 UNION ALL
+        SELECT 90 UNION ALL SELECT 91 UNION ALL SELECT 92 UNION ALL SELECT 93 UNION ALL SELECT 94 UNION ALL SELECT 95 UNION ALL SELECT 96 UNION ALL SELECT 97 UNION ALL SELECT 98 UNION ALL SELECT 99 UNION ALL SELECT 100
+    ),
+    DateRange AS (
+        SELECT DATEADD(DAY, n, @FromDate) AS DateValue
+        FROM Numbers
+        WHERE DATEADD(DAY, n, @FromDate) <= @ToDate
+    ),
+
+    /* Employees + LocationId + Shift (fallback to 08:00 if no shift) */
+    EmployeeList AS (
+        SELECT 
+            e.EmployeeId,
+            e.ECode,
+            EmployeeName = CASE 
+                WHEN e.FirstName IS NULL AND e.[FULL NAME] IS NULL THEN 'NA'
+                WHEN e.FirstName IS NULL THEN ISNULL(e.[FULL NAME], 'NA')
+                ELSE LTRIM(ISNULL(e.FirstName,'') + CASE WHEN e.LastName IS NOT NULL THEN ' ' + e.LastName ELSE '' END)
+            END,
+            dsg.DesignationName,
+            loc.LocationName,
+            loc.STCode,
+            dept.DepartmentName,
+            e.LocationId,
+            sm.ShiftID,                                     -- NEW: carry ShiftID
+            sm.ShiftName,
+            COALESCE(CAST(sm.StartTime AS TIME(0)), CAST('08:00:00' AS TIME(0))) AS ShiftStartTime,
+            CAST(sm.EndTime AS TIME(0)) AS ShiftEndTime,
+            CASE WHEN sm.ShiftID IS NULL THEN 0 ELSE 1 END AS HasShift,
+            CASE WHEN sm.ShiftID = 19 OR sm.ShiftName = 'Flexible Shift' THEN 1 ELSE 0 END AS IsFlexibleShift  -- NEW
+        FROM tblEmployee e
+        LEFT JOIN tblDesignation dsg ON e.DesignationId = dsg.DesignationId
+        LEFT JOIN tblLocation    loc ON e.LocationId    = loc.LocationId
+        LEFT JOIN tblDepartment  dept ON e.DepartmentId = dept.DepartmentId
+        LEFT JOIN tblShiftMaster sm   ON sm.ShiftID     = e.ShiftId AND sm.IsActive = 1
+        WHERE (@ECode IS NULL OR e.ECode = @ECode)
+    ),
+
+    /* --- HOLIDAY: de-duplicate to avoid row multiplication --- */
+    HolidayRaw AS (
+        SELECT 
+            hm.HolidayDate,
+            hm.HolidayName,
+            tl.STCode
+        FROM HolidayMaster hm
+        INNER JOIN LocationTypeMaster ltm ON ltm.Id = hm.LocationType 
+        INNER JOIN GroupMaster gm ON gm.Id = hm.LocationValue
+        INNER JOIN GroupWiseStoreCodeMapping gwscm ON gwscm.GroupId = gm.Id
+        INNER JOIN tblLocation tl ON tl.STCode = gwscm.ST_CD
+        WHERE hm.HolidayDate BETWEEN @FromDate AND @ToDate
+    ),
+    HolidayBase AS (
+        SELECT 
+            r.STCode,
+            r.HolidayDate,
+            MIN(r.HolidayName) AS HolidayName
+        FROM HolidayRaw r
+        GROUP BY r.STCode, r.HolidayDate
+    ),
+
+    /* Grid (per-employee per-date) + Holiday + Shift info */
+    EmployeeDateGrid AS (
+        SELECT 
+            el.EmployeeId,
+            el.ECode,
+            el.EmployeeName,
+            el.DesignationName,
+            el.LocationName,
+            el.STCode,
+            el.DepartmentName,
+            el.LocationId,
+            el.ShiftID,               -- NEW
+            el.ShiftName,
+            el.ShiftStartTime,
+            el.ShiftEndTime,
+            el.HasShift,
+            el.IsFlexibleShift,       -- NEW
+            dr.DateValue AS PunchDate,
+            CASE WHEN DATEPART(WEEKDAY, dr.DateValue) IN (1, 7) THEN 1 ELSE 0 END AS IsWeekend,
+            CASE WHEN dr.DateValue > CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsFutureDate,
+            CASE WHEN hb.HolidayDate IS NOT NULL THEN 1 ELSE 0 END AS IsHoliday,
+            ISNULL(hb.HolidayName,'') AS HolidayName
+        FROM EmployeeList el
+        CROSS JOIN DateRange dr
+        LEFT JOIN HolidayBase hb ON hb.STCode = el.STCode AND hb.HolidayDate = dr.DateValue
+    ),
+
+    /* Raw punches */
+    PunchData AS (
+        SELECT 
+            e.EmployeeId,
+            e.ECode,
+            p.PunchDate,
+            p.Machine_Type,
+            p.Punch1,p.Punch2,p.Punch3,p.Punch4,p.Punch5,p.Punch6,
+            p.Punch7,p.Punch8,p.Punch9,p.Punch10,p.Punch11,p.Punch12,
+            p.RegularizePunchIn,
+            p.RegularizePuncOut,
+            p.IsRegularize,
+            EmployeeName = CASE 
+                WHEN e.FirstName IS NULL AND e.[FULL NAME] IS NULL THEN 'NA'
+                WHEN e.FirstName IS NULL THEN ISNULL(e.[FULL NAME], 'NA')
+                ELSE LTRIM(ISNULL(e.FirstName,'') + CASE WHEN e.LastName IS NOT NULL THEN ' ' + e.LastName ELSE '' END)
+            END,
+            dsg.DesignationName,
+            loc.LocationName,
+            loc.STCode,
+            dept.DepartmentName
+        FROM tblEmployee e
+        LEFT JOIN tblDesignation dsg ON e.DesignationId = dsg.DesignationId
+        LEFT JOIN tblLocation loc    ON e.LocationId    = loc.LocationId
+        LEFT JOIN tblDepartment dept ON e.DepartmentId  = dept.DepartmentId
+        LEFT JOIN tblEmployeeMultiPunches p ON e.ECode = p.UserID AND p.PunchDate BETWEEN @FromDate AND @ToDate
+        WHERE (@ECode IS NULL OR e.ECode = @ECode)
+    ),
+
+    /* Aggregated punches (per day) */
+    AggregatedPunches AS (
+        SELECT 
+            EmployeeId,
+            ECode,
+            PunchDate,
+            STRING_AGG(Machine_Type, ',') AS Machine_Type,
+            EmployeeName,
+            DesignationName,
+            LocationName,
+            STCode,
+            RegularizePunchIn,
+            RegularizePuncOut,
+            CAST(IsRegularize AS BIT) AS IsRegularize,
+            DepartmentName,
+            ISNULL(Punch1,'00:00:00') AS Punch1,
+            ISNULL(Punch2,'00:00:00') AS Punch2,
+            ISNULL(Punch3,'00:00:00') AS Punch3,
+            ISNULL(Punch4,'00:00:00') AS Punch4,
+            ISNULL(Punch5,'00:00:00') AS Punch5,
+            ISNULL(Punch6,'00:00:00') AS Punch6,
+            ISNULL(Punch7,'00:00:00') AS Punch7,
+            ISNULL(Punch8,'00:00:00') AS Punch8,
+            ISNULL(Punch9,'00:00:00') AS Punch9,
+            ISNULL(Punch10,'00:00:00') AS Punch10,
+            ISNULL(Punch11,'00:00:00') AS Punch11,
+            ISNULL(Punch12,'00:00:00') AS Punch12,
+            (SELECT COUNT(p) 
+             FROM (VALUES (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),
+                          (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)
+             WHERE p IS NOT NULL AND p <> '00:00:00') AS PunchCount,
+            CASE 
+                WHEN IsRegularize=1 AND ISNULL(RegularizePunchIn,'00:00:00')<>'00:00:00' THEN RegularizePunchIn
+                ELSE ISNULL((SELECT MIN(p) 
+                            FROM (VALUES (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),
+                                         (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)
+                            WHERE p IS NOT NULL AND p <> '00:00:00'),'00:00:00')
+            END AS PunchIn,
+            CASE 
+                WHEN IsRegularize=1 AND ISNULL(RegularizePuncOut,'00:00:00')<>'00:00:00' THEN RegularizePuncOut
+                ELSE ISNULL((SELECT MAX(p) 
+                            FROM (VALUES (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),
+                                         (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)
+                            WHERE p IS NOT NULL AND p <> '00:00:00'),'00:00:00')
+            END AS PunchOut
+        FROM PunchData
+        GROUP BY EmployeeId,ECode,PunchDate,EmployeeName,DesignationName,LocationName,STCode,DepartmentName,
+                 RegularizePunchIn,RegularizePuncOut,IsRegularize,
+                 Punch1,Punch2,Punch3,Punch4,Punch5,Punch6,Punch7,Punch8,Punch9,Punch10,Punch11,Punch12
+    ),
+
+    /* Working minutes (as per your final logic) */
+    DailyWorkingMinutes AS (
+        SELECT 
+            EmployeeId,
+            PunchDate,
+            PunchCount,
+            CASE 
+                WHEN IsRegularize=1 AND ISNULL(RegularizePunchIn,'00:00:00') <> '00:00:00' AND ISNULL(RegularizePuncOut,'00:00:00')<> '00:00:00' 
+                     AND DATEDIFF(MINUTE,RegularizePunchIn,RegularizePuncOut) > 0 
+                THEN DATEDIFF(MINUTE,RegularizePunchIn,RegularizePuncOut)
+                WHEN PunchCount % 2 = 0 
+                THEN ISNULL(DATEDIFF(MINUTE,Punch1,Punch2),0) + ISNULL(DATEDIFF(MINUTE,Punch3,Punch4),0) + 
+                     ISNULL(DATEDIFF(MINUTE,Punch5,Punch6),0) + ISNULL(DATEDIFF(MINUTE,Punch7,Punch8),0) + 
+                     ISNULL(DATEDIFF(MINUTE,Punch9,Punch10),0) + ISNULL(DATEDIFF(MINUTE,Punch11,Punch12),0)
+                ELSE 0 
+            END AS TotalDailyWorkingMinutes
+        FROM AggregatedPunches
+        WHERE (IsRegularize=1 AND ISNULL(RegularizePunchIn,'00:00:00')<>'00:00:00' AND ISNULL(RegularizePuncOut,'00:00:00')<>'00:00:00')
+           OR (PunchCount%2=0 AND (
+               (Punch1 IS NOT NULL AND Punch2 IS NOT NULL AND DATEDIFF(MINUTE,Punch1,Punch2) > 0) OR
+               (Punch3 IS NOT NULL AND Punch4 IS NOT NULL AND DATEDIFF(MINUTE,Punch3,Punch4) > 0) OR
+               (Punch5 IS NOT NULL AND Punch6 IS NOT NULL AND DATEDIFF(MINUTE,Punch5,Punch6) > 0) OR
+               (Punch7 IS NOT NULL AND Punch8 IS NOT NULL AND DATEDIFF(MINUTE,Punch7,Punch8) > 0) OR
+               (Punch9 IS NOT NULL AND Punch10 IS NOT NULL AND DATEDIFF(MINUTE,Punch9,Punch10) > 0) OR
+               (Punch11 IS NOT NULL AND Punch12 IS NOT NULL AND DATEDIFF(MINUTE,Punch11,Punch12) > 0)))
+    ),
+
+    /* Monthly hours string */
+    MonthlyWorkingHours AS (
+        SELECT 
+            EmployeeId,
+            CAST(SUM(TotalDailyWorkingMinutes)/60 AS VARCHAR) + ' hours and ' + 
+            RIGHT('0' + CAST(SUM(TotalDailyWorkingMinutes)%60 AS VARCHAR),2) + ' minutes' AS TotalMonthlyWorkingHours
+        FROM DailyWorkingMinutes
+        GROUP BY EmployeeId
+    ),
+
+    /* Week key for grace */
+    WeekKey AS (
+        SELECT 
+            edg.EmployeeId,
+            edg.PunchDate,
+            DATEADD(DAY,-((DATEPART(WEEKDAY,edg.PunchDate)+5)%7),edg.PunchDate) AS WeekStartMonday
+        FROM EmployeeDateGrid edg
+    ),
+
+    /* Next-day punches (for cross-midnight late detection) */
+    AggregatedPunches_NextDay AS (
+        SELECT 
+            EmployeeId, ECode, PunchDate,
+            PunchIn, PunchOut, RegularizePunchIn, RegularizePuncOut, IsRegularize
+        FROM AggregatedPunches
+    ),
+
+    /* SHIFT-AWARE late calc */
+    LateCalc AS (
+        SELECT 
+            edg.EmployeeId,
+            edg.PunchDate,
+            edg.LocationId,
+            edg.HasShift,
+            edg.IsFlexibleShift,     -- NEW
+            edg.ShiftStartTime,
+            edg.ShiftEndTime,
+            wk.WeekStartMonday,
+
+            DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS TIME), edg.ShiftStartTime), CAST(edg.PunchDate AS DATETIME)) AS ShiftStartDT,
+
+            CASE 
+                WHEN ap.IsRegularize=1 AND ISNULL(ap.RegularizePunchIn,'00:00:00')<>'00:00:00'
+                    THEN CASE WHEN ap.RegularizePunchIn='00:00:00' THEN NULL 
+                              ELSE DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS TIME), CAST(ap.RegularizePunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME)) END
+                ELSE CASE WHEN ap.PunchIn IS NULL OR ap.PunchIn='00:00:00' THEN NULL
+                          ELSE DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS TIME), CAST(ap.PunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME)) END
+            END AS InDT_Today,
+
+            CASE 
+                WHEN apn.IsRegularize=1 AND ISNULL(apn.RegularizePunchIn,'00:00:00')<>'00:00:00'
+                    THEN CASE WHEN apn.RegularizePunchIn='00:00:00' THEN NULL 
+                              ELSE DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS TIME), CAST(apn.RegularizePunchIn AS TIME)), DATEADD(DAY,1, CAST(edg.PunchDate AS DATETIME))) END
+                ELSE CASE WHEN apn.PunchIn IS NULL OR apn.PunchIn='00:00:00' THEN NULL
+                          ELSE DATEADD(SECOND, DATEDIFF(SECOND, CAST('00:00:00' AS TIME), CAST(apn.PunchIn AS TIME)), DATEADD(DAY,1, CAST(edg.PunchDate AS DATETIME))) END
+            END AS InDT_Next
+        FROM EmployeeDateGrid edg
+        LEFT JOIN AggregatedPunches ap 
+               ON ap.EmployeeId=edg.EmployeeId AND ap.PunchDate=edg.PunchDate
+        LEFT JOIN AggregatedPunches_NextDay apn
+               ON apn.EmployeeId=edg.EmployeeId AND apn.PunchDate = DATEADD(DAY,1, edg.PunchDate)
+        LEFT JOIN WeekKey wk 
+               ON wk.EmployeeId=edg.EmployeeId AND wk.PunchDate=edg.PunchDate
+    ),
+
+    /* Normalize EffectiveInDT + IsLate */
+    LateCalc2 AS (
+        SELECT 
+            lc.*,
+            CASE 
+                WHEN lc.HasShift=1 AND lc.ShiftEndTime IS NOT NULL AND lc.ShiftStartTime > lc.ShiftEndTime 
+                    THEN (SELECT MIN(x.dt) FROM (VALUES (lc.InDT_Today),(lc.InDT_Next)) AS x(dt))
+                ELSE lc.InDT_Today
+            END AS EffectiveInDT,
+            CASE 
+                WHEN (lc.InDT_Today IS NULL AND (lc.HasShift=0 OR NOT (lc.ShiftStartTime > lc.ShiftEndTime) ) ) THEN 0
+                WHEN (lc.InDT_Today IS NULL AND lc.InDT_Next IS NULL) THEN 0
+                WHEN (CASE 
+                        WHEN lc.HasShift=1 AND lc.ShiftEndTime IS NOT NULL AND lc.ShiftStartTime > lc.ShiftEndTime 
+                             THEN (SELECT MIN(x.dt) FROM (VALUES (lc.InDT_Today),(lc.InDT_Next)) AS x(dt))
+                        ELSE lc.InDT_Today
+                      END) > lc.ShiftStartDT THEN 1
+                ELSE 0
+            END AS IsLate
+        FROM LateCalc lc
+    ),
+
+    /* Count late days for 313 ONLY, exclude Flexible Shift, from 2025-09-16 */
+    GraceDaysTracking AS (
+        SELECT 
+            lc.EmployeeId,
+            lc.PunchDate,
+            lc.LocationId,
+            lc.IsLate,
+            lc.WeekStartMonday,
+            lc.ShiftStartDT,
+            lc.EffectiveInDT,
+            lc.IsFlexibleShift,     -- NEW
+
+            (SELECT COUNT(*)
+               FROM LateCalc2 x
+              WHERE x.EmployeeId = lc.EmployeeId
+                AND x.WeekStartMonday = lc.WeekStartMonday
+                AND x.PunchDate <= lc.PunchDate
+                AND x.IsLate = 1
+                AND x.PunchDate >= '2025-09-16'
+                AND x.LocationId = 313
+                AND x.IsFlexibleShift = 0           -- NEW: exclude Flexible Shift from grace counting
+            ) AS LateCountTillDate,
+
+            CASE 
+              WHEN (SELECT COUNT(*)
+                      FROM LateCalc2 x
+                     WHERE x.EmployeeId = lc.EmployeeId
+                       AND x.WeekStartMonday = lc.WeekStartMonday
+                       AND x.PunchDate < lc.PunchDate
+                       AND x.IsLate = 1
+                       AND x.PunchDate >= '2025-09-16'
+                       AND x.LocationId = 313
+                       AND x.IsFlexibleShift = 0      -- NEW
+                   ) >= 2 
+              THEN 1 ELSE 0
+            END AS GraceDaysExhausted
+        FROM LateCalc2 lc
+    ),
+
+    /* Forced half day (313-only), no grace for Flexible Shift */
+    ForcedHalfDay AS (
+        SELECT 
+            gdt.EmployeeId,
+            gdt.PunchDate,
+            CASE
+                WHEN gdt.LocationId = 313 
+                 AND gdt.IsFlexibleShift = 0                 -- NEW: Flexible shift never gets grace penalties
+                 AND gdt.PunchDate >= '2025-09-16'
+                 AND gdt.IsLate = 1 
+                 AND gdt.GraceDaysExhausted = 1
+                THEN 1 ELSE 0
+            END AS IsForcedHalfDay,
+            CASE
+                WHEN gdt.LocationId = 313 
+                 AND gdt.IsFlexibleShift = 0                 -- NEW: grace “free late” only if not Flexible
+                 AND gdt.PunchDate >= '2025-09-16'
+                 AND gdt.IsLate = 1 
+                 AND gdt.GraceDaysExhausted = 0
+                THEN 1 ELSE 0
+            END AS IsInGrace,
+            gdt.ShiftStartDT,
+            gdt.EffectiveInDT
+        FROM GraceDaysTracking gdt
+    )
+
+    /* Final projection */
+    SELECT
+        EmpAttendanceId = CAST(0 AS INT),
+        edg.EmployeeId, edg.EmployeeName, edg.ECode,
+        edg.PunchDate AS AttendanceDate,
+        ISNULL(ap.Machine_Type,'') AS Machine_Type,
+        DesignationName = ISNULL(edg.DesignationName,'N/A'),
+        LocationName   = ISNULL(edg.LocationName,'N/A'),
+        STCode         = ISNULL(edg.STCode,'N/A'),
+        DepartmentName = ISNULL(edg.DepartmentName,'N/A'),
+
+        -- shift visibility (optional)
+        ShiftName      = ISNULL(edg.ShiftName,''),
+        ShiftStartTime = edg.ShiftStartTime,
+        ShiftEndTime   = edg.ShiftEndTime,
+
+        -- holiday
+        IsHoliday = edg.IsHoliday,
+        HolidayName = edg.HolidayName,
+
+        -- punches
+        ISNULL(ap.Punch1,'00:00:00') AS Punch1,  ISNULL(ap.Punch2,'00:00:00') AS Punch2,
+        ISNULL(ap.Punch3,'00:00:00') AS Punch3,  ISNULL(ap.Punch4,'00:00:00') AS Punch4,
+        ISNULL(ap.Punch5,'00:00:00') AS Punch5,  ISNULL(ap.Punch6,'00:00:00') AS Punch6,
+        ISNULL(ap.Punch7,'00:00:00') AS Punch7,  ISNULL(ap.Punch8,'00:00:00') AS Punch8,
+        ISNULL(ap.Punch9,'00:00:00') AS Punch9,  ISNULL(ap.Punch10,'00:00:00') AS Punch10,
+        ISNULL(ap.Punch11,'00:00:00') AS Punch11, ISNULL(ap.Punch12,'00:00:00') AS Punch12,
+        ISNULL(ap.PunchIn,'00:00:00')  AS PunchIn,
+        ISNULL(ap.PunchOut,'00:00:00') AS PunchOut,
+        ValidPunchCount = ISNULL(ap.PunchCount,0),
+        RegularizePunchIn = ISNULL(ap.RegularizePunchIn,'00:00:00'),
+        RegularizePuncOut = ISNULL(ap.RegularizePuncOut,'00:00:00'),
+        ISNULL(ap.IsRegularize,0) AS IsRegularize,
+
+        -- leave
+        IsOnLeave = CASE WHEN EXISTS (
+                            SELECT 1 FROM dbo.tblLeaveRequest l
+                            WHERE l.EmployeeId=edg.EmployeeId AND l.IsRevoked=0 AND l.StatusId IN (1)
+                              AND edg.PunchDate BETWEEN l.StartDate AND l.EndDate) THEN 1 ELSE 0 END,
+
+        -- working minutes (string)
+        TotalWorkingMinutes = CASE
+            WHEN edg.IsFutureDate=1 THEN '0 hours and 00 minutes'
+            WHEN edg.IsHoliday=1 AND ap.EmployeeId IS NULL THEN '0 hours and 00 minutes'
+            WHEN edg.IsWeekend=1 AND ap.EmployeeId IS NULL THEN '0 hours and 00 minutes'
+            WHEN ISNULL(dwm.TotalDailyWorkingMinutes,0)>0
+            THEN CAST(dwm.TotalDailyWorkingMinutes/60 AS VARCHAR)+' hours and '+RIGHT('0'+CAST(dwm.TotalDailyWorkingMinutes%60 AS VARCHAR),2)+' minutes'
+            ELSE '0 hours and 00 minutes'
+        END,
+
+        -- Late/Early vs SHIFT START (Late=0 during 313 grace days; Flexible never uses grace)
+        LateMinutes = CASE
+            WHEN edg.IsFutureDate=1 OR edg.IsHoliday=1 OR ap.EmployeeId IS NULL THEN 0
+            WHEN fh.IsInGrace = 1 THEN 0
+            WHEN fh.EffectiveInDT IS NULL THEN 0
+            WHEN fh.EffectiveInDT > fh.ShiftStartDT THEN DATEDIFF(MINUTE, fh.ShiftStartDT, fh.EffectiveInDT)
+            ELSE 0
+        END,
+
+        EarlyMinutes = CASE
+            WHEN edg.IsFutureDate=1 OR edg.IsHoliday=1 OR ap.EmployeeId IS NULL THEN 0
+            WHEN fh.EffectiveInDT IS NULL THEN 0
+            WHEN fh.EffectiveInDT < fh.ShiftStartDT THEN DATEDIFF(MINUTE, fh.EffectiveInDT, fh.ShiftStartDT)
+            ELSE 0
+        END,
+
+        -- status (as in your final; forced HD applies only for 313, and not for Flexible shift)
+        Status = CASE
+            WHEN edg.IsFutureDate=1 THEN ''
+            WHEN edg.IsHoliday=1 THEN 'Holiday'
+            WHEN EXISTS (SELECT 1 FROM dbo.tblLeaveRequest l
+                         WHERE l.EmployeeId=edg.EmployeeId AND l.IsRevoked=0 AND l.StatusId IN (1)
+                           AND edg.PunchDate BETWEEN l.StartDate AND l.EndDate) THEN 'On Leave'
+            WHEN edg.IsWeekend=1 AND ap.EmployeeId IS NULL THEN 'Weekly Off'
+            WHEN ap.IsRegularize=1 AND ISNULL(ap.RegularizePunchIn,'00:00:00')<>'00:00:00'
+                                   AND ISNULL(ap.RegularizePuncOut,'00:00:00')<>'00:00:00' THEN 'Manual Present'
+            WHEN ap.PunchCount % 2 = 1 THEN 'Missed Punch'
+            WHEN EXISTS (SELECT 1 FROM ForcedHalfDay fh2
+                         WHERE fh2.EmployeeId=edg.EmployeeId AND fh2.PunchDate=edg.PunchDate AND fh2.IsForcedHalfDay=1)
+                 AND edg.LocationId=313
+                 THEN CASE WHEN ISNULL(dwm.TotalDailyWorkingMinutes,0) >= 240 THEN 'Half Day Absent' ELSE 'Absent' END
+            WHEN ap.PunchIn IS NULL OR ap.PunchOut IS NULL OR ap.PunchIn='00:00:00' OR ap.PunchOut='00:00:00' THEN 'Absent'
+            WHEN ISNULL(dwm.TotalDailyWorkingMinutes,0) >= 510 THEN 'Present'
+            WHEN ISNULL(dwm.TotalDailyWorkingMinutes,0) >= 240 THEN 'Half Day Absent'
+            ELSE 'Absent'
+        END,
+
+        -- monthly working days calc
+        TotalWorkingDays = (
+            SELECT SUM(WorkDayValue)
+            FROM (
+                SELECT CASE
+                    WHEN edg2.IsFutureDate=1 THEN 0.0
+                    WHEN edg2.IsHoliday=1 THEN 0.0
+                    WHEN EXISTS (SELECT 1 FROM dbo.tblLeaveRequest l2
+                                 WHERE l2.EmployeeId=edg2.EmployeeId AND l2.IsRevoked=0 AND l2.StatusId IN (1)
+                                   AND edg2.PunchDate BETWEEN l2.StartDate AND l2.EndDate) THEN 0.0
+                    WHEN edg2.IsWeekend=1 AND ap2.EmployeeId IS NULL THEN 0.0
+                    WHEN ap2.IsRegularize=1 AND ISNULL(ap2.RegularizePunchIn,'00:00:00')<>'00:00:00'
+                                         AND ISNULL(ap2.RegularizePuncOut,'00:00:00')<>'00:00:00' THEN 1.0
+                    WHEN ap2.PunchCount % 2 = 1 THEN 0.0
+                    WHEN EXISTS (SELECT 1 FROM ForcedHalfDay fh2
+                                 WHERE fh2.EmployeeId=edg2.EmployeeId AND fh2.PunchDate=edg2.PunchDate AND fh2.IsForcedHalfDay=1)
+                         AND edg2.LocationId=313
+                         AND ISNULL(dwm2.TotalDailyWorkingMinutes,0) >= 240 THEN 0.5
+                    WHEN ISNULL(dwm2.TotalDailyWorkingMinutes,0) >= 510 THEN 1.0
+                    WHEN ISNULL(dwm2.TotalDailyWorkingMinutes,0) >= 240 THEN 0.5
+                    ELSE 0.0
+                END AS WorkDayValue
+                FROM EmployeeDateGrid edg2
+                LEFT JOIN AggregatedPunches ap2 ON ap2.EmployeeId=edg2.EmployeeId AND ap2.PunchDate=edg2.PunchDate
+                LEFT JOIN DailyWorkingMinutes dwm2 ON dwm2.EmployeeId=edg2.EmployeeId AND dwm2.PunchDate=edg2.PunchDate
+                WHERE edg2.EmployeeId=edg.EmployeeId
+            ) S
+        ),
+
+        ISNULL(mwh.TotalMonthlyWorkingHours,'0 hours and 00 minutes') AS TotalMonthlyWorkingHours
+    FROM EmployeeDateGrid edg
+    LEFT JOIN AggregatedPunches ap ON ap.EmployeeId=edg.EmployeeId AND ap.PunchDate=edg.PunchDate
+    LEFT JOIN DailyWorkingMinutes dwm ON dwm.EmployeeId=edg.EmployeeId AND dwm.PunchDate=edg.PunchDate
+    LEFT JOIN MonthlyWorkingHours mwh ON mwh.EmployeeId=edg.EmployeeId
+    LEFT JOIN ForcedHalfDay fh ON fh.EmployeeId=edg.EmployeeId AND fh.PunchDate=edg.PunchDate
+);
