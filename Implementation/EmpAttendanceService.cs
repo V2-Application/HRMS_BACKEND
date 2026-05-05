@@ -704,6 +704,9 @@ namespace HRMSAPI.Implementation
        long callerEmployeeId,
        string role)
         {
+            _logger.LogInformation("ApproveRegularization called: requestId={RequestId}, callerEmployeeId={CallerId}, role='{Role}', dto.StatusId={StatusId}",
+                requestId, callerEmployeeId, role, dto?.StatusId);
+
             if (requestId <= 0)
                 return new ApiResponse<object>(HttpStatusCode.BadRequest, false, "Request ID must be positive.", null);
 
@@ -711,7 +714,7 @@ namespace HRMSAPI.Implementation
                 return new ApiResponse<object>(HttpStatusCode.BadRequest, false, "Request body cannot be null.", null);
 
             if (dto.StatusId is not (AttendanceStatuses.Approved or AttendanceStatuses.Rejected or AttendanceStatuses.Pending))
-                return new ApiResponse<object>(HttpStatusCode.BadRequest, false, "StatusId must be 1 (Approved), 2 (Rejected), or 4 (Pending).", null);
+                return new ApiResponse<object>(HttpStatusCode.BadRequest, false, $"StatusId must be 1 (Approved), 2 (Rejected), or 4 (Pending). Received: {dto.StatusId}", null);
 
             try
             {
@@ -730,7 +733,7 @@ namespace HRMSAPI.Implementation
 
                 var req = wrapper.Request;
                 var roleLower = role?.Trim().ToLowerInvariant();
-                var isCallerSuperAdmin = roleLower == "superadmin";
+                var isCallerSuperAdmin = roleLower == "superadmin" || roleLower == "it superadmin" || roleLower == "master";
                 var isCallerLp = isCallerSuperAdmin || roleLower == "lp" || roleLower == "audit";
                 var isCallerReportingManager = req.ReportingManagerId == callerEmployeeId;
 
@@ -788,6 +791,11 @@ namespace HRMSAPI.Implementation
                     req.ManagerApproverId = callerEmployeeId;
                     req.ManagerApprovalOn = now;
                     req.ManagerRemarks = trimmedRemarks;
+
+                    req.LpApprovalStatusId = dto.StatusId;
+                    req.LpApproverId = callerEmployeeId;
+                    req.LpApprovalOn = now;
+                    req.LpRemarks = trimmedRemarks;
                 }
 
                 // ===== Final Status =====
@@ -857,14 +865,16 @@ namespace HRMSAPI.Implementation
                 catch (DbUpdateException ex)
                 {
                     await tx.RollbackAsync();
-                    _logger.LogError(ex, "DB error updating regularization {RequestId}", requestId);
-                    return new ApiResponse<object>(HttpStatusCode.BadRequest, false, "Database error while updating attendance request.", null);
+                    var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                    _logger.LogError(ex, "DB error updating regularization {RequestId}: {Error}", requestId, innerMsg);
+                    return new ApiResponse<object>(HttpStatusCode.BadRequest, false, $"Database error: {innerMsg}", null);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error updating regularization {RequestId}", requestId);
-                return new ApiResponse<object>(HttpStatusCode.BadRequest, false, "Unexpected error occurred while updating attendance request.", null);
+                var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                _logger.LogError(ex, "Unexpected error updating regularization {RequestId}: {Error}", requestId, innerMsg);
+                return new ApiResponse<object>(HttpStatusCode.BadRequest, false, $"Unexpected error: {innerMsg}", null);
             }
         }
 
@@ -959,7 +969,8 @@ namespace HRMSAPI.Implementation
                     .FirstOrDefaultAsync();
 
                 // === Role-based filtering ===
-                if (roleNorm == "superadmin" || (currentEmployeeId == 10 || currentEmployeeId == 52410))
+                var isNormSuperAdmin = roleNorm == "superadmin" || roleNorm == "it superadmin" || roleNorm == "master";
+                if (isNormSuperAdmin || (currentEmployeeId == 10 || currentEmployeeId == 52410))
                 {
                     // no filter
                 }

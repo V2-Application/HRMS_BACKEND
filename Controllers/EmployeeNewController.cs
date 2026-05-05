@@ -336,6 +336,35 @@ namespace HRMSAPI.Controllers
             }
         }
 
+        [HttpPost]
+        [Route("BulkInsertEmployees"), Authorize]
+        public async Task<IActionResult> BulkInsertEmployees([FromForm] IFormFile file)
+        {
+            _logger.LogInformation("Bulk inserting employees from Excel file");
+            try
+            {
+                var userIdentity = User.Identity as ClaimsIdentity;
+                if (userIdentity == null || !userIdentity.IsAuthenticated)
+                {
+                    return Unauthorized(new { Status = false, Message = "User is not authenticated" });
+                }
+
+                var createdBy = userIdentity.FindFirst("EmployeeId")?.Value;
+                var result = await _uow.BulkInsertEmployeesWithExcel(file, createdBy);
+
+                return StatusCode((int)result.Code, new
+                {
+                    Status = result.Status,
+                    Message = result.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error bulk inserting employees");
+                return StatusCode(500, new { Status = false, Message = ex.Message });
+            }
+        }
+
         [HttpPost("UpdateEmployeeStatusWithAttachment"), Authorize]
         public async Task<IActionResult> UpdateEmployeeStatus(EmployeeStatusUpdateWithReasonAndAttachmentRequest request)
         {

@@ -1459,6 +1459,305 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        public async Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy)
+        {
+            try
+            {
+                if (file == null || file.Length == 0)
+                    return BuildExecuteErrorResponse("No file uploaded", HttpStatusCode.BadRequest);
+
+                var now = DateTime.Now;
+                var folderPath = Path.Combine("wwwroot", now.Year.ToString(), now.ToString("MMM"),
+                    now.ToString("ddMMyyyyHHmmssfff"), createdBy, "EmpBulkInsert");
+                Directory.CreateDirectory(folderPath);
+
+                var fileName = Path.GetFileName(file.FileName);
+                var savePath = Path.Combine(folderPath, fileName);
+                using (var fileStream = new FileStream(savePath, FileMode.Create))
+                {
+                    await file.CopyToAsync(fileStream);
+                }
+
+                using var stream = file.OpenReadStream();
+                using var workbook = new XLWorkbook(stream);
+                var worksheet = workbook.Worksheet(1);
+
+                // Header validation — same 59-column format
+                string[] expectedHeaders = new string[]
+                {
+                    "Employee Code", "First Name", "Middle Name", "Last Name", "Full Name", "Gender", "Husband Name", "Aadhar Number", "Father's Name", "Place of Birth",
+                    "Name on Aadhar", "Mother's Name", "PAN Number", "Date of Birth", "Date of Joining", "Basic Salary", "CCA", "Special Allowance", "Location", "Department",
+                    "Present Address", "Present Address Pin Code", "Gross Salary", "DA", "Permanent Address", "Permanent Address Pin Code", "HRA", "Extra Allowance", "Designation",
+                    "Monthly Gross CTC", "Annually Net CTC", "UAN Number", "PF Applicable", "Bonus Applicable", "ESIC Applicable", "ESIC Number", "Company", "Reporting Manager Ecode",
+                    "Marital Status", "Mobile", "Email Address", "Beneficiary Address", "Nationality", "Religion", "Bank Name", "Account Number", "Bank IFSC Code", "Is Relative in Company",
+                    "Reference", "Store Code",
+                    "Reimbersment", "Fuel_and_Maintainence", "Books_and_Periodicals", "Professional Attire", "Driver Wages", "Meal Voucher", "Mobile Bill", "IsExtraDayApplicable", "AO Code"
+                };
+
+                var headerRow = worksheet.Row(1);
+                int cellCount = headerRow.CellsUsed().Count();
+                if (expectedHeaders.Length != cellCount)
+                    return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
+
+                for (int i = 0; i < expectedHeaders.Length; i++)
+                {
+                    var cellValue = headerRow.Cell(i + 1).GetValue<string>().Trim();
+                    if (!string.Equals(cellValue, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
+                        return BuildExecuteErrorResponse($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'", HttpStatusCode.BadRequest);
+                }
+
+                var rows = worksheet.RowsUsed().Skip(1).ToList();
+                if (!rows.Any())
+                    return BuildExecuteErrorResponse("No data rows found in the Excel file.", HttpStatusCode.BadRequest);
+
+                // Validate: Company column (37) is required for every row
+                for (int idx = 0; idx < rows.Count; idx++)
+                {
+                    var companyVal = rows[idx].Cell(37).GetValue<string>()?.Trim();
+                    if (string.IsNullOrWhiteSpace(companyVal))
+                        return BuildExecuteErrorResponse($"Company is required at row {idx + 2}.", HttpStatusCode.BadRequest);
+                }
+
+                // Validate: Mobile (40) required
+                for (int idx = 0; idx < rows.Count; idx++)
+                {
+                    var mobile = rows[idx].Cell(40).GetValue<string>()?.Trim();
+                    if (string.IsNullOrWhiteSpace(mobile))
+                        return BuildExecuteErrorResponse($"Mobile is required at row {idx + 2}.", HttpStatusCode.BadRequest);
+                }
+
+                // Check duplicate mobiles within the file
+                var mobileList = rows.Select(r => r.Cell(40).GetValue<string>()?.Trim()).Where(m => !string.IsNullOrWhiteSpace(m)).ToList();
+                var dupMobiles = mobileList.GroupBy(m => m).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+                if (dupMobiles.Any())
+                    return BuildExecuteErrorResponse($"Duplicate Mobile(s) found: {string.Join(", ", dupMobiles)}.", HttpStatusCode.BadRequest);
+
+                // Default password
+                string defaultPassword = "V2@123";
+                string hashedPassword = BCrypt.Net.BCrypt.HashPassword(defaultPassword);
+
+                int insertedCount = 0;
+                var errors = new List<string>();
+
+                foreach (var row in rows)
+                {
+                    var rowNum = row.RowNumber();
+                    try
+                    {
+                        // Resolve Company
+                        var companyName = row.Cell(37).GetValue<string>()?.Trim();
+                        var company = await _context.tblCompanies.FirstOrDefaultAsync(c => c.CompanyName.Trim().ToLower() == companyName.Trim().ToLower());
+                        if (company == null)
+                        {
+                            errors.Add($"Row {rowNum}: Company '{companyName}' not found.");
+                            continue;
+                        }
+
+                        // Determine prefix and pad length
+                        string prefix;
+                        int padLength;
+                        switch (company.CompanyId)
+                        {
+                            case 1: prefix = "V"; padLength = 5; break;
+                            case 2: prefix = "V2S"; padLength = 4; break;
+                            case 3: prefix = "PT"; padLength = 5; break;
+                            case 4: prefix = "CT"; padLength = 5; break;
+                            case 6: prefix = "E"; padLength = 4; break;
+                            default: errors.Add($"Row {rowNum}: Unknown CompanyId {company.CompanyId}."); continue;
+                        }
+
+                        // Generate next ecode
+                        var lastEmployee = await _context.tblEmployees
+                            .Where(e => e.Ecode.StartsWith(prefix) && e.CompanyId == company.CompanyId)
+                            .OrderByDescending(e => e.EmployeeId)
+                            .FirstOrDefaultAsync();
+
+                        int nextNumber;
+                        if (lastEmployee != null && lastEmployee.Ecode.Length > prefix.Length &&
+                            int.TryParse(lastEmployee.Ecode.Substring(prefix.Length), out int lastNum))
+                        {
+                            nextNumber = lastNum + 1;
+                        }
+                        else
+                        {
+                            nextNumber = company.CompanyId == 2 ? 2701 : 1;
+                        }
+
+                        string newEcode = prefix + nextNumber.ToString().PadLeft(padLength, '0');
+
+                        // Check duplicate
+                        if (await _context.tblEmployees.AnyAsync(e => e.Ecode == newEcode))
+                        {
+                            errors.Add($"Row {rowNum}: Generated Ecode '{newEcode}' already exists.");
+                            continue;
+                        }
+
+                        // Read fields from Excel
+                        var firstName = row.Cell(2).GetValue<string>()?.Trim();
+                        var middleName = row.Cell(3).GetValue<string>()?.Trim();
+                        var lastName = row.Cell(4).GetValue<string>()?.Trim();
+                        var fullName = row.Cell(5).GetValue<string>()?.Trim();
+                        if (string.IsNullOrWhiteSpace(fullName))
+                            fullName = string.Join(" ", new[] { firstName, middleName, lastName }.Where(n => !string.IsNullOrWhiteSpace(n)));
+
+                        var emp = new tblEmployee
+                        {
+                            Ecode = newEcode,
+                            FirstName = Truncate(firstName, 100),
+                            MiddleName = Truncate(middleName, 100),
+                            LastName = Truncate(lastName, 100),
+                            FULL_NAME = Truncate(fullName, 255),
+                            GENDER = Truncate(row.Cell(6).GetValue<string>()?.Trim(), 10),
+                            Husband_Name = Truncate(row.Cell(7).GetValue<string>()?.Trim(), 100),
+                            AADHAR_NO = Truncate(row.Cell(8).GetValue<string>()?.Trim(), 20),
+                            FATHER_S_NAME = Truncate(row.Cell(9).GetValue<string>()?.Trim(), 100),
+                            PLACE_OF_BIRTH = Truncate(row.Cell(10).GetValue<string>()?.Trim(), 100),
+                            NAME_ON_ADHAR = Truncate(row.Cell(11).GetValue<string>()?.Trim(), 100),
+                            MOTHER_S_NAME = Truncate(row.Cell(12).GetValue<string>()?.Trim(), 100),
+                            PAN_NO = Truncate(row.Cell(13).GetValue<string>()?.Trim(), 50),
+                            PRESENT_ADDRESS = Truncate(row.Cell(21).GetValue<string>()?.Trim(), 255),
+                            PRESENT_ADDRESS_PIN_CODE = Truncate(row.Cell(22).GetValue<string>()?.Trim(), 10),
+                            PERMANENT_ADDRESS = Truncate(row.Cell(25).GetValue<string>()?.Trim(), 255),
+                            PERMANENT_ADDRESS_PIN_CODE = Truncate(row.Cell(26).GetValue<string>()?.Trim(), 10),
+                            UAN_NO = Truncate(row.Cell(32).GetValue<string>()?.Trim(), 50),
+                            ESICNO = Truncate(row.Cell(36).GetValue<string>()?.Trim(), 100),
+                            ReportHeadEcode = Truncate(row.Cell(38).GetValue<string>()?.Trim(), 50),
+                            MARITIAL_STATUS = Truncate(row.Cell(39).GetValue<string>()?.Trim(), 20),
+                            MOBILE = Truncate(row.Cell(40).GetValue<string>()?.Trim(), 20),
+                            EMAIL_ADDRESS = Truncate(row.Cell(41).GetValue<string>()?.Trim(), 100),
+                            BENEFICIARY_ADDRESS = Truncate(row.Cell(42).GetValue<string>()?.Trim(), 500),
+                            NATIONALITY = Truncate(row.Cell(43).GetValue<string>()?.Trim(), 50),
+                            RELIGION = Truncate(row.Cell(44).GetValue<string>()?.Trim(), 50),
+                            BANK_NAME = Truncate(row.Cell(45).GetValue<string>()?.Trim(), 100),
+                            A_C_NO = Truncate(row.Cell(46).GetValue<string>()?.Trim(), 30),
+                            BANK_IFSC_CODE = Truncate(row.Cell(47).GetValue<string>()?.Trim(), 15),
+                            REFERENCE = Truncate(row.Cell(49).GetValue<string>()?.Trim(), 255),
+                            AOCode = Truncate(row.Cell(59).GetValue<string>()?.Trim(), 255),
+                            CompanyId = company.CompanyId,
+                            PasswordHash = hashedPassword,
+                            Password = defaultPassword,
+                            IsActive = true,
+                            IsDeleted = false,
+                            CreatedOn = DateTime.UtcNow,
+                            CreatedBy = createdBy,
+                            ShiftID = 1,
+                        };
+
+                        // Date fields
+                        if (DateTime.TryParse(row.Cell(14).GetValue<string>(), out DateTime dob))
+                            emp.DOB = dob;
+                        if (DateTime.TryParse(row.Cell(15).GetValue<string>(), out DateTime doj))
+                            emp.DOJ = doj;
+                        else
+                            emp.DOJ = DateTime.Now;
+
+                        // Decimal fields
+                        if (decimal.TryParse(row.Cell(16).GetValue<string>(), out decimal basicSalary)) emp.BasicSalary = basicSalary;
+                        if (decimal.TryParse(row.Cell(17).GetValue<string>(), out decimal cca)) emp.CCA = cca;
+                        if (decimal.TryParse(row.Cell(18).GetValue<string>(), out decimal specialAllowance)) emp.SpecialAllowance = specialAllowance;
+                        if (decimal.TryParse(row.Cell(23).GetValue<string>(), out decimal grossSalary)) emp.GROSS_SALARY = grossSalary;
+                        if (decimal.TryParse(row.Cell(24).GetValue<string>(), out decimal da)) emp.DA = da;
+                        if (decimal.TryParse(row.Cell(27).GetValue<string>(), out decimal hra)) emp.HRA = hra;
+                        if (decimal.TryParse(row.Cell(28).GetValue<string>(), out decimal extraAllowance)) emp.ExtraAllowance = extraAllowance;
+                        if (decimal.TryParse(row.Cell(30).GetValue<string>(), out decimal monthlyGrossCTC)) emp.monthlyGrossCTC = monthlyGrossCTC;
+                        if (decimal.TryParse(row.Cell(31).GetValue<string>(), out decimal annuallyNetCTC)) emp.annuallyNetCTC = annuallyNetCTC;
+                        if (decimal.TryParse(row.Cell(51).GetValue<string>(), out decimal reimbersment)) emp.Reimbersment = reimbersment;
+                        if (decimal.TryParse(row.Cell(52).GetValue<string>(), out decimal fuel)) emp.Fuel_and_Maintainence = fuel;
+                        if (decimal.TryParse(row.Cell(53).GetValue<string>(), out decimal books)) emp.Books_and_Periodicals = books;
+                        if (decimal.TryParse(row.Cell(54).GetValue<string>(), out decimal attire)) emp.Professional_Attire = attire;
+                        if (decimal.TryParse(row.Cell(55).GetValue<string>(), out decimal driverWages)) emp.Driver_Wages = driverWages;
+                        if (decimal.TryParse(row.Cell(56).GetValue<string>(), out decimal mealVoucher)) emp.Meal_Voucher = mealVoucher;
+                        if (decimal.TryParse(row.Cell(57).GetValue<string>(), out decimal mobileBill)) emp.Mobile_Bill = mobileBill;
+
+                        // Boolean fields
+                        var pfVal = row.Cell(33).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(pfVal)) emp.PFApplicable = pfVal.ToLower() == "yes";
+                        var bonusVal = row.Cell(34).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(bonusVal)) emp.BonusApplicable = bonusVal.ToLower() == "yes";
+                        var esicVal = row.Cell(35).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(esicVal)) emp.ESICApplicable = esicVal.ToLower() == "yes";
+                        var relativeVal = row.Cell(48).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(relativeVal)) emp.ISRELATIVEINCOMPANY = relativeVal.ToLower() == "yes";
+                        var extraDayVal = row.Cell(58).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(extraDayVal)) emp.IsExtraDayApplicable = extraDayVal.ToLower() == "yes";
+
+                        // Lookup: Location (col 19)
+                        var locationName = row.Cell(19).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(locationName))
+                        {
+                            var loc = await _context.tblLocations.FirstOrDefaultAsync(l => l.LocationName == locationName);
+                            if (loc != null) emp.LocationId = loc.LocationId;
+                        }
+                        // Store Code (col 50) overrides location
+                        var storeCode = row.Cell(50).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(storeCode))
+                        {
+                            var loc = await _context.tblLocations.FirstOrDefaultAsync(l => l.STCode.Trim().ToLower() == storeCode.Trim().ToLower());
+                            if (loc != null) emp.LocationId = loc.LocationId;
+                        }
+
+                        // Lookup: Department (col 20)
+                        var deptName = row.Cell(20).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(deptName))
+                        {
+                            var dept = await _context.tblDepartments.FirstOrDefaultAsync(d => d.DepartmentName == deptName);
+                            if (dept != null) emp.DepartmentId = dept.DepartmentId;
+                        }
+
+                        // Lookup: Designation (col 29)
+                        var desgName = row.Cell(29).GetValue<string>()?.Trim();
+                        if (!string.IsNullOrWhiteSpace(desgName))
+                        {
+                            var desg = await _context.tblDesignations.FirstOrDefaultAsync(d => d.DesignationName == desgName);
+                            if (desg != null) emp.DesignationId = desg.DesignationId;
+                        }
+
+                        await _context.tblEmployees.AddAsync(emp);
+                        await _context.SaveChangesAsync();
+
+                        // Assign default Employee role (RoleId = 3)
+                        var empRole = new tblEmployeeRole
+                        {
+                            EmployeeId = emp.EmployeeId,
+                            RoleId = 3,
+                            AssignedOn = DateTime.UtcNow,
+                            AssignedBy = "System",
+                            LastUpdatedBy = "System",
+                            LastUpdatedOn = DateTime.UtcNow
+                        };
+                        await _context.tblEmployeeRoles.AddAsync(empRole);
+                        await _context.SaveChangesAsync();
+
+                        insertedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                        errors.Add($"Row {rowNum}: {innerMsg}");
+                    }
+                }
+
+                if (insertedCount == 0 && errors.Any())
+                    return BuildExecuteErrorResponse($"No employees inserted. Errors: {string.Join("; ", errors)}", HttpStatusCode.BadRequest);
+
+                var msg = $"{insertedCount} employee(s) created successfully.";
+                if (errors.Any())
+                    msg += $" Errors in {errors.Count} row(s): {string.Join("; ", errors)}";
+
+                return BuildExecuteSuccessResponse(msg);
+            }
+            catch (Exception ex)
+            {
+                return BuildExecuteErrorResponse($"Error inserting employees: {ex.Message}", HttpStatusCode.BadRequest);
+            }
+        }
+
+        private static string Truncate(string value, int maxLength)
+        {
+            if (string.IsNullOrEmpty(value)) return value;
+            return value.Length <= maxLength ? value : value.Substring(0, maxLength);
+        }
+
         private async Task SaveNewAttachments(long candidateId, string email, CandidateDocs files, string updatedBy)
         {
             async Task SaveFileIfExists(IFormFile? file, string folder, string docType, int index = 0)

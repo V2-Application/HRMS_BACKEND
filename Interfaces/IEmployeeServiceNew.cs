@@ -16,6 +16,7 @@ namespace HRMSAPI.Interfaces
         Task<ExecuteAndReponse> UpdateEmployeeStatus(EmployeeStatusUpdateRequest request);
         Task<FetchAndResponse> GetInActiveStatusList();
         Task<ExecuteAndReponse> UpdateEmployeeWithExcel(IFormFile file, string updatedBy);
+        Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy);
         Task<ExecuteAndReponse> UpdateEmployeeStatusWithReasonAndAttachment(EmployeeStatusUpdateWithReasonAndAttachmentRequest request);
         Task<(List<GetEmployeeDetailsResult> Employees, long TotalCount, int CurrentPageNumber)> GetEmployeeDetailsByManagerIdAsync(
        long managerId, int pageNumber = 1, int pageSize = 10, string searchTerm = null);

@@ -70,11 +70,12 @@ BEGIN
     ELSE                
     BEGIN                
         -- Generate new Ecode using existing logic    
-        SET @Prefix = CASE @CompanyId                
-                        WHEN 1 THEN 'V'                
-                        WHEN 2 THEN 'V2S'                
-                        WHEN 3 THEN 'PT'                
-                        WHEN 4 THEN 'CT'                
+        SET @Prefix = CASE @CompanyId
+                        WHEN 1 THEN 'V'
+                        WHEN 2 THEN 'V2S'
+                        WHEN 3 THEN 'PT'
+                        WHEN 4 THEN 'CT'
+                        WHEN 6 THEN 'E'
                       END;                
               
         /* 🔒 Strong lock to avoid duplicate generation */              
