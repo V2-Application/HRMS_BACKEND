@@ -71,11 +71,11 @@ TestResults/
 # Publish output
 publish/
 
-# Secrets
-secrets.json
-appsettings.json
-appsettings.Development.json
-appsettings.Local.json
+# # Secrets
+# secrets.json
+# appsettings.json
+# appsettings.Development.json
+# appsettings.Local.json
 
 # Docker files
 **/.dockerignore
