@@ -8,7 +8,7 @@ public class VendorEmployeeRequestDTO : IValidatableObject
     public string? MiddleName { get; set; }
     public string? LastName { get; set; }
     public string? FatherName { get; set; }
-    public string Email { get; set; }
+    public string? Email { get; set; }
     public string Mobile { get; set; }
     public int? DepartmentId { get; set; }
     public int? DesignationId { get; set; }
@@ -71,21 +71,19 @@ public class VendorEmployeeRequestDTO : IValidatableObject
         else if (!Regex.IsMatch(Mobile, @"^[6-9]\d{9}$"))
             yield return new ValidationResult("Mobile number must be 10 digits starting with 6-9", new[] { nameof(Mobile) });
 
-        // Email validation
-        if (string.IsNullOrWhiteSpace(Email))
-            yield return new ValidationResult("Email is required", new[] { nameof(Email) });
-        else
+        // Email validation (optional)
+        if (!string.IsNullOrWhiteSpace(Email))
         {
             var emailAttribute = new EmailAddressAttribute();
             if (!emailAttribute.IsValid(Email))
                 yield return new ValidationResult("Invalid Email format", new[] { nameof(Email) });
         }
-        // PAN validation
-        if (!Regex.IsMatch(PANNo, @"^[A-Z]{5}[0-9]{4}[A-Z]{1}$"))
+        // PAN validation (optional)
+        if (!string.IsNullOrWhiteSpace(PANNo) && !Regex.IsMatch(PANNo, @"^[A-Z]{5}[0-9]{4}[A-Z]{1}$", RegexOptions.IgnoreCase))
             yield return new ValidationResult("Invalid PAN format", new[] { nameof(PANNo) });
 
-        // Aadhaar validation
-        if (!Regex.IsMatch(AadharNo, @"^\d{12}$"))
+        // Aadhaar validation (optional)
+        if (!string.IsNullOrWhiteSpace(AadharNo) && !Regex.IsMatch(AadharNo, @"^\d{12}$"))
             yield return new ValidationResult("Aadhaar must be 12 digits", new[] { nameof(AadharNo) });
 
         // Optional: contract date validation

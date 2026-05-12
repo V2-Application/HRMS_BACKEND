@@ -791,10 +791,10 @@ namespace HRMSAPI.Implementation
                 //  Check duplicates
                 var (panExists, aadhaarExists, emailExist, mobileExists) = await CheckDuplicatesAsync(request, connection);
 
-                if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "PAN already exists" };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Aadhaar already exists" };
-                if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Email already exists" };
-                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Mobile number already exists" };
+                if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"PAN already exists: {request.PANNo}" };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar already exists: {request.AadharNo}" };
+                if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Email already exists: {request.Email}" };
+                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Mobile number already exists: {request.Mobile}" };
 
                 //  Contract dates
                 DateTime? contractStart = request.ContractStartDate?.Date;
@@ -812,7 +812,7 @@ namespace HRMSAPI.Implementation
                 command.Parameters.Add(new SqlParameter("@MiddleName", SqlDbType.NVarChar, 100) { Value = (object?)request.MiddleName ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@LastName", SqlDbType.NVarChar, 100) { Value = (object?)request.LastName ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@FATHER_S_NAME", SqlDbType.NVarChar, 50) { Value = (object?)request.FatherName ?? DBNull.Value });
-                command.Parameters.Add(new SqlParameter("@EMAIL_ADDRESS", SqlDbType.NVarChar, 100) { Value = request.Email });
+                command.Parameters.Add(new SqlParameter("@EMAIL_ADDRESS", SqlDbType.NVarChar, 100) { Value = (object?)request.Email ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@MOBILE", SqlDbType.NVarChar, 20) { Value = request.Mobile });
 
                 command.Parameters.Add(new SqlParameter("@DepartmentId", SqlDbType.Int) { Value = (object?)request.DepartmentId ?? DBNull.Value });
@@ -905,10 +905,10 @@ namespace HRMSAPI.Implementation
                 //  Check duplicates
                 var (panExists, aadhaarExists, emailExist, mobileExists) = await CheckDuplicatesAsync2(request, connection, transaction);
 
-                if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "PAN already exists" };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Aadhaar already exists" };
-                if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Email already exists" };
-                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Mobile number already exists" };
+                if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"PAN already exists: {request.PANNo}" };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar already exists: {request.AadharNo}" };
+                if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Email already exists: {request.Email}" };
+                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Mobile number already exists: {request.Mobile}" };
 
                 //  Contract dates
                 DateTime? contractStart = request.ContractStartDate?.Date;
@@ -927,7 +927,7 @@ namespace HRMSAPI.Implementation
                 command.Parameters.Add(new SqlParameter("@MiddleName", SqlDbType.NVarChar, 100) { Value = (object?)request.MiddleName ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@LastName", SqlDbType.NVarChar, 100) { Value = (object?)request.LastName ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@FATHER_S_NAME", SqlDbType.NVarChar, 50) { Value = (object?)request.FatherName ?? DBNull.Value });
-                command.Parameters.Add(new SqlParameter("@EMAIL_ADDRESS", SqlDbType.NVarChar, 100) { Value = request.Email });
+                command.Parameters.Add(new SqlParameter("@EMAIL_ADDRESS", SqlDbType.NVarChar, 100) { Value = (object?)request.Email ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@MOBILE", SqlDbType.NVarChar, 20) { Value = request.Mobile });
 
                 command.Parameters.Add(new SqlParameter("@DepartmentId", SqlDbType.Int) { Value = (object?)request.DepartmentId ?? DBNull.Value });
@@ -1018,8 +1018,8 @@ namespace HRMSAPI.Implementation
             using var reader = await command.ExecuteReaderAsync();
             await reader.ReadAsync();
 
-            bool panExists = reader.GetInt32(0) > 0;
-            bool aadhaarExists = reader.GetInt32(1) > 0;
+            bool panExists = !string.IsNullOrWhiteSpace(request.PANNo) && reader.GetInt32(0) > 0;
+            bool aadhaarExists = !string.IsNullOrWhiteSpace(request.AadharNo) && reader.GetInt32(1) > 0;
             bool emailExists = !string.IsNullOrWhiteSpace(request.Email) && reader.GetInt32(2) > 0;
             bool mobileExists = !string.IsNullOrWhiteSpace(request.Mobile) && reader.GetInt32(3) > 0;
 
@@ -1047,8 +1047,8 @@ namespace HRMSAPI.Implementation
             using var reader = await command.ExecuteReaderAsync();
             await reader.ReadAsync();
 
-            bool panExists = reader.GetInt32(0) > 0;
-            bool aadhaarExists = reader.GetInt32(1) > 0;
+            bool panExists = !string.IsNullOrWhiteSpace(request.PANNo) && reader.GetInt32(0) > 0;
+            bool aadhaarExists = !string.IsNullOrWhiteSpace(request.AadharNo) && reader.GetInt32(1) > 0;
             bool emailExists = !string.IsNullOrWhiteSpace(request.Email) && reader.GetInt32(2) > 0;
             bool mobileExists = !string.IsNullOrWhiteSpace(request.Mobile) && reader.GetInt32(3) > 0;
 
@@ -1691,14 +1691,17 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
 
             try
             {
+                int rowNumber = 2; // row 1 is header
                 foreach (var employee in employees)
                 {
                     var response = await InsertVendorEmployee2(employee, createdBy, connection, transaction);
                     if (!response.Status)
                     {
                         await transaction.RollbackAsync();
+                        response.Message = $"Row {rowNumber}: {response.Message}";
                         return response;
                     }
+                    rowNumber++;
                 }
 
                 await transaction.CommitAsync();
@@ -1719,6 +1722,48 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
         {
             var s = v?.ToString()?.Trim();
             return string.IsNullOrWhiteSpace(s) ? null : s;
+        }
+
+        // Matches WorkLocation by STCode, LocationName, or combined "STCode-LocationName"
+        private async Task<Dictionary<string, int>> GetLocationLookupAsync(DbConnection connection, List<string> names)
+        {
+            if (names.Count == 0) return new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            var parameters = names.Select((n, i) => $"@p{i}").ToArray();
+            var inList = string.Join(",", parameters);
+            var sql = $@"
+                SELECT LocationId,
+                       STCode + '-' + LocationName AS CombinedName,
+                       STCode,
+                       LocationName
+                FROM tblLocation
+                WHERE STCode IN ({inList})
+                   OR LocationName IN ({inList})
+                   OR STCode + '-' + LocationName IN ({inList})";
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+            for (int i = 0; i < names.Count; i++)
+            {
+                var p = cmd.CreateParameter();
+                p.ParameterName = $"@p{i}";
+                p.Value = names[i];
+                cmd.Parameters.Add(p);
+            }
+
+            var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var id = reader.GetInt32(0);
+                var combined = reader.IsDBNull(1) ? null : reader.GetString(1).Trim();
+                var stcode   = reader.IsDBNull(2) ? null : reader.GetString(2).Trim();
+                var locName  = reader.IsDBNull(3) ? null : reader.GetString(3).Trim();
+                if (combined != null) dict.TryAdd(combined, id);
+                if (stcode   != null) dict.TryAdd(stcode,   id);
+                if (locName  != null) dict.TryAdd(locName,  id);
+            }
+            return dict;
         }
 
         private async Task<Dictionary<string, int>> GetLookupAsync(
@@ -1779,7 +1824,7 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
 
             var table = result.Tables[0];
 
-            var expectedHeaders = new[] { "Ecode", "FirstName", "MiddleName", "LastName", "Gender", "FatherName", "SpouseName", "DOB", "Mobile", "Email", "Address", "Pincode", "WorkLocation", "Department", "Designation", "DateOfJoining", "ContractStartDate", "ContractEndDate", "Shift", "Aadhar Number", "PAN", "BasicSalary", "CCA", "DA", "ExtraAllowance", "SpecialAllowance", "HRA", "GROSS_SALARY", "monthlyGrossCTC", "annuallyNetCTC" };
+            var expectedHeaders = new[] { "Ecode", "FirstName", "MiddleName", "LastName", "Gender", "FatherName", "SpouseName", "DOB", "Mobile", "Email", "Address", "Pincode", "WorkLocation", "Department", "Designation", "DateOfJoining", "ContractStartDate", "ContractEndDate", "Shift", "Aadhar Number", "PAN", "BasicSalary", "CCA", "DA", "ExtraAllowance", "SpecialAllowance", "HRA", "GROSS_SALARY", "monthlyGrossCTC", "annuallyNetCTC", "ContractorRatePerDay" };
 
             if (table.Columns.Count != expectedHeaders.Length)
             {
@@ -1842,12 +1887,7 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     "DesignationName",
                     desgNames);
 
-                var locMap = await GetLookupAsync(
-                    connection,
-                    "tblLocation",
-                    "LocationId",
-                    "STCode",
-                    locNames);
+                var locMap = await GetLocationLookupAsync(connection, locNames);
 
                 var shiftMap = await GetLookupAsync(
                     connection,
@@ -1910,9 +1950,6 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
 
                     if (string.IsNullOrEmpty(gender))
                         throw new Exception($"Missing required value 'Gender' in Row {table.Rows.IndexOf(row) + 1}, Column 'Gender'");
-
-                    if (string.IsNullOrEmpty(email))
-                        throw new Exception($"Missing required value 'Email' in Row {table.Rows.IndexOf(row) + 1}, Column 'Email'");
 
                     if (string.IsNullOrEmpty(mobile))
                         throw new Exception($"Missing required value 'Mobile' in Row {table.Rows.IndexOf(row) + 1}, Column 'Mobile'");
