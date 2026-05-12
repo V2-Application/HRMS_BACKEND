@@ -90,13 +90,7 @@ namespace HRMSAPI.Implementation
                         return BuildExecuteErrorResponse($"Duplicate ECode '{ecode}' found in Excel (row {row.RowNumber()}).", HttpStatusCode.BadRequest);
                 }
 
-                // Fetch existing mappings
-                var ecodes = rows.Select(r => r.Cell(1).GetValue<string>()?.Trim()).ToList();
-                var existing = await _context.EcodeZoneRegionClusterMappings
-                    .Where(x => ecodes.Contains(x.Ecode))
-                    .ToListAsync();
-                var existingByEcode = existing.ToDictionary(x => x.Ecode, StringComparer.OrdinalIgnoreCase);
-
+                // Validate all rows before making any DB changes
                 var toInsert = new List<EcodeZoneRegionClusterMapping>();
                 foreach (var row in rows)
                 {
@@ -105,7 +99,6 @@ namespace HRMSAPI.Implementation
                     var cluster = row.Cell(3).GetValue<string>()?.Trim();
                     var region = row.Cell(4).GetValue<string>()?.Trim();
 
-                    // Length validation (optional typical caps; adjust if schema requires)
                     if (ecode.Length > 50)
                         return BuildExecuteErrorResponse($"ECode length exceeds 50 at row {row.RowNumber()}.", HttpStatusCode.BadRequest);
                     if (!string.IsNullOrEmpty(zone) && zone.Length > 100)
@@ -115,31 +108,23 @@ namespace HRMSAPI.Implementation
                     if (!string.IsNullOrEmpty(region) && region.Length > 100)
                         return BuildExecuteErrorResponse($"Region length exceeds 100 at row {row.RowNumber()}.", HttpStatusCode.BadRequest);
 
-                    if (existingByEcode.TryGetValue(ecode, out var existingRow))
+                    toInsert.Add(new EcodeZoneRegionClusterMapping
                     {
-                        existingRow.Zone = zone;
-                        existingRow.Cluster = cluster;
-                        existingRow.Region = region;
-                        // Updated in place
-                    }
-                    else
-                    {
-                        toInsert.Add(new EcodeZoneRegionClusterMapping
-                        {
-                            Ecode = ecode,
-                            Zone = zone,
-                            Cluster = cluster,
-                            Region = region
-                        });
-                    }
+                        Ecode = ecode,
+                        Zone = zone,
+                        Cluster = cluster,
+                        Region = region
+                    });
                 }
 
-                if (toInsert.Count > 0)
-                    await _context.EcodeZoneRegionClusterMappings.AddRangeAsync(toInsert);
+                // Replace entire hierarchy: remove all existing records, then insert new ones
+                var allExisting = await _context.EcodeZoneRegionClusterMappings.ToListAsync();
+                _context.EcodeZoneRegionClusterMappings.RemoveRange(allExisting);
+                await _context.EcodeZoneRegionClusterMappings.AddRangeAsync(toInsert);
 
                 await _context.SaveChangesAsync();
 
-                return BuildExecuteSuccessResponse($"Processed {rows.Count} rows. Inserted {toInsert.Count}, Updated {rows.Count - toInsert.Count}.");
+                return BuildExecuteSuccessResponse($"Hierarchy replaced successfully. {toInsert.Count} records uploaded.");
             }
             catch (Exception ex)
             {

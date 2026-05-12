@@ -1658,7 +1658,7 @@ namespace HRMSAPI.Implementation
                     monthlyGrossCTC = candidateEntity.monthlyGrossCTC ?? 0,
                     annuallyNetCTC = candidateEntity.annuallyNetCTC ?? 0,
                     PFApplicable = candidateEntity.PFApplicable ?? false,
-                    bonusApplicable = candidateEntity.BonusApplicable ?? false,
+                    bonusApplicable = candidateEntity.BonusApplicable ?? "No",
                     ESICApplicable = candidateEntity.ESICApplicable ?? false,
                     companyId = candidateEntity.CompanyId,
                     ShiftID = candidateEntity.ShiftID ?? 0,

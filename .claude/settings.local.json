@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Recurse -Filter \"appsettings*.json\" -Path \"C:\\\\Users\\\\Administrator\\\\Desktop\\\\HRMS_BACKEND\")",
+      "Bash(Select-Object FullName)",
+      "Bash(dotnet run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\HRMS_BACKEND'; dotnet run\")",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\HRMS_FRONTEND'; npm run dev\")",
+      "PowerShell(Invoke-RestMethod -Uri \"http://192.168.151.27:5000/api/Auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://192.168.151.27:5000/swagger/v1/swagger.json\" -Method GET -ErrorAction SilentlyContinue | ConvertTo-Json -Depth 2 | Select-Object -First 20)",
+      "PowerShell(Invoke-WebRequest -Uri \"http://192.168.151.27:5000/\" -ErrorAction SilentlyContinue | Select-Object StatusCode, StatusDescription, Content)",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:5000/api/Auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue)",
+      "PowerShell(Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"cd 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\HRMS_BACKEND'; dotnet run --urls 'http://0.0.0.0:5000'\")",
+      "PowerShell(Invoke-RestMethod -Uri \"http://localhost:5000/api/Auth/login\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue; Write-Host \"Exit: $LASTEXITCODE\")",
+      "Bash(Get-ChildItem *)",
+      "PowerShell(try { Invoke-WebRequest \"http://192.168.151.27:5000/api/Auth/loginnew\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' } catch { $_.Exception.Response | Select-Object StatusCode; $_.Exception.Response.Headers | ForEach-Object { $_ } })",
+      "PowerShell($resp = $null; try { $resp = Invoke-WebRequest \"http://192.168.151.27:5000/\" -ErrorAction Stop } catch { $resp = $_.Exception.Response }; if \\($resp\\) { \"Status: $\\($resp.StatusCode\\)\"; $resp.Headers.AllKeys | ForEach-Object { \"$_ : $\\($resp.Headers[$_]\\)\" } })",
+      "PowerShell(netstat *)",
+      "PowerShell(Invoke-WebRequest \"http://192.168.151.27:8080/api/Auth/loginnew\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue | Select-Object StatusCode; $err = $null; try { Invoke-WebRequest \"http://192.168.151.27:8080/api/Auth/loginnew\" -Method OPTIONS -Headers @{\"Origin\"=\"http://192.168.151.27:3000\";\"Access-Control-Request-Method\"=\"POST\";\"Access-Control-Request-Headers\"=\"content-type\"} -ErrorAction Stop } catch { $_.Exception.Response.StatusCode; $_.Exception.Response.Headers.AllKeys | ForEach-Object { \"$_ : $\\($_.Exception.Response.Headers[$_]\\)\" } })",
+      "PowerShell(Invoke-WebRequest \"http://localhost:8080/api/Auth/loginnew\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue | Select-Object StatusCode)",
+      "PowerShell(New-NetFirewallRule *)",
+      "PowerShell(Invoke-WebRequest \"http://192.168.151.27:8080/api/Auth/loginnew\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue | Select-Object StatusCode)",
+      "PowerShell(Invoke-WebRequest \"http://192.168.149.87:8080/api/Auth/loginnew\" -Method POST -ContentType \"application/json\" -Body '{\"username\":\"test\",\"password\":\"test\"}' -ErrorAction SilentlyContinue | Select-Object StatusCode)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Test-NetConnection *)",
+      "PowerShell(ConvertTo-SecureString *)",
+      "Bash(sqlcmd -S '192.168.151.27\\\\KARMA' -U nikhil -P Vrl@12345 -d HRMS -C -Q ' *)"
+    ]
+  }
+}

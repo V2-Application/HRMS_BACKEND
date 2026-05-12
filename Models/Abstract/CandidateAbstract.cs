@@ -115,7 +115,7 @@ namespace HRMSAPI.Models.Abstract
      
         public bool? PFApplicable { get; set; } = false;
         public bool? ESICApplicable { get; set; } = false;
-        public bool? bonusApplicable { get; set; } = false;
+        public string? bonusApplicable { get; set; } = "No";
         public List<CandidateStatusHistory>? StatusHistory { get; set; }
         public List<InterviewRound>? InterviewRounds { get; set; }
         public int? companyId { get; set; }

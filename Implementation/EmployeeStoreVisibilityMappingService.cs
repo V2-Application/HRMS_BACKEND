@@ -790,240 +790,97 @@ namespace HRMSAPI.Implementation
                     return BuildExecuteErrorResponse($"Invalid department names found: {string.Join(", ", invalidDeptNames)}", HttpStatusCode.BadRequest);
                 }
 
-                // Group by ECode and StCode to process store access first
+                // ── Pre-fetch all master data in one shot (avoid N+1 queries) ──────
+                var allDeptIds = await _context.tblDepartments
+                    .Select(d => d.DepartmentId)
+                    .ToListAsync();
+
+                var allDesigIdsInSystem = await _context.tblDesignations
+                    .Select(d => d.DesignationId)
+                    .ToListAsync();
+
+                // dept → list of mapped (allowed) designation IDs
+                var deptDesigMap = (await _context.DepartmentDesignationMappings
+                    .Where(ddm => ddm.ISActive == true && ddm.IsDeleted != true && ddm.DesigId.HasValue)
+                    .Select(ddm => new { ddm.DeptId, DesigId = ddm.DesigId!.Value })
+                    .ToListAsync())
+                    .GroupBy(x => x.DeptId)
+                    .ToDictionary(g => g.Key, g => g.Select(x => x.DesigId).ToHashSet());
+
+                // ── Delete all existing records and replace with new hierarchy ──────
+                await _context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE dbo.tblEmployeeStroreVisibilityMapping");
+
                 var storeAccessGroups = validMappings
                     .GroupBy(m => new { m.ECode, m.StCode })
                     .ToList();
 
-                using var transaction = await _context.Database.BeginTransactionAsync();
+                var newRecords = new List<tblEmployeeStroreVisibilityMapping>();
 
-                try
+                foreach (var group in storeAccessGroups)
                 {
-                    foreach (var group in storeAccessGroups)
+                    var eCode = group.Key.ECode;
+                    var stCode = group.Key.StCode;
+                    var allowedDeptNames = group.Select(m => m.DeptName).ToList();
+
+                    // Store access record
+                    newRecords.Add(new tblEmployeeStroreVisibilityMapping
                     {
-                        var eCode = group.Key.ECode;
-                        var stCode = group.Key.StCode;
-                        var allowedDeptNames = group.Select(m => m.DeptName).ToList();
+                        ECode = eCode, StCode = stCode,
+                        DeptId = null, DesigId = null,
+                        IsActive = true, IsDeleted = false,
+                        CreatedOn = DateTime.Now, CreatedBy = createdBy
+                    });
 
-                        // 1. Store access - only store allowed stores (ECode + StCode)
-                        var existingStoreAccess = await _context.tblEmployeeStroreVisibilityMappings
-                            .FirstOrDefaultAsync(x => x.ECode == eCode && x.StCode == stCode && x.DeptId == null && x.DesigId == null);
+                    var allowedDeptIds = allowedDeptNames
+                        .Select(name => deptNameToIdMap[name.ToUpperInvariant()])
+                        .ToHashSet();
 
-                        if (existingStoreAccess == null)
+                    // Excluded department records
+                    foreach (var deptId in allDeptIds.Where(d => !allowedDeptIds.Contains(d)))
+                    {
+                        newRecords.Add(new tblEmployeeStroreVisibilityMapping
                         {
-                            // Create store access record (allowed)
-                            var storeAccess = new tblEmployeeStroreVisibilityMapping
-                            {
-                                ECode = eCode,
-                                StCode = stCode,
-                                DeptId = null,
-                                DesigId = null,
-                                IsActive = true, // Allowed
-                                IsDeleted = false,
-                                CreatedOn = DateTime.Now,
-                                CreatedBy = createdBy
-                            };
-                            await _context.tblEmployeeStroreVisibilityMappings.AddAsync(storeAccess);
-                        }
-                        else if (existingStoreAccess.IsDeleted == true)
-                        {
-                            // Reactivate if it was soft deleted
-                            existingStoreAccess.IsActive = true;
-                            existingStoreAccess.IsDeleted = false;
-                            existingStoreAccess.UpdatedOn = DateTime.Now;
-                            existingStoreAccess.UpdatedBy = createdBy;
-                        }
-                        // If already active and not deleted, no change needed
-
-                        // 2. Get all departments for this store
-                        var allDeptIds = await _context.tblDepartments
-                            //.Where(d => d.IsActive == true)
-                            .Select(d => d.DepartmentId)
-                            .ToListAsync();
-
-                        // 3. Get allowed department IDs from Excel
-                        var allowedDeptIds = allowedDeptNames
-                            .Select(name => deptNameToIdMap[name.ToUpperInvariant()])
-                            .ToList();
-
-                        // 4. Get current department permissions from database
-                        var currentDeptPermissions = await _context.tblEmployeeStroreVisibilityMappings
-                            .Where(x => x.ECode == eCode && x.StCode == stCode && x.DeptId != null && x.DesigId == null)
-                            .ToListAsync();
-
-                        // 5. Determine which departments to allow and which to exclude
-                        // Note: We only store exceptions (excluded departments), not allowed departments
-                        var deptsToAllow = allowedDeptIds.ToList();
-                        var deptsToExclude = allDeptIds.Except(allowedDeptIds).ToList();
-
-                        // 6. Update department permissions - only store exceptions (excluded departments)
-                        foreach (var deptId in allDeptIds)
-                        {
-                            var existingDeptPermission = currentDeptPermissions
-                                .FirstOrDefault(x => x.DeptId == deptId.ToString());
-
-                            if (deptsToAllow.Contains(deptId))
-                            {
-                                // This department should be allowed - soft delete any existing exclusion
-                                if (existingDeptPermission != null)
-                                {
-                                    // Mark existing exclusion as deleted (soft delete)
-                                    existingDeptPermission.IsDeleted = true;
-                                    existingDeptPermission.IsActive = false;
-                                    existingDeptPermission.UpdatedOn = DateTime.Now;
-                                    existingDeptPermission.UpdatedBy = createdBy;
-                                }
-                                // If no record exists, that's fine - default allow (no record needed)
-                            }
-                            else
-                            {
-                                // This department should be excluded - create or reactivate exclusion record
-                                if (existingDeptPermission == null)
-                                {
-                                    // No record exists, create exclusion record
-                                    var deptPermission = new tblEmployeeStroreVisibilityMapping
-                                    {
-                                        ECode = eCode,
-                                        StCode = stCode,
-                                        DeptId = deptId.ToString(),
-                                        DesigId = null,
-                                        IsActive = false, // Excluded
-                                        IsDeleted = false,
-                                        CreatedOn = DateTime.Now,
-                                        CreatedBy = createdBy
-                                    };
-                                    await _context.tblEmployeeStroreVisibilityMappings.AddAsync(deptPermission);
-                                }
-                                else if (existingDeptPermission.IsDeleted == true)
-                                {
-                                    // Reactivate exclusion (was soft deleted, now exclude again)
-                                    existingDeptPermission.IsActive = false;
-                                    existingDeptPermission.IsDeleted = false;
-                                    existingDeptPermission.UpdatedOn = DateTime.Now;
-                                    existingDeptPermission.UpdatedBy = createdBy;
-                                }
-                                // If already excluded and not deleted, no change needed
-                            }
-                        }
-
-                        // 7. Handle designation permissions for allowed departments - only store exceptions (not allowed designations)
-                        foreach (var deptId in deptsToAllow)
-                        {
-                            // Fetch mapped (allowed) designations for this department
-                            var mappedDesigIds = await _context.DepartmentDesignationMappings
-                                .Where(ddm => ddm.DeptId == deptId && ddm.ISActive == true && ddm.IsDeleted != true && ddm.DesigId.HasValue)
-                                .Select(ddm => ddm.DesigId!.Value)
-                                .ToListAsync();
-
-                            // Get current designation permissions for this department (existing exclusions)
-                            var currentDesigPermissions = await _context.tblEmployeeStroreVisibilityMappings
-                                .Where(x => x.ECode == eCode && x.StCode == stCode && x.DeptId == deptId.ToString() && x.DesigId != null)
-                                .ToListAsync();
-
-                            if (mappedDesigIds.Any())
-                            {
-                                // Universe of designations (we will exclude all that are NOT mapped)
-                                var allDesigIdsInSystem = await _context.tblDesignations
-                                    .Select(d => d.DesignationId)
-                                    .ToListAsync();
-
-                                var desigIdsToExclude = allDesigIdsInSystem.Except(mappedDesigIds).ToList();
-
-                                // Create or reactivate exclusions for NOT mapped designations
-                                foreach (var desigId in desigIdsToExclude)
-                                {
-                                    var existingExclusion = currentDesigPermissions
-                                        .FirstOrDefault(x => x.DesigId == desigId.ToString());
-
-                                    if (existingExclusion == null)
-                                    {
-                                        var desigPermission = new tblEmployeeStroreVisibilityMapping
-                                        {
-                                            ECode = eCode,
-                                            StCode = stCode,
-                                            DeptId = deptId.ToString(),
-                                            DesigId = desigId.ToString(),
-                                            IsActive = false, // Excluded
-                                            IsDeleted = false,
-                                            CreatedOn = DateTime.Now,
-                                            CreatedBy = createdBy
-                                        };
-                                        await _context.tblEmployeeStroreVisibilityMappings.AddAsync(desigPermission);
-                                    }
-                                    else if (existingExclusion.IsDeleted == true)
-                                    {
-                                        existingExclusion.IsActive = false;
-                                        existingExclusion.IsDeleted = false;
-                                        existingExclusion.UpdatedOn = DateTime.Now;
-                                        existingExclusion.UpdatedBy = createdBy;
-                                    }
-                                }
-
-                                // For mapped (allowed) designations, ensure any existing exclusions are soft-deleted
-                                foreach (var allowedDesigId in mappedDesigIds)
-                                {
-                                    var existingExclusion = currentDesigPermissions
-                                        .FirstOrDefault(x => x.DesigId == allowedDesigId.ToString());
-
-                                    if (existingExclusion != null && existingExclusion.IsDeleted != true)
-                                    {
-                                        existingExclusion.IsDeleted = true;
-                                        existingExclusion.IsActive = false;
-                                        existingExclusion.UpdatedOn = DateTime.Now;
-                                        existingExclusion.UpdatedBy = createdBy;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // No mapping for this department => all designations are allowed
-                                // Soft-delete any existing exclusions for safety
-                                foreach (var existing in currentDesigPermissions)
-                                {
-                                    if (existing.IsDeleted != true)
-                                    {
-                                        existing.IsDeleted = true;
-                                        existing.IsActive = false;
-                                        existing.UpdatedOn = DateTime.Now;
-                                        existing.UpdatedBy = createdBy;
-                                    }
-                                }
-                            }
-                        }
-
-                        // 8. Clean up designation permissions for excluded departments - soft delete them
-                        var excludedDeptIds = deptsToExclude;
-                        foreach (var deptId in excludedDeptIds)
-                        {
-                            // Soft delete all designation permissions for excluded departments
-                            var desigPermissionsToSoftDelete = await _context.tblEmployeeStroreVisibilityMappings
-                                .Where(x => x.ECode == eCode && x.StCode == stCode && x.DeptId == deptId.ToString() && x.DesigId != null)
-                                .ToListAsync();
-
-                            foreach (var desigPermission in desigPermissionsToSoftDelete)
-                            {
-                                desigPermission.IsDeleted = true;
-                                desigPermission.IsActive = false;
-                                desigPermission.UpdatedOn = DateTime.Now;
-                                desigPermission.UpdatedBy = createdBy;
-                            }
-                        }
+                            ECode = eCode, StCode = stCode,
+                            DeptId = deptId.ToString(), DesigId = null,
+                            IsActive = false, IsDeleted = false,
+                            CreatedOn = DateTime.Now, CreatedBy = createdBy
+                        });
                     }
 
-                    await _context.SaveChangesAsync();
-                    await transaction.CommitAsync();
+                    // Designation exclusions for allowed departments
+                    foreach (var deptId in allowedDeptIds)
+                    {
+                        if (!deptDesigMap.TryGetValue(deptId, out var mappedDesigIds) || !mappedDesigIds.Any())
+                            continue;
 
-                    response.Success = true;
-                    response.Message = $"Successfully uploaded {response.ValidRows} mappings with department and designation exceptions.";
-                    response.DuplicateRows = 0;
-
-                    return BuildExecuteSuccessResponse(response.Message);
+                        foreach (var desigId in allDesigIdsInSystem.Where(d => !mappedDesigIds.Contains(d)))
+                        {
+                            newRecords.Add(new tblEmployeeStroreVisibilityMapping
+                            {
+                                ECode = eCode, StCode = stCode,
+                                DeptId = deptId.ToString(), DesigId = desigId.ToString(),
+                                IsActive = false, IsDeleted = false,
+                                CreatedOn = DateTime.Now, CreatedBy = createdBy
+                            });
+                        }
+                    }
                 }
-                catch (Exception ex)
+
+                // Insert in batches of 5000 to avoid memory/timeout issues
+                const int batchSize = 5000;
+                for (int i = 0; i < newRecords.Count; i += batchSize)
                 {
-                    await transaction.RollbackAsync();
-                    throw;
+                    var batch = newRecords.Skip(i).Take(batchSize).ToList();
+                    await _context.tblEmployeeStroreVisibilityMappings.AddRangeAsync(batch);
+                    await _context.SaveChangesAsync();
+                    _context.ChangeTracker.Clear();
                 }
+
+                response.Success = true;
+                response.Message = $"Hierarchy replaced. {newRecords.Count} records inserted for {response.ValidRows} mappings.";
+                response.DuplicateRows = 0;
+
+                return BuildExecuteSuccessResponse(response.Message);
             }
             catch (Exception ex)
             {

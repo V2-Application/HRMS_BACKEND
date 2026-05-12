@@ -201,7 +201,7 @@ public partial class Candidate
 
     public bool? PFApplicable { get; set; }
 
-    public bool? BonusApplicable { get; set; }
+    public string? BonusApplicable { get; set; }
 
     public bool? ESICApplicable { get; set; }
 

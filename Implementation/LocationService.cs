@@ -58,192 +58,135 @@ namespace HRMSAPI.Implementation
 
             var rows = worksheet.RowsUsed().Skip(1).ToList();
 
-            using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // 1. Bulk fetch all existing data
-                var zones = await _context.tblZones.ToListAsync();
-                var clusters = await _context.Clusters.ToListAsync();
-                var regions = await _context.tblRegions.ToListAsync();
-                var states = await _context.tblStates.ToListAsync();
-                var locations = await _context.tblLocations.ToListAsync();
+                // ── PASS 1: validate all rows + collect parsed data (no DB writes yet) ──
 
-                // 2. Prepare in-memory dictionaries for fast lookup
-                var zoneDict = zones.ToDictionary(z => z.ZoneName, z => z);
-                var clusterDict = clusters.ToDictionary(c => c.ClusterName, c => c);
-                var regionDict = regions.ToDictionary(r => r.RegionName, r => r);
-                var stateDict = states.ToDictionary(s => s.StateName, s => s);
-                var locationDict = locations.ToDictionary(l => (l.LocationName, l.STCode), l => l);
-
-                // 3. Track new entities to add
-                var newZones = new List<tblZone>();
-                var newClusters = new List<Cluster>();
-                var newRegions = new List<tblRegion>();
-                var newStates = new List<tblState>();
-                var newLocations = new List<tblLocation>();
-                var updatedLocations = new List<tblLocation>();
-
-                // Track STCodes seen in this Excel to catch duplicates
                 var seenStCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var parsedRows  = new List<(string LocCode, string LocationName, string ZoneName, string RegionName, string ClusterName, string StateName, string Status, string OpeningDate)>();
 
                 foreach (var row in rows)
                 {
-                    var locCode = row.Cell(1).GetValue<string>()?.Trim();
+                    var locCode      = row.Cell(1).GetValue<string>()?.Trim();
                     var locationName = row.Cell(2).GetValue<string>()?.Trim();
-                    var zoneName = row.Cell(3).GetValue<string>()?.Trim();
-                    var regionName = row.Cell(4).GetValue<string>()?.Trim();
-                    var clusterName = row.Cell(5).GetValue<string>()?.Trim();
-                    var stateName = row.Cell(6).GetValue<string>()?.Trim();
-                    var status = row.Cell(7).GetValue<string>()?.Trim();
-                    var openingDate = row.Cell(8).GetValue<string>()?.Trim();
+                    var zoneName     = row.Cell(3).GetValue<string>()?.Trim();
+                    var regionName   = row.Cell(4).GetValue<string>()?.Trim();
+                    var clusterName  = row.Cell(5).GetValue<string>()?.Trim();
+                    var stateName    = row.Cell(6).GetValue<string>()?.Trim();
+                    var status       = row.Cell(7).GetValue<string>()?.Trim();
+                    var openingDate  = row.Cell(8).GetValue<string>()?.Trim();
 
-                    int? zoneId = null, clusterId = null, regionId = null, stateId = null;
+                    if (string.IsNullOrEmpty(locCode))
+                        continue;
 
-                    // Check for duplicate STCode in Excel
-                    if (!string.IsNullOrEmpty(locCode))
-                    {
-                        if (!seenStCodes.Add(locCode))
-                        {
-                            return BuildFetchErrorResponse($"Duplicate STCode '{locCode}' found in Excel.", HttpStatusCode.BadRequest);
-                        }
-                    }
+                    if (!seenStCodes.Add(locCode))
+                        return BuildFetchErrorResponse($"Duplicate STCode '{locCode}' found in Excel.", HttpStatusCode.BadRequest);
 
-                    // Validate Status column - only allow UPC or Active
-                    if (!string.IsNullOrEmpty(status))
-                    {
-                        if (!string.Equals(status, "UPC", StringComparison.OrdinalIgnoreCase) && 
-                            !string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return BuildFetchErrorResponse($"Invalid status '{status}' for STCode '{locCode}'. Only 'UPC' or 'Active' are allowed.", HttpStatusCode.BadRequest);
-                        }
-                    }
+                    if (!string.IsNullOrEmpty(status) &&
+                        !string.Equals(status, "UPC", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase))
+                        return BuildFetchErrorResponse($"Invalid status '{status}' for STCode '{locCode}'. Only 'UPC' or 'Active' are allowed.", HttpStatusCode.BadRequest);
 
-                    // Zone
-                    tblZone zone = null;
-                    if (!string.IsNullOrEmpty(zoneName))
-                    {
-                        if (!zoneDict.TryGetValue(zoneName, out zone))
-                        {
-                            zone = new tblZone { ZoneName = zoneName, IsActive = true, CreatedOn = DateTime.UtcNow };
-                            newZones.Add(zone);
-                            zoneDict[zoneName] = zone;
-                        }
-                        zoneId = zone.Id;
-                    }
-
-                    // Cluster
-                    Cluster cluster = null;
-                    if (!string.IsNullOrEmpty(clusterName))
-                    {
-                        if (!clusterDict.TryGetValue(clusterName, out cluster))
-                        {
-                            cluster = new Cluster { ClusterName = clusterName, IsActive = true, CreatedOn = DateTime.UtcNow };
-                            newClusters.Add(cluster);
-                            clusterDict[clusterName] = cluster;
-                        }
-                        clusterId = cluster.Id;
-                    }
-
-                    // Region
-                    tblRegion region = null;
-                    if (!string.IsNullOrEmpty(regionName))
-                    {
-                        if (!regionDict.TryGetValue(regionName, out region))
-                        {
-                            region = new tblRegion { RegionName = regionName, CreatedOn = DateTime.UtcNow };
-                            newRegions.Add(region);
-                            regionDict[regionName] = region;
-                        }
-                        regionId = region.RegionId;
-                    }
-
-                    // State
-                    tblState state = null;
-                    if (!string.IsNullOrEmpty(stateName))
-                    {
-                        if (!stateDict.TryGetValue(stateName, out state))
-                        {
-                            state = new tblState { StateName = stateName, RegionId = Convert.ToInt32(regionId), CreatedOn = DateTime.UtcNow };
-                            newStates.Add(state);
-                            stateDict[stateName] = state;
-                        }
-                        else if (regionId.HasValue && state.RegionId != regionId)
-                        {
-                            state.RegionId = Convert.ToInt32(regionId);
-                        }
-                        stateId = state.StateId;
-                    }
-
-                    // Location: Check by STCode only
-                    tblLocation location = null;
-                    if (!string.IsNullOrEmpty(locCode))
-                    {
-                        location = await _context.tblLocations.FirstOrDefaultAsync(l => l.STCode == locCode);
-                        if (location == null)
-                        {
-                            location = new tblLocation
-                            {
-                                LocationName = locationName,
-                                STCode = locCode,
-                                ZoneId = zoneId,
-                                ClusterId = clusterId,
-                                RegionId = regionId,
-                                StateId = stateId,
-                                IsActive = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase),
-                                IsDeleted=false,
-                                OpeningDate = openingDate,
-                                CreatedOn = DateTime.UtcNow
-                            };
-                            newLocations.Add(location);
-                            locationDict[(locationName, locCode)] = location;
-                        }
-                        else
-                        {
-                            // Update existing location
-                            location.LocationName = locationName; // Optionally update name
-                            location.ZoneId = zoneId;
-                            location.ClusterId = clusterId;
-                            location.RegionId = regionId;
-                            location.StateId = stateId;
-                            location.IsActive = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase);
-                            location.IsDeleted = false;
-                            location.OpeningDate = openingDate;
-                            updatedLocations.Add(location);
-                        }
-                    }
+                    parsedRows.Add((locCode, locationName, zoneName, regionName, clusterName, stateName, status, openingDate));
                 }
 
-                // 4. Bulk insert new entities
-                if (newZones.Any()) _context.tblZones.AddRange(newZones);
-                if (newClusters.Any()) _context.Clusters.AddRange(newClusters);
-                if (newRegions.Any()) _context.tblRegions.AddRange(newRegions);
-                if (newStates.Any()) _context.tblStates.AddRange(newStates);
+                if (parsedRows.Count == 0)
+                    return BuildFetchErrorResponse("No valid data rows found in Excel.", HttpStatusCode.BadRequest);
 
-                await _context.SaveChangesAsync();
+                // ── PASS 2: create any missing master entities, save to get real DB IDs ──
 
-                // Now that new entities have IDs, update foreign keys for new locations
-                foreach (var loc in newLocations)
+                var zoneDict    = (await _context.tblZones.ToListAsync()).ToDictionary(z => z.ZoneName, z => z, StringComparer.OrdinalIgnoreCase);
+                var clusterDict = (await _context.Clusters.ToListAsync()).ToDictionary(c => c.ClusterName, c => c, StringComparer.OrdinalIgnoreCase);
+                var regionDict  = (await _context.tblRegions.ToListAsync()).ToDictionary(r => r.RegionName, r => r, StringComparer.OrdinalIgnoreCase);
+                var stateDict   = (await _context.tblStates.ToListAsync()).ToDictionary(s => s.StateName, s => s, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var (_, _, zoneName, regionName, clusterName, stateName, _, _) in parsedRows)
                 {
-                    if (!string.IsNullOrEmpty(loc.ZoneId?.ToString()))
-                        loc.ZoneId = zoneDict.Values.FirstOrDefault(z => z.ZoneName == zones.FirstOrDefault(zz => zz.Id == loc.ZoneId)?.ZoneName)?.Id;
-                    if (!string.IsNullOrEmpty(loc.ClusterId?.ToString()))
-                        loc.ClusterId = clusterDict.Values.FirstOrDefault(c => c.ClusterName == clusters.FirstOrDefault(cc => cc.Id == loc.ClusterId)?.ClusterName)?.Id;
-                    if (!string.IsNullOrEmpty(loc.RegionId?.ToString()))
-                        loc.RegionId = regionDict.Values.FirstOrDefault(r => r.RegionName == regions.FirstOrDefault(rr => rr.RegionId == loc.RegionId)?.RegionName)?.RegionId;
-                    if (!string.IsNullOrEmpty(loc.StateId?.ToString()))
-                        loc.StateId = stateDict.Values.FirstOrDefault(s => s.StateName == states.FirstOrDefault(ss => ss.StateId == loc.StateId)?.StateName)?.StateId;
+                    if (!string.IsNullOrEmpty(zoneName) && !zoneDict.ContainsKey(zoneName))
+                    {
+                        var z = new tblZone { ZoneName = zoneName, IsActive = true, CreatedOn = DateTime.UtcNow };
+                        _context.tblZones.Add(z);
+                        zoneDict[zoneName] = z;
+                    }
+                    if (!string.IsNullOrEmpty(clusterName) && !clusterDict.ContainsKey(clusterName))
+                    {
+                        var c = new Cluster { ClusterName = clusterName, IsActive = true, CreatedOn = DateTime.UtcNow };
+                        _context.Clusters.Add(c);
+                        clusterDict[clusterName] = c;
+                    }
+                    if (!string.IsNullOrEmpty(regionName) && !regionDict.ContainsKey(regionName))
+                    {
+                        var r = new tblRegion { RegionName = regionName, CreatedOn = DateTime.UtcNow };
+                        _context.tblRegions.Add(r);
+                        regionDict[regionName] = r;
+                    }
+                    if (!string.IsNullOrEmpty(stateName) && !stateDict.ContainsKey(stateName))
+                    {
+                        var s = new tblState { StateName = stateName, CreatedOn = DateTime.UtcNow };
+                        _context.tblStates.Add(s);
+                        stateDict[stateName] = s;
+                    }
                 }
 
-                if (newLocations.Any()) _context.tblLocations.AddRange(newLocations);
-                if (updatedLocations.Any()) _context.tblLocations.UpdateRange(updatedLocations);
+                await _context.SaveChangesAsync(); // master entities now have real DB IDs
 
+                // ── PASS 3: delete all existing locations ──────────────────────────────
+                var oldCount = await _context.tblLocations.CountAsync();
+
+                // 1. Disable the 4 FK constraints from StoreRoutingTransaction
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__1C281490");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__24BD5A91");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__2799C73C");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__2C5E7C59");
+
+                // 2. Turn off temporal versioning (required for DELETE on temporal tables)
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.tblLocation SET (SYSTEM_VERSIONING = OFF)");
+
+                // 3. Delete all rows
+                await _context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.tblLocation");
+
+                // 4. Re-enable temporal versioning
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.tblLocation SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.tblLocation_History, DATA_CONSISTENCY_CHECK = OFF))");
+
+                // 5. Re-enable FK constraints (WITH NOCHECK to skip validating existing orphaned rows)
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__1C281490");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__24BD5A91");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__2799C73C");
+                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__2C5E7C59");
+
+                // ── PASS 4: insert new locations with correct FK IDs ───────────────────
+                var newLocations = new List<tblLocation>();
+
+                foreach (var (locCode, locationName, zoneName, regionName, clusterName, stateName, status, openingDate) in parsedRows)
+                {
+                    int? zoneId    = !string.IsNullOrEmpty(zoneName)    && zoneDict.TryGetValue(zoneName, out var z)       ? z.Id       : null;
+                    int? clusterId = !string.IsNullOrEmpty(clusterName) && clusterDict.TryGetValue(clusterName, out var c) ? c.Id       : null;
+                    int? regionId  = !string.IsNullOrEmpty(regionName)  && regionDict.TryGetValue(regionName, out var r)   ? r.RegionId : null;
+                    int? stateId   = !string.IsNullOrEmpty(stateName)   && stateDict.TryGetValue(stateName, out var s)     ? s.StateId  : null;
+
+                    newLocations.Add(new tblLocation
+                    {
+                        LocationName = locationName,
+                        STCode       = locCode,
+                        ZoneId       = zoneId,
+                        ClusterId    = clusterId,
+                        RegionId     = regionId,
+                        StateId      = stateId,
+                        IsActive     = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase),
+                        IsDeleted    = false,
+                        OpeningDate  = openingDate,
+                        CreatedOn    = DateTime.UtcNow
+                    });
+                }
+
+                await _context.tblLocations.AddRangeAsync(newLocations);
                 await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-                return BuildFetchSuccessResponse("Locations uploaded successfully", null);
+
+                return BuildFetchSuccessResponse($"Location hierarchy replaced. {oldCount} old records deleted, {newLocations.Count} new records inserted.", null);
             }
             catch (Exception ex)
             {
-                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error in UploadLocationsExcelAsync");
                 return BuildFetchErrorResponse($"Error uploading locations: {ex.Message}", HttpStatusCode.BadRequest);
             }
         }

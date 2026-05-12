@@ -113,7 +113,7 @@ namespace HRMSAPI.DTO
         public decimal annuallyNetCtc { get; set; }
         public bool pfApplicable { get; set; }
         public bool esicApplicable { get; set; }
-        public bool bonusApplicable { get; set; }
+        public string? bonusApplicable { get; set; }
         public string statusHistory { get; set; }
         public string interviewRounds { get; set; }
         public string? esicno { get; set; }

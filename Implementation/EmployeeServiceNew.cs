@@ -213,7 +213,7 @@ namespace HRMSAPI.Implementation
                         monthlyGrossCTC = candidateEntity.monthlyGrossCTC ?? 0,
                         annuallyNetCTC = candidateEntity.annuallyNetCTC ?? 0,
                         PFApplicable = candidateEntity.PFApplicable ?? false,
-                        bonusApplicable = candidateEntity.BonusApplicable ?? false,
+                        bonusApplicable = candidateEntity.BonusApplicable ?? "No",
                         ESICApplicable = candidateEntity.ESICApplicable ?? false,
                         differentlyAbledReason = candidateEntity.DifferentlyAbledReason ?? "",
                         differentlyAbledRemarks = candidateEntity.DifferentlyAbledRemarks ?? "",
@@ -428,7 +428,7 @@ namespace HRMSAPI.Implementation
                         candidate.monthlyGrossCTC = employeeEntity.monthlyGrossCTC ?? 0;
                         candidate.annuallyNetCTC = employeeEntity.annuallyNetCTC ?? 0;
                         candidate.PFApplicable = employeeEntity.PFApplicable ?? false;
-                        candidate.bonusApplicable = employeeEntity.BonusApplicable ?? false;
+                        candidate.bonusApplicable = employeeEntity.BonusApplicable ?? "No";
                         candidate.ESICApplicable = employeeEntity.ESICApplicable ?? false;
                         candidate.companyId = employeeEntity.CompanyId ?? 0;
                     candidate.companyName = company?.CompanyName ?? "";
@@ -695,7 +695,7 @@ namespace HRMSAPI.Implementation
                         IsOtherAttachmentUploaded = details.isOtherAttachmentUploaded ?? false,
                         pfApplicable = details.PFApplicable ?? false,
                         esicApplicable = details.ESICApplicable ?? false,
-                        bonusApplicable = details.bonusApplicable ?? false,
+                        bonusApplicable = details.bonusApplicable ?? "No",
                         fingerprintRegistered = details.fingerprintRegistered,
                         SkillType = details.skillType ?? "",
                         DifferentlyAbled = details.differentlyAbled ?? false,
@@ -1347,7 +1347,10 @@ namespace HRMSAPI.Implementation
                         // Column 34: Bonus Applicable
                         var bonusApplicable = row.Cell(34).GetValue<string>();
                         if (!string.IsNullOrWhiteSpace(bonusApplicable))
-                            employee.BonusApplicable = bonusApplicable.Trim().ToLower() == "yes";
+                        {
+                            var b = bonusApplicable.Trim().ToLower();
+                            employee.BonusApplicable = b switch { "stat" => "Stat", "ctc" => "Ctc", "yes" => "Ctc", _ => "No" };
+                        }
 
                         // Column 35: ESIC Applicable
                         var esicApplicable = row.Cell(35).GetValue<string>();
@@ -1673,7 +1676,7 @@ namespace HRMSAPI.Implementation
                         var pfVal = row.Cell(33).GetValue<string>()?.Trim();
                         if (!string.IsNullOrWhiteSpace(pfVal)) emp.PFApplicable = pfVal.ToLower() == "yes";
                         var bonusVal = row.Cell(34).GetValue<string>()?.Trim();
-                        if (!string.IsNullOrWhiteSpace(bonusVal)) emp.BonusApplicable = bonusVal.ToLower() == "yes";
+                        if (!string.IsNullOrWhiteSpace(bonusVal)) emp.BonusApplicable = bonusVal.ToLower() == "yes" ? "Ctc" : "No";
                         var esicVal = row.Cell(35).GetValue<string>()?.Trim();
                         if (!string.IsNullOrWhiteSpace(esicVal)) emp.ESICApplicable = esicVal.ToLower() == "yes";
                         var relativeVal = row.Cell(48).GetValue<string>()?.Trim();
