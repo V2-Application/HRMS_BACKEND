@@ -72,6 +72,14 @@ namespace HRMSAPI.Interfaces
           string lastUpdatedBy,               // <-- new parameter
           CancellationToken ct = default);
 
+        Task<byte[]> ExportGeoAttendanceByRangeAsync(
+            DateTime startDate,
+            DateTime endDate,
+            string? finalStatus,
+            string? managerStatus,
+            string? masterStatus,
+            CancellationToken ct = default);
+
         // Attendance Count Approval Methods
         Task<long> CreateAttendanceCountApprovalAsync(CreateAttendanceCountApprovalDto dto, string createdBy);
         Task<long> CreateAttendanceCountApprovalWithFilesAsync(CreateAttendanceCountApprovalDto dto, List<IFormFile> files, string createdBy);

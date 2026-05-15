@@ -10926,8 +10926,9 @@ namespace HRMSAPI.Data
                 new SqlParameter
                 {
                     ParameterName = "BonusApplicable",
+                    Size = 10,
                     Value = bonusApplicable ?? Convert.DBNull,
-                    SqlDbType = System.Data.SqlDbType.Bit,
+                    SqlDbType = System.Data.SqlDbType.NVarChar,
                 },
                 new SqlParameter
                 {
@@ -11514,8 +11515,9 @@ namespace HRMSAPI.Data
                 new SqlParameter
                 {
                     ParameterName = "BonusApplicable",
+                    Size = 10,
                     Value = bonusApplicable ?? Convert.DBNull,
-                    SqlDbType = System.Data.SqlDbType.Bit,
+                    SqlDbType = System.Data.SqlDbType.NVarChar,
                 },
                 new SqlParameter
                 {
@@ -12143,8 +12145,9 @@ namespace HRMSAPI.Data
                 new SqlParameter
                 {
                     ParameterName = "BonusApplicable",
+                    Size = 10,
                     Value = bonusApplicable ?? Convert.DBNull,
-                    SqlDbType = System.Data.SqlDbType.Bit,
+                    SqlDbType = System.Data.SqlDbType.NVarChar,
                 },
                 new SqlParameter
                 {

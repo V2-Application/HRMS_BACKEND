@@ -93,6 +93,48 @@ public class ShiftMapController : ControllerBase
         }
     }
 
+    [HttpPost("assign-shift-bulk"), Authorize]
+    public async Task<IActionResult> BulkAssignEmployeeShift([FromForm] BulkAssignShiftRequest request)
+    {
+        try
+        {
+            if (request == null)
+                return BadRequest(new { Status = false, Message = "Request body is required." });
+            if (request.ShiftId <= 0)
+                return BadRequest(new { Status = false, Message = "ShiftId is required." });
+            if (request.EffectiveFrom == default)
+                return BadRequest(new { Status = false, Message = "EffectiveFrom is required." });
+
+            var identity = HttpContext.User.Identity as ClaimsIdentity;
+            if (identity == null)
+                return Unauthorized(new { Status = false, Message = "Authentication required." });
+
+            var loginDetail = AuthenticUserDetails.GetCurrentUserDetails(identity);
+            if (string.IsNullOrWhiteSpace(request.AssignedBy))
+                request.AssignedBy = loginDetail?.EmployeeId ?? "System";
+
+            var result = await _shiftMapService.BulkAssignEmployeeShiftAsync(request);
+
+            return Ok(new
+            {
+                Status = true,
+                Message = $"Processed {result.Processed} of {result.TotalSubmitted}. " +
+                          $"Already on shift: {result.AlreadyOnShift}. " +
+                          $"Not found: {result.NotFoundEcodes.Count}. Errors: {result.Errors.Count}.",
+                Data = result
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { Status = false, Message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in bulk assign shift: {ex.Message}");
+            return StatusCode(500, new { Status = false, Message = $"An error occurred: {ex.Message}" });
+        }
+    }
+
     [HttpPost("assign-shift"), Authorize]
     public async Task<IActionResult> AssignEmployeeShift([FromBody] AssignEmployeeShiftRequest request)
     {

@@ -730,6 +730,59 @@ namespace HRMSAPI.Controllers
             });
         }
 
+        /// <summary>
+        /// SuperAdmin-only export: geofence/geo-attendance approvals for a date range,
+        /// optionally filtered by finalStatus / managerStatus / masterStatus.
+        /// </summary>
+        [HttpGet("geo/export"), Authorize]
+        public async Task<IActionResult> ExportGeoAttendance(
+            [FromQuery] DateTime startDate,
+            [FromQuery] DateTime endDate,
+            [FromQuery] string? finalStatus = null,
+            [FromQuery] string? managerStatus = null,
+            [FromQuery] string? masterStatus = null,
+            CancellationToken ct = default)
+        {
+            try
+            {
+                var identity = HttpContext.User.Identity as ClaimsIdentity;
+                var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
+
+                if (userClaims == null || string.IsNullOrEmpty(userClaims.EmployeeId))
+                    return Unauthorized(new { Status = false, Message = "Invalid user credentials." });
+
+                var roleLower = (userClaims.role ?? string.Empty).Trim().ToLowerInvariant();
+                var isSuperAdmin = roleLower == "superadmin"
+                                   || roleLower == "it superadmin"
+                                   || roleLower == "master";
+
+                if (!isSuperAdmin)
+                    return StatusCode(StatusCodes.Status403Forbidden, new
+                    {
+                        Status = false,
+                        Message = "Only SuperAdmin can export geofence requests."
+                    });
+
+                if (startDate == default || endDate == default)
+                    return BadRequest(new { Status = false, Message = "StartDate and EndDate are required." });
+
+                if (endDate < startDate)
+                    return BadRequest(new { Status = false, Message = "EndDate must be >= StartDate." });
+
+                var bytes = await _service.ExportGeoAttendanceByRangeAsync(
+                    startDate, endDate, finalStatus, managerStatus, masterStatus, ct);
+
+                var fileName = $"GeoAttendance_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}_{DateTime.UtcNow:yyyyMMddHHmmss}.xlsx";
+                return File(bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    fileName);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = false, Message = $"Export failed: {ex.Message}" });
+            }
+        }
+
 
         #region Attendance Count Approval Endpoints
 

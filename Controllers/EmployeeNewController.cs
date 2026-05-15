@@ -365,6 +365,45 @@ namespace HRMSAPI.Controllers
             }
         }
 
+        [HttpPost("BulkInactivateEmployees"), Authorize]
+        public async Task<IActionResult> BulkInactivateEmployees([FromForm] BulkInactivateRequest request)
+        {
+            _logger.LogInformation("BulkInactivateEmployees invoked");
+            try
+            {
+                var identity = User.Identity as ClaimsIdentity;
+                if (identity == null || !identity.IsAuthenticated)
+                {
+                    return Unauthorized(new { Status = false, Message = "User is not authenticated" });
+                }
+
+                if (string.IsNullOrWhiteSpace(request.LastUpdatedBy))
+                {
+                    request.LastUpdatedBy = identity.FindFirst("EmployeeId")?.Value;
+                }
+
+                var result = await _uow.BulkInactivateEmployees(request);
+                _logger.LogInformation("BulkInactivateEmployees completed with Status={Status} Code={Code}", result.Status, result.Code);
+
+                return StatusCode((int)result.Code, new
+                {
+                    Status = result.Status,
+                    Message = result.Message,
+                    Data = (object?)null
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in BulkInactivateEmployees");
+                return StatusCode((int)HttpStatusCode.InternalServerError, new
+                {
+                    Status = false,
+                    Message = "An unexpected error occurred.",
+                    Data = (object?)null
+                });
+            }
+        }
+
         [HttpPost("UpdateEmployeeStatusWithAttachment"), Authorize]
         public async Task<IActionResult> UpdateEmployeeStatus(EmployeeStatusUpdateWithReasonAndAttachmentRequest request)
         {

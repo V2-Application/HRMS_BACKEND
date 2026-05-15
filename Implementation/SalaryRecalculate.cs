@@ -227,7 +227,16 @@ namespace HRMSAPI.Implementation
                     };
                 }
                 var skippedMessage = new OutputParameter<string>();
-                var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, obj.ECodes, skippedMessage);
+                var previousTimeout = _context.Database.GetCommandTimeout();
+                _context.Database.SetCommandTimeout(600); // 10 min — heavy multi-ecode recalculation
+                try
+                {
+                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, obj.ECodes, skippedMessage);
+                }
+                finally
+                {
+                    _context.Database.SetCommandTimeout(previousTimeout);
+                }
 
                 // Call procedure for each ECode
                 //foreach (var ecode in ecodeList)
@@ -276,7 +285,16 @@ namespace HRMSAPI.Implementation
                 }
                 var skippedMessage = new OutputParameter<string>();
                 // Execute stored procedure for all employees by month
-                var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month,null, skippedMessage);
+                var previousTimeout = _context.Database.GetCommandTimeout();
+                _context.Database.SetCommandTimeout(600); // 10 min — full-tenant recalculation is heavy
+                try
+                {
+                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, null, skippedMessage);
+                }
+                finally
+                {
+                    _context.Database.SetCommandTimeout(previousTimeout);
+                }
 
                 return new ExecuteAndReponse
                 {

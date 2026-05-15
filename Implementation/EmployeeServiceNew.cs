@@ -2404,6 +2404,268 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        public async Task<ExecuteAndReponse> BulkInactivateEmployees(BulkInactivateRequest request)
+        {
+            if (request == null)
+                return BuildExecuteErrorResponse("No request provided", HttpStatusCode.BadRequest);
+
+            if (request.Attachment == null || request.Attachment.Length == 0)
+                return BuildExecuteErrorResponse("Attachment is mandatory for bulk inactivation", HttpStatusCode.BadRequest);
+
+            if (request.Attachment.Length > 10 * 1024 * 1024)
+                return BuildExecuteErrorResponse("Attachment exceeds 10MB limit", HttpStatusCode.BadRequest);
+
+            if (string.IsNullOrWhiteSpace(request.Remarks))
+                return BuildExecuteErrorResponse("Remarks are required", HttpStatusCode.BadRequest);
+
+            if (request.ResignationTypeId <= 0)
+                return BuildExecuteErrorResponse("ResignationTypeId is required", HttpStatusCode.BadRequest);
+
+            // Resolve EmployeeIds from any of the three input modes
+            List<long> employeeIds;
+            try
+            {
+                employeeIds = await ResolveBulkInactivateEmployeeIds(request);
+            }
+            catch (Exception ex)
+            {
+                return BuildExecuteErrorResponse($"Invalid employee selection: {ex.Message}", HttpStatusCode.BadRequest);
+            }
+
+            if (employeeIds.Count == 0)
+                return BuildExecuteErrorResponse("No employees selected", HttpStatusCode.BadRequest);
+
+            // Parse checklist
+            List<BulkInactivateChecklistItem> checklistItems = new();
+            if (!string.IsNullOrWhiteSpace(request.ChecklistResponsesJson))
+            {
+                try
+                {
+                    checklistItems = System.Text.Json.JsonSerializer.Deserialize<List<BulkInactivateChecklistItem>>(
+                        request.ChecklistResponsesJson,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+                }
+                catch (Exception ex)
+                {
+                    return BuildExecuteErrorResponse($"Invalid ChecklistResponsesJson: {ex.Message}", HttpStatusCode.BadRequest);
+                }
+            }
+
+            // Validate resignation type / sub-reasons once (shared across all employees)
+            var resignationTypeOk = await _context.tblResignationTypes.AnyAsync(rt => rt.ResignationTypeId == request.ResignationTypeId);
+            if (!resignationTypeOk)
+                return BuildExecuteErrorResponse("Invalid ResignationTypeId", HttpStatusCode.BadRequest);
+
+            if (request.AbscondingReasonId.HasValue)
+            {
+                var ok = await _context.tblAbscondingReasons.AnyAsync(ar =>
+                    ar.AbscondingReasonId == request.AbscondingReasonId && ar.ResignationTypeId == request.ResignationTypeId);
+                if (!ok)
+                    return BuildExecuteErrorResponse("Invalid AbscondingReasonId for the selected ResignationType", HttpStatusCode.BadRequest);
+            }
+
+            if (request.BlackListReasonId.HasValue)
+            {
+                var ok = await _context.tblBlacklistReasons.AnyAsync(br =>
+                    br.BlacklistReasonId == request.BlackListReasonId && br.ResignationTypeId == request.ResignationTypeId);
+                if (!ok)
+                    return BuildExecuteErrorResponse("Invalid BlackListReasonId for the selected ResignationType", HttpStatusCode.BadRequest);
+            }
+
+            // Validate checklist masters once
+            if (checklistItems.Count > 0)
+            {
+                var masterIds = checklistItems.Select(c => c.MasterId).Distinct().ToList();
+                var existingMasterIds = await _context.EmployeeResignationChecklistMasters
+                    .Where(m => masterIds.Contains(m.EmployeeResignationChecklistMasterId))
+                    .Select(m => m.EmployeeResignationChecklistMasterId)
+                    .ToListAsync();
+                var missing = masterIds.Except(existingMasterIds).ToList();
+                if (missing.Count > 0)
+                    return BuildExecuteErrorResponse($"Unknown checklist master id(s): {string.Join(",", missing)}", HttpStatusCode.BadRequest);
+            }
+
+            // Pre-fetch all target employees and validate they are currently active
+            var employees = await _context.tblEmployees
+                .Where(e => employeeIds.Contains(e.EmployeeId))
+                .ToListAsync();
+
+            var missingIds = employeeIds.Except(employees.Select(e => e.EmployeeId)).ToList();
+            if (missingIds.Count > 0)
+                return BuildExecuteErrorResponse($"Employee(s) not found: {string.Join(",", missingIds)}", HttpStatusCode.BadRequest);
+
+            var alreadyInactive = employees.Where(e => e.IsActive != true || e.IsDeleted == true).ToList();
+            if (alreadyInactive.Count > 0)
+                return BuildExecuteErrorResponse(
+                    $"Already inactive employee(s): {string.Join(",", alreadyInactive.Select(e => e.Ecode))}",
+                    HttpStatusCode.BadRequest);
+
+            // Save the single shared attachment once
+            string rootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "Uploads", "InactiveAttachments");
+            if (!Directory.Exists(rootPath))
+                Directory.CreateDirectory(rootPath);
+
+            var fileName = $"{DateTime.Now:ddMMyyyyHHmmssfff}_bulk{Path.GetExtension(request.Attachment.FileName)}";
+            var fullPath = Path.Combine(rootPath, fileName);
+            var relativePath = Path.Combine("Uploads", "InactiveAttachments", fileName);
+
+            using (var stream = new FileStream(fullPath, FileMode.Create))
+            {
+                await request.Attachment.CopyToAsync(stream);
+            }
+
+            using var trans = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var updatedBy = string.IsNullOrWhiteSpace(request.LastUpdatedBy) ? "System" : request.LastUpdatedBy;
+                var now = DateTime.UtcNow;
+
+                foreach (var emp in employees)
+                {
+                    emp.IsActive = false;
+                    emp.IsDeleted = true;
+                    emp.LastUpdatedBy = updatedBy;
+                    emp.ActiveInActiveRemarks = request.Remarks;
+                    emp.DeletedOn = now;
+                    emp.DOL_Reason = request.reasonid;
+
+                    var leavingData = _context.Database
+                        .SqlQueryRaw<DateTime?>(
+                            "EXEC dbo.sp_GetEmployeeEffectiveLeavingDate @EmployeeId",
+                            new SqlParameter("@EmployeeId", emp.EmployeeId))
+                        .AsEnumerable()
+                        .FirstOrDefault();
+                    emp.DateOfLeft = leavingData ?? request.LeavingDate;
+                }
+
+                if (await _context.SaveChangesAsync() < 1)
+                {
+                    await trans.RollbackAsync();
+                    if (File.Exists(fullPath)) File.Delete(fullPath);
+                    return BuildExecuteErrorResponse("Unable to update employee statuses", HttpStatusCode.BadRequest);
+                }
+
+                var attachmentRows = employees.Select(emp => new tblEmployeeInActiveFile
+                {
+                    EmpId = (int)emp.EmployeeId,
+                    FilePath = relativePath,
+                    CreatedOn = now,
+                    CreatedBy = updatedBy,
+                    IsActive = true,
+                    IsDeleted = false
+                }).ToList();
+                await _context.tblEmployeeInActiveFiles.AddRangeAsync(attachmentRows);
+
+                var historyRows = employees.Select(emp => new tblEmployeeActiveInActiveHistory
+                {
+                    EmpId = emp.EmployeeId.ToString(),
+                    ActionPerformed = false.ToString(),
+                    LeavingDate = emp.DateOfLeft,
+                    Remarks = request.Remarks,
+                    CreatedBy = updatedBy,
+                    UpdatedBy = updatedBy,
+                    UpdatedOn = now,
+                    CreatedOn = now,
+                    ResignationTypeId = request.ResignationTypeId,
+                    AbscondingReasonId = request.AbscondingReasonId,
+                    BlackListReasonId = request.BlackListReasonId
+                }).ToList();
+                await _context.tblEmployeeActiveInActiveHistories.AddRangeAsync(historyRows);
+
+                if (checklistItems.Count > 0)
+                {
+                    var checklistRows = new List<EmployeeResignationChecklistResponse>();
+                    foreach (var emp in employees)
+                    {
+                        foreach (var item in checklistItems)
+                        {
+                            checklistRows.Add(new EmployeeResignationChecklistResponse
+                            {
+                                EmployeeResignationChecklistMasterId = item.MasterId,
+                                ResignationChecklistResponse = item.Response,
+                                EmployeeId = emp.EmployeeId.ToString(),
+                                Attachment = relativePath,
+                                CreatedBy = updatedBy,
+                                LastUpdatedBy = updatedBy,
+                                CreatedOn = now,
+                                LastUpdatedOn = now
+                            });
+                        }
+                    }
+                    await _context.EmployeeResignationChecklistResponses.AddRangeAsync(checklistRows);
+                }
+
+                if (await _context.SaveChangesAsync() < 1)
+                {
+                    await trans.RollbackAsync();
+                    if (File.Exists(fullPath)) File.Delete(fullPath);
+                    return BuildExecuteErrorResponse("Unable to save attachments/history/checklist", HttpStatusCode.BadRequest);
+                }
+
+                await trans.CommitAsync();
+                return BuildExecuteSuccessResponse($"Inactivated {employees.Count} employee(s) successfully");
+            }
+            catch (Exception ex)
+            {
+                await trans.RollbackAsync();
+                if (File.Exists(fullPath)) File.Delete(fullPath);
+                return BuildExecuteErrorResponse($"Error during bulk inactivation: {ex.Message}", HttpStatusCode.BadRequest);
+            }
+        }
+
+        private async Task<List<long>> ResolveBulkInactivateEmployeeIds(BulkInactivateRequest request)
+        {
+            var ids = new HashSet<long>();
+            var ecodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(request.EmployeeIdsCsv))
+            {
+                foreach (var part in request.EmployeeIdsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (long.TryParse(part, out var v) && v > 0) ids.Add(v);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.EcodesCsv))
+            {
+                foreach (var part in request.EcodesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!string.IsNullOrWhiteSpace(part)) ecodes.Add(part);
+                }
+            }
+
+            if (request.EcodeExcel != null && request.EcodeExcel.Length > 0)
+            {
+                using var s = request.EcodeExcel.OpenReadStream();
+                using var wb = new XLWorkbook(s);
+                var ws = wb.Worksheet(1);
+                var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+                for (int r = 2; r <= lastRow; r++)
+                {
+                    var v = ws.Cell(r, 1).GetString()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(v)) ecodes.Add(v);
+                }
+            }
+
+            if (ecodes.Count > 0)
+            {
+                var ecodeList = ecodes.ToList();
+                var resolved = await _context.tblEmployees
+                    .Where(e => ecodeList.Contains(e.Ecode))
+                    .Select(e => new { e.EmployeeId, e.Ecode })
+                    .ToListAsync();
+
+                var resolvedEcodes = new HashSet<string>(resolved.Select(r => r.Ecode), StringComparer.OrdinalIgnoreCase);
+                var unknown = ecodeList.Where(e => !resolvedEcodes.Contains(e)).ToList();
+                if (unknown.Count > 0)
+                    throw new Exception($"Unknown Ecode(s): {string.Join(",", unknown)}");
+
+                foreach (var r in resolved) ids.Add(r.EmployeeId);
+            }
+
+            return ids.ToList();
+        }
+
         public async Task<FetchAndResponse> GetInActiveStatusList()
         {
             try {

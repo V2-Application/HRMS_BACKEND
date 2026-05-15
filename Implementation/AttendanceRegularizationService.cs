@@ -85,6 +85,127 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        public async Task<FetchAndResponse> ExportAttendanceRegularizationByRangeAsync(
+            DateTime startDate,
+            DateTime endDate,
+            string? status,
+            string? managerStatus,
+            string? lpStatus)
+        {
+            try
+            {
+                if (startDate == DateTime.MinValue || endDate == DateTime.MinValue)
+                {
+                    return new FetchAndResponse
+                    {
+                        Status = false,
+                        Message = "StartDate and EndDate are required.",
+                        Code = System.Net.HttpStatusCode.BadRequest,
+                        Data = null
+                    };
+                }
+
+                if (endDate < startDate)
+                {
+                    return new FetchAndResponse
+                    {
+                        Status = false,
+                        Message = "EndDate must be greater than or equal to StartDate.",
+                        Code = System.Net.HttpStatusCode.BadRequest,
+                        Data = null
+                    };
+                }
+
+                var data = await GetAttendanceRegularizationByRangeDataAsync(startDate, endDate, status, managerStatus, lpStatus);
+                var label = $"{startDate:yyyyMMdd}_{endDate:yyyyMMdd}";
+                var excelBytes = await GenerateExcelAsync(data, label);
+
+                return new FetchAndResponse
+                {
+                    Status = true,
+                    Message = "Attendance regularization data exported successfully",
+                    Code = System.Net.HttpStatusCode.OK,
+                    Data = excelBytes
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error exporting attendance regularization data for range {StartDate} - {EndDate}", startDate, endDate);
+                return new FetchAndResponse
+                {
+                    Status = false,
+                    Message = $"An error occurred while exporting attendance regularization data: {ex.Message}",
+                    Code = System.Net.HttpStatusCode.InternalServerError,
+                    Data = null
+                };
+            }
+        }
+
+        private async Task<List<AttendanceRegularizationResultDto>> GetAttendanceRegularizationByRangeDataAsync(
+            DateTime startDate,
+            DateTime endDate,
+            string? status,
+            string? managerStatus,
+            string? lpStatus)
+        {
+            var results = new List<AttendanceRegularizationResultDto>();
+
+            using var connection = _context.Database.GetDbConnection();
+            await connection.OpenAsync();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "usp_GetAttendanceRegularizationByRange";
+            command.CommandType = CommandType.StoredProcedure;
+
+            command.Parameters.Add(new SqlParameter("@StartDate", SqlDbType.Date) { Value = startDate.Date });
+            command.Parameters.Add(new SqlParameter("@EndDate", SqlDbType.Date) { Value = endDate.Date });
+            command.Parameters.Add(new SqlParameter("@Status", SqlDbType.VarChar, 50)
+            {
+                Value = string.IsNullOrWhiteSpace(status) ? (object)DBNull.Value : status
+            });
+            command.Parameters.Add(new SqlParameter("@ManagerStatus", SqlDbType.VarChar, 50)
+            {
+                Value = string.IsNullOrWhiteSpace(managerStatus) ? (object)DBNull.Value : managerStatus
+            });
+            command.Parameters.Add(new SqlParameter("@LpStatus", SqlDbType.VarChar, 50)
+            {
+                Value = string.IsNullOrWhiteSpace(lpStatus) ? (object)DBNull.Value : lpStatus
+            });
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new AttendanceRegularizationResultDto
+                {
+                    Ecode = reader.IsDBNull(reader.GetOrdinal("Ecode")) ? null : reader.GetString("Ecode"),
+                    EmpName = reader.IsDBNull(reader.GetOrdinal("EmpName")) ? null : reader.GetString("EmpName"),
+                    STCode = reader.IsDBNull(reader.GetOrdinal("STCode")) ? null : reader.GetString("STCode"),
+                    LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString("LocationName"),
+                    DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? null : reader.GetString("DepartmentName"),
+                    DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? null : reader.GetString("DesignationName"),
+                    RequestDate = reader.IsDBNull(reader.GetOrdinal("RequestDate")) ? DateTime.MinValue : reader.GetDateTime("RequestDate"),
+                    Reason = reader.IsDBNull(reader.GetOrdinal("Reason")) ? null : reader.GetString("Reason"),
+                    RM_ECODE = reader.IsDBNull(reader.GetOrdinal("RM_ECODE")) ? null : reader.GetString("RM_ECODE"),
+                    ReportManagerName = reader.IsDBNull(reader.GetOrdinal("ReportManagerName")) ? null : reader.GetString("ReportManagerName"),
+                    PunchIn = reader.GetNullableTimeSpan("PunchIn"),
+                    PunchOut = reader.GetNullableTimeSpan("PunchOut"),
+                    StatusName = reader.IsDBNull(reader.GetOrdinal("StatusName")) ? null : reader.GetString("StatusName"),
+                    FileUrl = reader.IsDBNull(reader.GetOrdinal("FileUrl")) ? null : reader.GetString("FileUrl"),
+                    PunchTypeId = reader.IsDBNull(reader.GetOrdinal("PunchTypeId")) ? null : reader.GetInt32("PunchTypeId"),
+                    RequestTypeName = reader.IsDBNull(reader.GetOrdinal("RequestTypeName")) ? null : reader.GetString("RequestTypeName"),
+                    EmployeeRemarks = reader.IsDBNull(reader.GetOrdinal("EmployeeRemarks")) ? null : reader.GetString("EmployeeRemarks"),
+                    ManagerStatus = reader.IsDBNull(reader.GetOrdinal("ManagerStatus")) ? null : reader.GetString("ManagerStatus"),
+                    ManagerApprovalOn = reader.IsDBNull(reader.GetOrdinal("ManagerApprovalOn")) ? null : (DateTime?)reader.GetDateTime("ManagerApprovalOn"),
+                    ManagerRemarks = reader.IsDBNull(reader.GetOrdinal("ManagerRemarks")) ? null : reader.GetString("ManagerRemarks"),
+                    LpApprovalStatus = reader.IsDBNull(reader.GetOrdinal("LpApprovalStatus")) ? null : reader.GetString("LpApprovalStatus"),
+                    LpApprovalOn = reader.IsDBNull(reader.GetOrdinal("LpApprovalOn")) ? null : (DateTime?)reader.GetDateTime("LpApprovalOn"),
+                    LpRemarks = reader.IsDBNull(reader.GetOrdinal("LpRemarks")) ? null : reader.GetString("LpRemarks")
+                });
+            }
+
+            return results;
+        }
+
         private async Task<List<AttendanceRegularizationResultDto>> GetAttendanceRegularizationDataAsync(string monthYear)
         {
             var results = new List<AttendanceRegularizationResultDto>();

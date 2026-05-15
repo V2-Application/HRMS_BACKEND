@@ -16,6 +16,8 @@ namespace HRMSAPI.Interfaces
 
         Task<(bool Success, string Message)> AssignEmployeeShiftAsync(AssignEmployeeShiftRequest request);
 
+        Task<BulkAssignShiftResult> BulkAssignEmployeeShiftAsync(BulkAssignShiftRequest request);
+
         Task<(bool Success, string Message)> ApplyScheduledShiftsAsync();
     }
 

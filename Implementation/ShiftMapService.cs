@@ -385,6 +385,111 @@ public class ShiftMapService : IShiftMapService
         }
     }
 
+    public async Task<BulkAssignShiftResult> BulkAssignEmployeeShiftAsync(BulkAssignShiftRequest request)
+    {
+        var result = new BulkAssignShiftResult();
+
+        if (request == null) throw new ArgumentNullException(nameof(request));
+        if (request.ShiftId <= 0) throw new ArgumentException("ShiftId is required.");
+        if (request.EffectiveFrom == default) throw new ArgumentException("EffectiveFrom is required.");
+
+        var ecodes = ParseEcodes(request.EcodesCsv, request.EcodeExcel);
+        if (ecodes.Count == 0)
+            throw new ArgumentException("No ecodes provided (CSV and Excel were both empty).");
+
+        result.TotalSubmitted = ecodes.Count;
+
+        // Resolve ecodes -> (EmployeeId, current ShiftID)
+        var found = await _context.tblEmployees
+            .AsNoTracking()
+            .Where(e => ecodes.Contains(e.Ecode))
+            .Select(e => new { e.EmployeeId, e.Ecode, e.ShiftID })
+            .ToListAsync();
+
+        var foundEcodes = found.Select(f => f.Ecode).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        result.NotFoundEcodes = ecodes.Where(e => !foundEcodes.Contains(e)).ToList();
+
+        using var connection = (SqlConnection)_context.Database.GetDbConnection();
+        await connection.OpenAsync();
+
+        foreach (var emp in found)
+        {
+            if (emp.ShiftID == request.ShiftId)
+            {
+                result.AlreadyOnShift++;
+                continue;
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "dbo.usp_AssignEmployeeShift";
+                command.CommandType = CommandType.StoredProcedure;
+                command.Parameters.Add(new SqlParameter("@EmployeeId", emp.EmployeeId));
+                command.Parameters.Add(new SqlParameter("@ShiftId", request.ShiftId));
+                command.Parameters.Add(new SqlParameter("@EffectiveFrom", SqlDbType.Date) { Value = request.EffectiveFrom.Date });
+                command.Parameters.Add(new SqlParameter("@AssignedBy", (object?)request.AssignedBy ?? DBNull.Value));
+                command.Parameters.Add(new SqlParameter("@Remarks", (object?)request.Remarks ?? DBNull.Value));
+
+                await command.ExecuteNonQueryAsync();
+                result.Processed++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Bulk shift assign failed for {Ecode}", emp.Ecode);
+                result.Errors.Add(new BulkAssignShiftError { Ecode = emp.Ecode, Message = ex.Message });
+            }
+        }
+
+        return result;
+    }
+
+    private static List<string> ParseEcodes(string? csv, IFormFile? excel)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(csv))
+        {
+            foreach (var token in csv.Split(new[] { ',', '\n', '\r', ';', '\t', ' ' },
+                                            StringSplitOptions.RemoveEmptyEntries))
+            {
+                var t = token.Trim();
+                if (t.Length > 0) set.Add(t);
+            }
+        }
+
+        if (excel != null && excel.Length > 0)
+        {
+            using var stream = excel.OpenReadStream();
+            using var wb = new XLWorkbook(stream);
+            var ws = wb.Worksheets.First();
+
+            // Try to find an "Ecode" header in row 1; fall back to first non-empty column.
+            int ecodeCol = 1;
+            var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 1;
+            for (int c = 1; c <= lastCol; c++)
+            {
+                var header = ws.Cell(1, c).GetString().Trim();
+                if (string.Equals(header, "Ecode", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(header, "EmpCode", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(header, "Employee Code", StringComparison.OrdinalIgnoreCase))
+                {
+                    ecodeCol = c;
+                    break;
+                }
+            }
+
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+            for (int r = 2; r <= lastRow; r++)
+            {
+                var val = ws.Cell(r, ecodeCol).GetString().Trim();
+                if (val.Length > 0) set.Add(val);
+            }
+        }
+
+        return set.ToList();
+    }
+
     public async Task<(bool Success, string Message)> ApplyScheduledShiftsAsync()
     {
         try

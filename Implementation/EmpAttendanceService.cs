@@ -1,4 +1,5 @@
-﻿using DocumentFormat.OpenXml.Drawing.Charts;
+﻿using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Drawing.Charts;
 using DocumentFormat.OpenXml.InkML;
 using HRMSAPI.Data;
 using HRMSAPI.DTO;
@@ -968,17 +969,35 @@ namespace HRMSAPI.Implementation
                     .Select(e => e.LocationId)
                     .FirstOrDefaultAsync();
 
-                // === Role-based filtering ===
-                var isNormSuperAdmin = roleNorm == "superadmin" || roleNorm == "it superadmin" || roleNorm == "master";
-                if (isNormSuperAdmin || (currentEmployeeId == 10 || currentEmployeeId == 52410))
+                // === Pending tab: limit to current attendance cycle (26th of prev month → 25th of current month) for all roles ===
+                if (statusId == 4)
                 {
-                    // no filter
+                    var today = DateTime.Today;
+                    var prevMonth = today.AddMonths(-1);
+                    var cycleFrom = new DateTime(prevMonth.Year, prevMonth.Month, 26);
+                    var cycleToExclusive = new DateTime(today.Year, today.Month, 26); // 25 inclusive == < 26
+                    query = query.Where(x => x.request.RequestDate >= cycleFrom && x.request.RequestDate < cycleToExclusive);
                 }
-                else if ((roleNorm == "audit" || roleNorm == "lp") && (currentEmployeeId == 10 || currentEmployeeId == 52410))
+
+                // === Role-based filtering ===
+                // Approved / Rejected tabs: only role "SuperAdmin" (strict) sees the entire organisation.
+                // Everyone else (incl. IT Superadmin / Master / Manager / LP / employees) sees ONLY
+                // rows where they personally acted on the request (Manager or LP approver).
+                bool isSuperAdmin = roleNorm == "superadmin";
+                bool isApprovedOrRejectedView = statusId == 1 || statusId == 2;
+
+                if (isApprovedOrRejectedView)
                 {
-                    // LP/audit base view: only requests already approved by Manager
-                    query = query.Where(x => x.request.ManagerApprovalStatusId == 1
-                                             || x.request.ReportingManagerId == currentEmployeeId);
+                    if (!isSuperAdmin)
+                    {
+                        query = query.Where(x => x.request.ManagerApproverId == currentEmployeeId
+                                              || x.request.LpApproverId == currentEmployeeId);
+                    }
+                    // SuperAdmin: no additional filter
+                }
+                else if (isSuperAdmin)
+                {
+                    // Pending / all view for SuperAdmin (strict role): see all rows in the org (still within the date cycle when statusId==4)
                 }
                 else if (isStoreHr)
                 {
@@ -990,7 +1009,7 @@ namespace HRMSAPI.Implementation
                 }
                 else
                 {
-                    // Regular manager role:
+                    // Default: team manager view (sees reportees' pending/all requests)
                     var effectiveManagerId = managerId > 0 ? managerId : currentEmployeeId;
                     query = query.Where(x => x.request.ReportingManagerId == effectiveManagerId);
                 }
@@ -3665,6 +3684,141 @@ namespace HRMSAPI.Implementation
         }
 
         #endregion
+
+        public async Task<byte[]> ExportGeoAttendanceByRangeAsync(
+            DateTime startDate,
+            DateTime endDate,
+            string? finalStatus,
+            string? managerStatus,
+            string? masterStatus,
+            CancellationToken ct = default)
+        {
+            if (endDate < startDate)
+                throw new ArgumentException("EndDate must be greater than or equal to StartDate.");
+
+            var rows = new List<GeoAttendanceExportDto>();
+
+            await using var conn = _context.Database.GetDbConnection();
+            if (conn.State != ConnectionState.Open) await conn.OpenAsync(ct);
+
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "dbo.usp_GetGeoAttendanceByRange";
+                cmd.CommandType = CommandType.StoredProcedure;
+
+                cmd.Parameters.Add(new SqlParameter("@StartDate", SqlDbType.Date) { Value = startDate.Date });
+                cmd.Parameters.Add(new SqlParameter("@EndDate", SqlDbType.Date) { Value = endDate.Date });
+                cmd.Parameters.Add(new SqlParameter("@FinalStatus", SqlDbType.VarChar, 50)
+                { Value = string.IsNullOrWhiteSpace(finalStatus) ? (object)DBNull.Value : finalStatus });
+                cmd.Parameters.Add(new SqlParameter("@ManagerStatus", SqlDbType.VarChar, 50)
+                { Value = string.IsNullOrWhiteSpace(managerStatus) ? (object)DBNull.Value : managerStatus });
+                cmd.Parameters.Add(new SqlParameter("@MasterStatus", SqlDbType.VarChar, 50)
+                { Value = string.IsNullOrWhiteSpace(masterStatus) ? (object)DBNull.Value : masterStatus });
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                string? GetStr(string col)
+                {
+                    var i = reader.GetOrdinal(col);
+                    return reader.IsDBNull(i) ? null : reader.GetString(i);
+                }
+                DateTime? GetDt(string col)
+                {
+                    var i = reader.GetOrdinal(col);
+                    return reader.IsDBNull(i) ? (DateTime?)null : reader.GetDateTime(i);
+                }
+                int GetInt(string col)
+                {
+                    var i = reader.GetOrdinal(col);
+                    return reader.IsDBNull(i) ? 0 : reader.GetInt32(i);
+                }
+
+                while (await reader.ReadAsync(ct))
+                {
+                    rows.Add(new GeoAttendanceExportDto
+                    {
+                        Ecode = GetStr("Ecode"),
+                        EmployeeName = GetStr("EmployeeName"),
+                        DepartmentName = GetStr("DepartmentName"),
+                        DesignationName = GetStr("DesignationName"),
+                        LocationName = GetStr("LocationName"),
+                        STCode = GetStr("STCode"),
+                        ReportingManagerEcode = GetStr("ReportingManagerEcode"),
+                        ReportingManagerName = GetStr("ReportingManagerName"),
+                        PunchDate = GetDt("PunchDate") ?? DateTime.MinValue,
+                        PunchCount = GetInt("PunchCount"),
+                        PunchInCount = GetInt("PunchInCount"),
+                        PunchOutCount = GetInt("PunchOutCount"),
+                        FirstPunchUtc = GetDt("FirstPunchUtc"),
+                        LastPunchUtc = GetDt("LastPunchUtc"),
+                        ManagerStatus = GetStr("ManagerStatus"),
+                        ManagerApproverId = GetStr("ManagerApproverId"),
+                        ManagerApprovalOn = GetDt("ManagerApprovalOn"),
+                        ManagerRemarks = GetStr("ManagerRemarks"),
+                        MasterStatus = GetStr("MasterStatus"),
+                        MasterApproverId = GetStr("MasterApproverId"),
+                        MasterApprovalOn = GetDt("MasterApprovalOn"),
+                        MasterRemarks = GetStr("MasterRemarks"),
+                        FinalStatus = GetStr("FinalStatus"),
+                    });
+                }
+            }
+
+            using var workbook = new XLWorkbook();
+            var ws = workbook.Worksheets.Add("GeoAttendance");
+
+            var headers = new[]
+            {
+                "Ecode", "Employee Name", "Department", "Designation", "Location", "ST Code",
+                "RM Ecode", "Reporting Manager",
+                "Punch Date", "Punch Count", "Punch In Count", "Punch Out Count",
+                "First Punch (UTC)", "Last Punch (UTC)",
+                "Manager Status", "Manager Approver", "Manager Approved On", "Manager Remarks",
+                "Master Status", "Master Approver", "Master Approved On", "Master Remarks",
+                "Final Status"
+            };
+
+            for (int i = 0; i < headers.Length; i++)
+            {
+                ws.Cell(1, i + 1).Value = headers[i];
+                ws.Cell(1, i + 1).Style.Font.Bold = true;
+                ws.Cell(1, i + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
+            }
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                var row = i + 2;
+                ws.Cell(row, 1).Value = r.Ecode ?? "";
+                ws.Cell(row, 2).Value = r.EmployeeName ?? "";
+                ws.Cell(row, 3).Value = r.DepartmentName ?? "";
+                ws.Cell(row, 4).Value = r.DesignationName ?? "";
+                ws.Cell(row, 5).Value = r.LocationName ?? "";
+                ws.Cell(row, 6).Value = r.STCode ?? "";
+                ws.Cell(row, 7).Value = r.ReportingManagerEcode ?? "";
+                ws.Cell(row, 8).Value = r.ReportingManagerName ?? "";
+                ws.Cell(row, 9).Value = r.PunchDate != DateTime.MinValue ? r.PunchDate.ToString("yyyy-MM-dd") : "";
+                ws.Cell(row, 10).Value = r.PunchCount;
+                ws.Cell(row, 11).Value = r.PunchInCount;
+                ws.Cell(row, 12).Value = r.PunchOutCount;
+                ws.Cell(row, 13).Value = r.FirstPunchUtc.HasValue ? r.FirstPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, 14).Value = r.LastPunchUtc.HasValue ? r.LastPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, 15).Value = r.ManagerStatus ?? "";
+                ws.Cell(row, 16).Value = r.ManagerApproverId ?? "";
+                ws.Cell(row, 17).Value = r.ManagerApprovalOn.HasValue ? r.ManagerApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, 18).Value = r.ManagerRemarks ?? "";
+                ws.Cell(row, 19).Value = r.MasterStatus ?? "";
+                ws.Cell(row, 20).Value = r.MasterApproverId ?? "";
+                ws.Cell(row, 21).Value = r.MasterApprovalOn.HasValue ? r.MasterApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, 22).Value = r.MasterRemarks ?? "";
+                ws.Cell(row, 23).Value = r.FinalStatus ?? "";
+            }
+
+            ws.ColumnsUsed().AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
+        }
 
     }
 }

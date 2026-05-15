@@ -80,6 +80,7 @@ namespace HRMSAPI.Controllers
                         //command.CommandText = "GetEmployeeDetailsforexcel";
                         command.CommandText = "GetEmployeeDetailsforexcel_Ishu";
                         command.CommandType = CommandType.StoredProcedure;
+                        command.CommandTimeout = 600; // 10 min — full-tenant pulls can take minutes
 
                         // Add parameters
                         command.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = isActive });
@@ -302,6 +303,7 @@ namespace HRMSAPI.Controllers
                     {
                         command.CommandText = "GetEmployeeDetailsforexcel_Ishu";
                         command.CommandType = CommandType.StoredProcedure;
+                        command.CommandTimeout = 600; // 10 min — full-tenant pulls can take minutes
 
                         // Add parameters
                         command.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = isActive });
