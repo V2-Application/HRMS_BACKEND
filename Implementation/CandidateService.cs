@@ -43,11 +43,13 @@ namespace HRMSAPI.Implementation
         private readonly string savePath = Path.Combine("wwwroot");
         public readonly IEmailService _emailService;
         private readonly IHttpContextAccessor _httpContextAccessor;
-        public CandidateService(HRMSContext context, IEmailService emailService, IHttpContextAccessor httpContextAccessor)
+        private readonly IConfiguration _configuration;
+        public CandidateService(HRMSContext context, IEmailService emailService, IHttpContextAccessor httpContextAccessor, IConfiguration configuration)
         {
             _context = context;
             _emailService = emailService;
             _httpContextAccessor = httpContextAccessor;
+            _configuration = configuration;
         }
         public async Task<string> SaveFile(IFormFile file, string folderName, string candidateId)
         {
@@ -588,6 +590,12 @@ namespace HRMSAPI.Implementation
                     .Distinct()
                     .CountAsync(row => row.StatusId == 4);
 
+                // CanidateDocs.CreatedOn is written as local time (see SaveFile —
+                // `DateTime.Now.ToString(...)`), so we must use local time when
+                // diffing against it. Otherwise IST docs produce -5.5h ageing.
+                var nowLocal = DateTime.Now;
+                const int approvedStatusIdForList = 1; // matches CandidateApproval logic
+
                 var list = await finalQuery
                     .OrderByDescending(x => x.Candidate.Id)
                     .Skip((pageNumber - 1) * pageSize)
@@ -610,7 +618,7 @@ namespace HRMSAPI.Implementation
                         AuditApprovalStatus = x.Approval != null ? (int?)x.Approval.AuditApprovalStatus : null,
                         ClusterManagerApprovalStatus = x.Approval != null ? (int?)x.Approval.ClusterManagerApprovalStatus : null,
 
-                        // Newly added fields from tblNewCandidateApproval
+                        // Approval action timestamps (now stamped on approve OR reject)
                         HRApprovedOn = x.Approval != null ? (DateTime?)x.Approval.HRApprovedOn : null,
                         AuditApprovedOn = x.Approval != null ? (DateTime?)x.Approval.AuditApprovedOn : null,
                         ClusterManagerApprovedOn = x.Approval != null ? (DateTime?)x.Approval.ClusterManagerApprovedOn : null,
@@ -618,6 +626,16 @@ namespace HRMSAPI.Implementation
                         HRRemarks = x.Approval != null ? x.Approval.HRRemarks : null,
                         AuditRemarks = x.Approval != null ? x.Approval.AuditRemarks : null,
                         ClusterManagerRemarks = x.Approval != null ? x.Approval.ClusterManagerRemarks : null,
+
+                        // Reviewer ecodes
+                        HRReviewedBy = x.Approval != null ? x.Approval.HRReviewedBy : null,
+                        AuditReviewedBy = x.Approval != null ? x.Approval.AuditReviewedBy : null,
+                        ClusterManagerReviewBy = x.Approval != null ? x.Approval.ClusterManagerReviewBy : null,
+
+                        // First document upload date — starts the ageing clock for LP.
+                        DocumentUploadedOn = _context.CanidateDocs
+                            .Where(d => d.CId == x.Candidate.Id && d.IsDeleted != true)
+                            .Min(d => (DateTime?)d.CreatedOn),
 
                         StoreLocationName = x.Location != null ? x.Location.LocationName : null,
                         StoreLocationCode = x.Location != null ? x.Location.STCode : null,
@@ -634,6 +652,50 @@ namespace HRMSAPI.Implementation
                     })
                     .ToListAsync();
 
+                // Compute ageing hours in memory (sequential pipeline: LP -> Cluster -> HR).
+                // The frontend surfaces a badge whenever a hours value crosses 24.
+                var listWithAgeing = list.Select(r =>
+                {
+                    double? lpAgeHrs = null, clusterAgeHrs = null, hrAgeHrs = null;
+
+                    // LP clock starts at first document upload
+                    if (r.DocumentUploadedOn.HasValue)
+                    {
+                        var lpEnd = r.AuditApprovedOn ?? nowLocal;
+                        lpAgeHrs = (lpEnd - r.DocumentUploadedOn.Value).TotalHours;
+                    }
+
+                    // Cluster clock starts only after LP approves
+                    if (r.AuditApprovalStatus == approvedStatusIdForList && r.AuditApprovedOn.HasValue)
+                    {
+                        var clusterEnd = r.ClusterManagerApprovedOn ?? nowLocal;
+                        clusterAgeHrs = (clusterEnd - r.AuditApprovedOn.Value).TotalHours;
+                    }
+
+                    // HR clock starts only after Cluster approves
+                    if (r.ClusterManagerApprovalStatus == approvedStatusIdForList && r.ClusterManagerApprovedOn.HasValue)
+                    {
+                        var hrEnd = r.HRApprovedOn ?? nowLocal;
+                        hrAgeHrs = (hrEnd - r.ClusterManagerApprovedOn.Value).TotalHours;
+                    }
+
+                    return new
+                    {
+                        r.ID, r.FirstName, r.MiddleName, r.LastName, r.Phone, r.Email,
+                        r.Designation, r.DOB, r.StatusId, r.ReportHeadEcode,
+                        r.HRApprovalStatus, r.AuditApprovalStatus, r.ClusterManagerApprovalStatus,
+                        r.HRApprovedOn, r.AuditApprovedOn, r.ClusterManagerApprovedOn,
+                        r.HRRemarks, r.AuditRemarks, r.ClusterManagerRemarks,
+                        r.HRReviewedBy, r.AuditReviewedBy, r.ClusterManagerReviewBy,
+                        r.DocumentUploadedOn,
+                        LpAgeingHours = lpAgeHrs,
+                        ClusterAgeingHours = clusterAgeHrs,
+                        HrAgeingHours = hrAgeHrs,
+                        r.StoreLocationName, r.StoreLocationCode,
+                        r.DesignationName, r.DepartmentName
+                    };
+                }).ToList();
+
                 return new Response
                 {
                     Status = true,
@@ -643,7 +705,7 @@ namespace HRMSAPI.Implementation
                     {
                         TotalRecords = totalRecords,
                         PendingCount = pendingCount,
-                        Candidates = list
+                        Candidates = listWithAgeing
                     }
                 };
             }
@@ -1103,12 +1165,10 @@ namespace HRMSAPI.Implementation
                         candidateApproval.UpdatedOn = DateTime.UtcNow;
                         candidateApproval.LastUpdatedBy = loginDetail.EmployeeId;
 
-                        // Set approved date when status is Approved
-                        if (clusterApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.ClusterManagerApprovedOn.HasValue)
-                        {
-                            candidateApproval.ClusterManagerApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject), not
+                        // only on approval — used by the ageing calc on the list page.
+                        // DateTime.Now (local) matches the CanidateDocs.CreatedOn convention.
+                        candidateApproval.ClusterManagerApprovedOn = DateTime.Now;
                     }
                 }
                 // Handle AUDIT role updates
@@ -1135,12 +1195,9 @@ namespace HRMSAPI.Implementation
                         candidateApproval.UpdatedOn = DateTime.UtcNow;
                         candidateApproval.LastUpdatedBy = loginDetail.EmployeeId;
 
-                        // Set approved date when status is Approved
-                        if (auditApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.AuditApprovedOn.HasValue)
-                        {
-                            candidateApproval.AuditApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject) — local time
+                        // to match CanidateDocs.CreatedOn for the ageing calc.
+                        candidateApproval.AuditApprovedOn = DateTime.Now;
                     }
                 }
                 // Handle HR role updates
@@ -1167,12 +1224,9 @@ namespace HRMSAPI.Implementation
                         candidateApproval.UpdatedOn = DateTime.UtcNow;
                         candidateApproval.LastUpdatedBy = loginDetail.EmployeeId;
 
-                        // Set approved date when status is Approved
-                        if (hrApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.HRApprovedOn.HasValue)
-                        {
-                            candidateApproval.HRApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject) — local time
+                        // to match CanidateDocs.CreatedOn for the ageing calc.
+                        candidateApproval.HRApprovedOn = DateTime.Now;
                     }
                 }
                 // Handle SUPERADMIN role updates
@@ -1206,11 +1260,8 @@ namespace HRMSAPI.Implementation
                         candidateApproval.ClusterManagerReviewBy = loginDetail.EmployeeId.ToString();
                         candidateApproval.ClusterManagerRemarks = superAdminRemark;
 
-                        if (clusterApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.ClusterManagerApprovedOn.HasValue)
-                        {
-                            candidateApproval.ClusterManagerApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject).
+                        candidateApproval.ClusterManagerApprovedOn = DateTime.UtcNow;
                     }
 
                     // Audit Approval
@@ -1234,11 +1285,9 @@ namespace HRMSAPI.Implementation
                         candidateApproval.AuditReviewedBy = loginDetail.EmployeeId.ToString();
                         candidateApproval.AuditRemarks = superAdminRemark;
 
-                        if (auditApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.AuditApprovedOn.HasValue)
-                        {
-                            candidateApproval.AuditApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject) — local time
+                        // to match CanidateDocs.CreatedOn for the ageing calc.
+                        candidateApproval.AuditApprovedOn = DateTime.Now;
                     }
 
                     // HR Approval
@@ -1262,11 +1311,9 @@ namespace HRMSAPI.Implementation
                         candidateApproval.HRReviewedBy = loginDetail.EmployeeId.ToString();
                         candidateApproval.HRRemarks = superAdminRemark;
 
-                        if (hrApprovalStatusId == approvedStatusId &&
-                            !candidateApproval.HRApprovedOn.HasValue)
-                        {
-                            candidateApproval.HRApprovedOn = DateTime.UtcNow;
-                        }
+                        // Stamp action date on every decision (approve OR reject) — local time
+                        // to match CanidateDocs.CreatedOn for the ageing calc.
+                        candidateApproval.HRApprovedOn = DateTime.Now;
                     }
 
                     candidateApproval.UpdatedOn = DateTime.UtcNow;
@@ -2359,8 +2406,22 @@ namespace HRMSAPI.Implementation
         {
             searchTerm = searchTerm?.Trim().ToLower();
             var connection = _context.Database.GetDbConnection();
-            var request = _httpContextAccessor.HttpContext.Request;
-            var baseUrl = $"{request.Scheme}://{request.Host}/";
+
+            // Resume / offer-letter files are hosted on the production server only.
+            // Use the configured production base URL (Reports:ResumeBaseUrl) so links
+            // in the exported Excel work no matter where this API instance is running
+            // (dev, staging, local). Falls back to the current request host if absent.
+            var configuredBase = _configuration?["Reports:ResumeBaseUrl"];
+            string baseUrl;
+            if (!string.IsNullOrWhiteSpace(configuredBase))
+            {
+                baseUrl = configuredBase;
+            }
+            else
+            {
+                var request = _httpContextAccessor.HttpContext.Request;
+                baseUrl = $"{request.Scheme}://{request.Host}/";
+            }
             if (connection.State != ConnectionState.Open)
                 await connection.OpenAsync();
 
@@ -2414,6 +2475,52 @@ namespace HRMSAPI.Implementation
                 .Where(c => !IsPrimaryKeyColumn(c.ColumnName))
                 .ToList();
 
+            // Identify document-link columns by NAME — column positions shift after
+            // IsPrimaryKeyColumn filtering, so a hard-coded index lands on the wrong
+            // column and the actual ResumeLink stays as a raw DB path.
+            var resumeColIdx = exportColumns.FindIndex(c =>
+                string.Equals(c.ColumnName, "ResumeLink", StringComparison.OrdinalIgnoreCase));
+            var offerLetterColIdx = exportColumns.FindIndex(c =>
+                string.Equals(c.ColumnName, "OfferLetterLink", StringComparison.OrdinalIgnoreCase));
+
+            // Approval pipeline columns (present once the SP is upgraded; absent on
+            // older SPs — handled with -1 / skip).
+            int IdxOf(string name) =>
+                exportColumns.FindIndex(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase));
+
+            var statusColIdxs = new[] { IdxOf("LpStatus"), IdxOf("ClusterStatus"), IdxOf("HrStatus") };
+            var ageingColIdxs = new[] { IdxOf("LpAgeingHours"), IdxOf("ClusterAgeingHours"), IdxOf("HrAgeingHours") };
+            var dateColIdxs   = new[] {
+                IdxOf("DocumentUploadedOn"),
+                IdxOf("LpActionedOn"),
+                IdxOf("ClusterActionedOn"),
+                IdxOf("HrActionedOn"),
+            };
+
+            string ApprovalStatusText(object raw)
+            {
+                if (raw == null || raw == DBNull.Value) return "Pending";
+                if (!int.TryParse(raw.ToString(), out var s)) return raw.ToString();
+                return s switch
+                {
+                    1 => "Approved",
+                    2 => "Rejected",
+                    0 => "Pending",
+                    _ => $"Status {s}",
+                };
+            }
+
+            string AgeingText(object raw)
+            {
+                if (raw == null || raw == DBNull.Value) return string.Empty;
+                if (!double.TryParse(raw.ToString(), out var hrs)) return raw.ToString();
+                if (hrs < 0) hrs = 0;
+                if (hrs < 24) return $"{hrs:0.#} hrs";
+                var days = (int)(hrs / 24);
+                var rem = hrs - days * 24;
+                return rem < 0.05 ? $"{days}d ({hrs:0.#} hrs)" : $"{days}d {rem:0.#}h ({hrs:0.#} hrs)";
+            }
+
             for (int i = 0; i < exportColumns.Count; i++)
             {
                 worksheet.Cell(1, i + 1).Value = exportColumns[i].ColumnName;
@@ -2429,13 +2536,57 @@ namespace HRMSAPI.Implementation
                     if (value == DBNull.Value)
                     {
                         cell.Value = string.Empty;
+                        continue;
                     }
-                    else if (col == 18)
-                    {
-                        var url = baseUrl + value.ToString();
 
-                        cell.Value = url;                 // or "Open"
+                    if (col == resumeColIdx || col == offerLetterColIdx)
+                    {
+                        var rawPath = value.ToString();
+                        if (string.IsNullOrWhiteSpace(rawPath))
+                        {
+                            cell.Value = string.Empty;
+                            continue;
+                        }
+
+                        // DB stores Windows-style relative paths
+                        // ("92975_user@x.com\Resume\18052026_foo.pdf"). Convert to a
+                        // URL: normalize separators, URL-encode each segment, prepend
+                        // the production base URL (where the file actually exists).
+                        var normalized = rawPath.Replace('\\', '/').TrimStart('/');
+                        var encoded = string.Join("/",
+                            normalized.Split('/').Select(Uri.EscapeDataString));
+                        var url = baseUrl.TrimEnd('/') + "/" + encoded;
+
+                        var displayName = Path.GetFileName(rawPath.Replace('\\', '/'));
+                        if (string.IsNullOrEmpty(displayName)) displayName = url;
+
+                        cell.Value = displayName;
                         cell.SetHyperlink(new XLHyperlink(url));
+                        cell.Style.Font.FontColor = XLColor.Blue;
+                        cell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                    }
+                    else if (statusColIdxs.Contains(col))
+                    {
+                        var txt = ApprovalStatusText(value);
+                        cell.Value = txt;
+                        if (txt == "Approved") cell.Style.Font.FontColor = XLColor.DarkGreen;
+                        else if (txt == "Rejected") cell.Style.Font.FontColor = XLColor.DarkRed;
+                        else cell.Style.Font.FontColor = XLColor.DarkGray;
+                    }
+                    else if (ageingColIdxs.Contains(col))
+                    {
+                        var txt = AgeingText(value);
+                        cell.Value = txt;
+                        // Highlight ageing > 24h in red, otherwise normal
+                        if (double.TryParse(value.ToString(), out var hrs) && hrs > 24)
+                        {
+                            cell.Style.Font.FontColor = XLColor.Red;
+                            cell.Style.Font.Bold = true;
+                        }
+                    }
+                    else if (dateColIdxs.Contains(col) && value is DateTime dt2)
+                    {
+                        cell.Value = dt2.ToString("dd-MMM-yyyy HH:mm");
                     }
                     else
                     {

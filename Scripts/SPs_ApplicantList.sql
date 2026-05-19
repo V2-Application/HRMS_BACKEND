@@ -116,7 +116,33 @@ BEGIN
         c.PreferredLocation,
         c.StateId,
         st.StateName,
-        c.NoticePeriod
+        c.NoticePeriod,
+
+        -- ============================================================
+        -- Approval pipeline (additive). Surfaces LP/Cluster/HR data
+        -- + per-stage calendar-hour ageing computed against the previous
+        -- stage's completion (sequential pipeline). Front-end and the
+        -- Excel export both consume these columns.
+        -- ============================================================
+        ap.DocumentUploadedOn,
+
+        ap.LpStatus,
+        ap.LpReviewedBy,
+        ap.LpActionedOn,
+        ap.LpRemarks,
+        ap.LpAgeingHours,
+
+        ap.ClusterStatus,
+        ap.ClusterReviewedBy,
+        ap.ClusterActionedOn,
+        ap.ClusterRemarks,
+        ap.ClusterAgeingHours,
+
+        ap.HrStatus,
+        ap.HrReviewedBy,
+        ap.HrActionedOn,
+        ap.HrRemarks,
+        ap.HrAgeingHours
 
     FROM BaseData c
 
@@ -149,6 +175,67 @@ BEGIN
         FROM CanidateDocs
         WHERE CId = c.Id AND IsDeleted = 0
     ) docs
+
+    -- ================================================================
+    -- Approval pipeline data + sequential per-stage ageing (calendar hours)
+    --   LP clock     : DocumentUploadedOn        -> AuditApprovedOn (or NOW)
+    --   Cluster clock: AuditApprovedOn (=approve)-> ClusterManagerApprovedOn (or NOW)
+    --   HR clock     : ClusterManagerApprovedOn  -> HRApprovedOn (or NOW)
+    -- Cluster ageing is NULL until LP approves; HR ageing is NULL until
+    -- Cluster approves. Approve status id = 1 (mirrors C# service).
+    -- ================================================================
+    OUTER APPLY
+    (
+        SELECT TOP 1
+            (SELECT MIN(d2.CreatedOn)
+             FROM CanidateDocs d2
+             WHERE d2.CId = c.Id AND d2.IsDeleted = 0) AS DocumentUploadedOn,
+
+            na.AuditApprovalStatus         AS LpStatus,
+            na.AuditReviewedBy             AS LpReviewedBy,
+            na.AuditApprovedOn             AS LpActionedOn,
+            na.AuditRemarks                AS LpRemarks,
+
+            na.ClusterManagerApprovalStatus AS ClusterStatus,
+            na.ClusterManagerReviewBy       AS ClusterReviewedBy,
+            na.ClusterManagerApprovedOn     AS ClusterActionedOn,
+            na.ClusterManagerRemarks        AS ClusterRemarks,
+
+            na.HRApprovalStatus            AS HrStatus,
+            na.HRReviewedBy                AS HrReviewedBy,
+            na.HRApprovedOn                AS HrActionedOn,
+            na.HRRemarks                   AS HrRemarks,
+
+            CASE
+                WHEN (SELECT MIN(d2.CreatedOn) FROM CanidateDocs d2 WHERE d2.CId = c.Id AND d2.IsDeleted = 0) IS NULL
+                    THEN NULL
+                WHEN na.AuditApprovedOn IS NOT NULL
+                    THEN DATEDIFF(MINUTE,
+                                   (SELECT MIN(d2.CreatedOn) FROM CanidateDocs d2 WHERE d2.CId = c.Id AND d2.IsDeleted = 0),
+                                   na.AuditApprovedOn) / 60.0
+                ELSE DATEDIFF(MINUTE,
+                               (SELECT MIN(d2.CreatedOn) FROM CanidateDocs d2 WHERE d2.CId = c.Id AND d2.IsDeleted = 0),
+                               GETDATE()) / 60.0
+            END AS LpAgeingHours,
+
+            CASE
+                WHEN na.AuditApprovalStatus <> 1 OR na.AuditApprovedOn IS NULL THEN NULL
+                WHEN na.ClusterManagerApprovedOn IS NOT NULL
+                    THEN DATEDIFF(MINUTE, na.AuditApprovedOn, na.ClusterManagerApprovedOn) / 60.0
+                ELSE DATEDIFF(MINUTE, na.AuditApprovedOn, GETDATE()) / 60.0
+            END AS ClusterAgeingHours,
+
+            CASE
+                WHEN na.ClusterManagerApprovalStatus <> 1 OR na.ClusterManagerApprovedOn IS NULL THEN NULL
+                WHEN na.HRApprovedOn IS NOT NULL
+                    THEN DATEDIFF(MINUTE, na.ClusterManagerApprovedOn, na.HRApprovedOn) / 60.0
+                ELSE DATEDIFF(MINUTE, na.ClusterManagerApprovedOn, GETDATE()) / 60.0
+            END AS HrAgeingHours
+
+        FROM tblNewCandidateApproval na
+        WHERE na.CandidateId = c.Id
+        ORDER BY na.ApprovalId DESC
+    ) ap
 
     OUTER APPLY
     (
