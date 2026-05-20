@@ -26,12 +26,14 @@ namespace HRMSAPI.Interfaces
             CancellationToken ct = default);
 
         /// <summary>
-        /// Paged list of incentives with optional search.
+        /// Paged list of incentives with optional search and optional CreatedBy filter
+        /// (used by "My Requests" to restrict rows to the calling user).
         /// </summary>
         Task<(List<IncentiveDto> Items, long TotalCount, int CurrentPageNumber)> ListAsync(
             int pageNumber,
             int pageSize,
             string? searchTerm,
+            string? createdByFilter,
             CancellationToken ct = default);
 
         /// <summary>

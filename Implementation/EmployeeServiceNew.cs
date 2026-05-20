@@ -2609,7 +2609,9 @@ namespace HRMSAPI.Implementation
             {
                 await trans.RollbackAsync();
                 if (File.Exists(fullPath)) File.Delete(fullPath);
-                return BuildExecuteErrorResponse($"Error during bulk inactivation: {ex.Message}", HttpStatusCode.BadRequest);
+                _logger.LogError(ex, "BulkInactivateEmployees failed. Outer: {Outer} | Inner: {Inner}", ex.Message, ex.InnerException?.Message);
+                var detail = ex.InnerException?.Message ?? ex.Message;
+                return BuildExecuteErrorResponse($"Error during bulk inactivation: {detail}", HttpStatusCode.BadRequest);
             }
         }
 

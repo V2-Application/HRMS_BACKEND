@@ -51,14 +51,22 @@ public class IncentivesController : ControllerBase
         return Ok(dto);
     }
 
-    // 3) LIST (paged)
+    // 3) LIST (paged). When mine=true, restrict to incentives created by the calling user (ecode from JWT).
     [HttpGet("list")]
-    public async Task<IActionResult> List(int pageNumber = 1, int pageSize = 10, string? searchTerm = "")
+    public async Task<IActionResult> List(int pageNumber = 1, int pageSize = 10, string? searchTerm = "", bool mine = false)
     {
         var identity = HttpContext.User.Identity as ClaimsIdentity;
         if (identity == null) return BadRequest("Authentication Fails");
 
-        var (items, total, current) = await _repo.ListAsync(pageNumber, pageSize, searchTerm, HttpContext.RequestAborted);
+        string? createdByFilter = null;
+        if (mine)
+        {
+            createdByFilter = identity.FindFirst("ecode")?.Value ?? identity.Name;
+            if (string.IsNullOrWhiteSpace(createdByFilter))
+                return BadRequest("Unable to resolve calling user identity for 'mine' filter.");
+        }
+
+        var (items, total, current) = await _repo.ListAsync(pageNumber, pageSize, searchTerm, createdByFilter, HttpContext.RequestAborted);
 
         return Ok(new
         {

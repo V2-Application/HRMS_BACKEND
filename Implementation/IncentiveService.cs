@@ -131,7 +131,7 @@ public sealed class IncentiveService : IIncentiveService
     }
 
     public async Task<(List<IncentiveDto> Items, long TotalCount, int CurrentPageNumber)>
-        ListAsync(int pageNumber, int pageSize, string? searchTerm, CancellationToken ct = default)
+        ListAsync(int pageNumber, int pageSize, string? searchTerm, string? createdByFilter, CancellationToken ct = default)
     {
         await using var sqlConn = await OpenSqlAsync(ct).ConfigureAwait(false);
         await using var cmd = CreateSpCommand(sqlConn, "LIST");
@@ -141,6 +141,9 @@ public sealed class IncentiveService : IIncentiveService
 
         var st = string.IsNullOrWhiteSpace(searchTerm) ? (object)DBNull.Value : searchTerm!;
         cmd.Parameters.Add(new SqlParameter("@SearchTerm", SqlDbType.NVarChar, 100) { Value = st });
+
+        var cb = string.IsNullOrWhiteSpace(createdByFilter) ? (object)DBNull.Value : createdByFilter!;
+        cmd.Parameters.Add(new SqlParameter("@CreatedByFilter", SqlDbType.VarChar, 50) { Value = cb });
 
         var totalCountParam = new SqlParameter("@TotalCount", SqlDbType.BigInt) { Direction = ParameterDirection.Output };
         var currentPageParam = new SqlParameter("@CurrentPageNumber", SqlDbType.Int) { Direction = ParameterDirection.Output };
