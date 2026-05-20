@@ -1,4 +1,5 @@
 using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +12,7 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class EmpAttendanceViewSnapshotController : ControllerBase
     {
         private readonly IEmpAttendanceViewSnapshotService _service;
@@ -20,7 +22,7 @@ namespace HRMSAPI.Controllers
             _service = service;
         }
 
-        [HttpGet("get-snapshots")]
+        [HttpGet("get-snapshots"), RequirePageAccess("/payroll-summary")]
         public async Task<IActionResult> GetSnapshots([FromQuery] string month = null, [FromQuery] int? status = null, [FromQuery] string ecode = null, [FromQuery] string batch = null)
         {
             // Validate month format if provided
@@ -42,7 +44,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpPost("salary-process-to-given-to-bank-or-paid-by-cash"), Authorize]
+        [HttpPost("salary-process-to-given-to-bank-or-paid-by-cash"), Authorize, RequirePageAccess("/given-to-bank")]
         public async Task<IActionResult> SalaryProcessToGivenToBankOrPaidByCash([FromBody] UpdateSalaryStatusRequestDto request)
         {
             if (request.Status != 2 && request.Status != 3)
@@ -62,7 +64,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpGet("get-salary-status-list")]
+        [HttpGet("get-salary-status-list"), RequirePageAccess("/payroll-summary")]
         public async Task<IActionResult> GetSalaryStatusList([FromQuery] int status, [FromQuery] string month = null)
         {
             // Validate status
@@ -93,7 +95,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpPost("given-to-bank-to-paid-by-bank-or-return-from-bank"), Authorize]
+        [HttpPost("given-to-bank-to-paid-by-bank-or-return-from-bank"), Authorize, RequirePageAccess("/finance/paid-by-bank")]
         public async Task<IActionResult> GivenToBankToPaidByBankOrReturnFromBank([FromBody] UpdateBankTransferStatusRequestDto request)
         {
             if (request.StatusId != 4 && request.StatusId != 5)
@@ -113,7 +115,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpPost("process-excel-upload"), Authorize]
+        [HttpPost("process-excel-upload"), Authorize, RequirePageAccess("/finance/process-salary")]
         public async Task<IActionResult> ProcessExcelUpload([FromForm] ExcelUploadRequestDto request)
         {
             if (request.File == null || request.File.Length == 0)
@@ -133,7 +135,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpPost("process-given-to-bank-excel-upload"), Authorize]
+        [HttpPost("process-given-to-bank-excel-upload"), Authorize, RequirePageAccess("/finance/given-to-bank")]
         public async Task<IActionResult> ProcessGivenToBankExcelUpload([FromForm] GivenToBankExcelUploadRequestDto request)
         {
             if (request.File == null || request.File.Length == 0)
@@ -153,7 +155,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpGet("get-comprehensive-salary-status-list")]
+        [HttpGet("get-comprehensive-salary-status-list"), RequirePageAccess("/payroll-summary")]
         public async Task<IActionResult> GetComprehensiveSalaryStatusList(
             [FromQuery] string month = null,
             [FromQuery] string ecode = null,
@@ -197,7 +199,7 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
-        [HttpGet("eligible-employees")]
+        [HttpGet("eligible-employees"), RequirePageAccess("/payroll-summary")]
         public async Task<IActionResult> GetEligibleEmployees(
             [FromQuery] string stCode = "RH01",
             [FromQuery] string month = null)
@@ -215,7 +217,7 @@ namespace HRMSAPI.Controllers
             return StatusCode((int)result.Code, result);
         }
 
-        [HttpGet("EmployeeSalarySnapShotByEcode")]
+        [HttpGet("EmployeeSalarySnapShotByEcode"), RequirePageAccess("/emp-final-data")]
         public async Task<IActionResult> GetEligibleEmployeesFast(
             [FromQuery] string ecode = null,
             [FromQuery] string month = null)
@@ -233,7 +235,7 @@ namespace HRMSAPI.Controllers
             return StatusCode((int)result.Code, result);
         }
 
-        [HttpPost("update-status/{id}")]
+        [HttpPost("update-status/{id}"), RequirePageAccess("/payroll-summary")]
         [Authorize]
         public async Task<IActionResult> UpdateStatus([FromRoute] long id, [FromQuery] int status)
         {

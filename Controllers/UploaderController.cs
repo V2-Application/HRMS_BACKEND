@@ -15,6 +15,7 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
     public class UploaderController : ControllerBase
     {
         private readonly ILogger<UploaderController> _logger;
@@ -25,7 +26,7 @@ namespace HRMSAPI.Controllers
             _service = service;
         }
 
-        [HttpPost("UploadEmpAttendanceMaster")]
+        [HttpPost("UploadEmpAttendanceMaster"), RequirePageAccess("/emp-attendance-uploader")]
         public async Task<IActionResult> UploadEmpAttendanceMaster([FromForm] FileDTO fileD)
         {
             var file = fileD.File;
@@ -33,7 +34,7 @@ namespace HRMSAPI.Controllers
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEcodeZoneRegionClusterMapping")]
+        [HttpGet("GetAllEcodeZoneRegionClusterMapping"), RequirePageAccess("/emp-zone-region-cluster-map-uploader")]
         public async Task<IActionResult> GetAllEcodeZoneRegionClusterMapping([FromQuery] bool isExcel = false)
         {
             if (isExcel)
@@ -51,7 +52,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
             }
         }
-        [HttpPost("UploadEcodeZoneRegionClusterMapping"), Authorize]
+        [HttpPost("UploadEcodeZoneRegionClusterMapping"), Authorize, RequirePageAccess("/emp-zone-region-cluster-map-uploader")]
         public async Task<IActionResult> UploadEcodeZoneRegionClusterMapping([FromForm] IFormFile file)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -77,193 +78,193 @@ namespace HRMSAPI.Controllers
             });
         }
 
-        [HttpGet("GetAllEmpAttendanceMaster")]
+        [HttpGet("GetAllEmpAttendanceMaster"), RequirePageAccess("/emp-attendance-uploader")]
         public async Task<IActionResult> GetAllEmpAttendanceMaster()
         {
             var result = await _service.GetAllEmpAttendanceMasterAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpTDSTable")]
+        [HttpPost("UploadEmpTDSTable"), RequirePageAccess("/emp-tds-uploader")]
         public async Task<IActionResult> UploadEmpTDSTable([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpTDSTableAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpTDSTable")]
+        [HttpGet("GetAllEmpTDSTable"), RequirePageAccess("/emp-tds-uploader")]
         public async Task<IActionResult> GetAllEmpTDSTable()
         {
             var result = await _service.GetAllEmpTDSTableAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadApplicabilityMaster")]
+        [HttpPost("UploadApplicabilityMaster"), RequirePageAccess("/applicability-uploader")]
         public async Task<IActionResult> UploadApplicabilityMaster([FromForm] IFormFile file)
         {
             var result = await _service.UploadApplicabilityMasterAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllApplicabilityMaster")]
+        [HttpGet("GetAllApplicabilityMaster"), RequirePageAccess("/applicability-uploader")]
         public async Task<IActionResult> GetAllApplicabilityMaster()
         {
             var result = await _service.GetAllApplicabilityMasterAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
-        [HttpPost("UploadEmpSalaryStructure")]
+        [HttpPost("UploadEmpSalaryStructure"), RequirePageAccess("/salary-structure-uploader")]
         public async Task<IActionResult> UploadEmpSalaryStructure([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpSalaryStructureAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpSalaryStructure")]
+        [HttpGet("GetAllEmpSalaryStructure"), RequirePageAccess("/salary-structure-uploader")]
         public async Task<IActionResult> GetAllEmpSalaryStructure()
         {
             var result = await _service.GetAllEmpSalaryStructureAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadLeaveOpeningBalTable")]
+        [HttpPost("UploadLeaveOpeningBalTable"), RequirePageAccess("/leave-opening-balance-uploader")]
         public async Task<IActionResult> UploadLeaveOpeningBalTable([FromForm] IFormFile file)
         {
             var result = await _service.UploadLeaveOpeningBalTableAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllLeaveOpeningBalTable")]
+        [HttpGet("GetAllLeaveOpeningBalTable"), RequirePageAccess("/leave-opening-balance-uploader")]
         public async Task<IActionResult> GetAllLeaveOpeningBalTable()
         {
             var result = await _service.GetAllLeaveOpeningBalTableAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpPersonalDetails")]
+        [HttpPost("UploadEmpPersonalDetails"), RequirePageAccess("/emp-personal-details-uploader")]
         public async Task<IActionResult> UploadEmpPersonalDetails([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpPersonalDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpPersonalDetails")]
+        [HttpGet("GetAllEmpPersonalDetails"), RequirePageAccess("/emp-personal-details-uploader")]
         public async Task<IActionResult> GetAllEmpPersonalDetails()
         {
             var result = await _service.GetAllEmpPersonalDetailsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpStatutoryDetails")]
+        [HttpPost("UploadEmpStatutoryDetails"), RequirePageAccess("/emp-statutory-details-uploader")]
         public async Task<IActionResult> UploadEmpStatutoryDetails([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpStatutoryDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpStatutoryDetails")]
+        [HttpGet("GetAllEmpStatutoryDetails"), RequirePageAccess("/emp-statutory-details-uploader")]
         public async Task<IActionResult> GetAllEmpStatutoryDetails()
         {
             var result = await _service.GetAllEmpStatutoryDetailsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpDegreeQualification")]
+        [HttpPost("UploadEmpDegreeQualification"), RequirePageAccess("/emp-degree-qualifications-uploader")]
         public async Task<IActionResult> UploadEmpDegreeQualification([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpDegreeQualificationAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpDegreeQualification")]
+        [HttpGet("GetAllEmpDegreeQualification"), RequirePageAccess("/emp-degree-qualifications-uploader")]
         public async Task<IActionResult> GetAllEmpDegreeQualification()
         {
             var result = await _service.GetAllEmpDegreeQualificationAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpPastExperienceDetails")]
+        [HttpPost("UploadEmpPastExperienceDetails"), RequirePageAccess("/emp-past-experience-uploader")]
         public async Task<IActionResult> UploadEmpPastExperienceDetails([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpPastExperienceDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpPastExperienceDetails")]
+        [HttpGet("GetAllEmpPastExperienceDetails"), RequirePageAccess("/emp-past-experience-uploader")]
         public async Task<IActionResult> GetAllEmpPastExperienceDetails()
         {
             var result = await _service.GetAllEmpPastExperienceDetailsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpJoiningReleavingDetails")]
+        [HttpPost("UploadEmpJoiningReleavingDetails"), RequirePageAccess("/emp-joining-releaving-uploader")]
         public async Task<IActionResult> UploadEmpJoiningReleavingDetails([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpJoiningReleavingDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpJoiningReleavingDetails")]
+        [HttpGet("GetAllEmpJoiningReleavingDetails"), RequirePageAccess("/emp-joining-releaving-uploader")]
         public async Task<IActionResult> GetAllEmpJoiningReleavingDetails()
         {
             var result = await _service.GetAllEmpJoiningReleavingDetailsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpRevisedDeptDesgLocDetails")]
+        [HttpPost("UploadEmpRevisedDeptDesgLocDetails"), RequirePageAccess("/emp-revised-dept-desg-loc-uploader")]
         public async Task<IActionResult> UploadEmpRevisedDeptDesgLocDetails([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpRevisedDeptDesgLocDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllEmpRevisedDeptDesgLocDetails")]
+        [HttpGet("GetAllEmpRevisedDeptDesgLocDetails"), RequirePageAccess("/emp-revised-dept-desg-loc-uploader")]
         public async Task<IActionResult> GetAllEmpRevisedDeptDesgLocDetails()
         {
             var result = await _service.GetAllEmpRevisedDeptDesgLocDetailsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
-        [HttpPost("UploadPayment")]
+        [HttpPost("UploadPayment"), RequirePageAccess("/payment-uploader")]
         public async Task<IActionResult> UploadPayment([FromForm] FileDTO file)
         {
             var result = await _service.UploadPaymentsync(file.File);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllUploadPaymentDetails")]
+        [HttpGet("GetAllUploadPaymentDetails"), RequirePageAccess("/payment-uploader")]
         public async Task<IActionResult> GetAllUploadPaymentDetails()
         {
             var result = await _service.GetAllPaymentsAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadBonusAndGratutityOpening")]
+        [HttpPost("UploadBonusAndGratutityOpening"), RequirePageAccess("/grauity-bonus-uploader")]
         public async Task<IActionResult> UploadBonusAndGratutityOpening([FromForm] IFormFile file)
         {
             var result = await _service.UploadBonusAndGratutityOpeningAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetBonusAndGratutityOpening")]
+        [HttpGet("GetBonusAndGratutityOpening"), RequirePageAccess("/grauity-bonus-uploader")]
         public async Task<IActionResult> GetBonusAndGratutityOpening([FromQuery] string? ecode)
         {
             var result = await _service.GetBonusAndGratutityOpeningByEcodeAsync(ecode);
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpPost("UploadEmpSalaryStatus")]
+        [HttpPost("UploadEmpSalaryStatus"), RequirePageAccess("/emp-salary-status-uploader")]
         public async Task<IActionResult> UploadEmpSalaryStatus([FromForm] IFormFile file)
         {
             var result = await _service.UploadEmpSalaryStatusAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetEmpSalaryStatus")]
+        [HttpGet("GetEmpSalaryStatus"), RequirePageAccess("/emp-salary-status-uploader")]
         public async Task<IActionResult> GetEmpSalaryStatus([FromQuery] string? ecode)
         {
             var result = await _service.GetEmpSalaryStatusByEcodeAsync(ecode);
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
-        [HttpPost("UploadCompOff")]
+        [HttpPost("UploadCompOff"), RequirePageAccess("/comp-off-uploader")]
         public async Task<IActionResult> UploadCompOff([FromForm] IFormFile file)
         {
             try
@@ -301,7 +302,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Message = "An error occurred while uploading comp off data." });
             }
         }
-        [HttpGet("GetCompOffList")]
+        [HttpGet("GetCompOffList"), RequirePageAccess("/comp-off-uploader")]
         public async Task<IActionResult> GetCompOffList()
         {
             try
@@ -317,21 +318,21 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("UploadStoreStateLinking")]
+        [HttpPost("UploadStoreStateLinking"), RequirePageAccess("/uploader/store-state_linking")]
         public async Task<IActionResult> UploadStoreStateLinking([FromForm] IFormFile file)
         {
             var result = await _service.UploadStoreStateLinkingAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
-        [HttpGet("GetAllStoreStateLinking")]
+        [HttpGet("GetAllStoreStateLinking"), RequirePageAccess("/uploader/store-state_linking")]
         public async Task<IActionResult> GetAllStoreStateLinking()
         {
             var result = await _service.GetAllStoreStateLinkingAsync();
             return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
-        [HttpGet("GetStoreWhichCanAdd")]
+        [HttpGet("GetStoreWhichCanAdd"), RequirePageAccess("/uploader/store-state_linking")]
         public async Task<IActionResult> GetStoreWhichCanAdd([FromQuery] bool isExcel = true)
         {
             if (isExcel)
@@ -349,14 +350,14 @@ namespace HRMSAPI.Controllers
                 return StatusCode((int)result.Code, new ApiFetchAndResponse { Status = result.Status, Message = result.Message, Data = result.Data });
             }
         }
-        [HttpPost("UploadEmpBonusDetails")]
+        [HttpPost("UploadEmpBonusDetails"), RequirePageAccess("/emp-bonus-uploader")]
         public async Task<IActionResult> UploadEmpPayrolDetails([FromForm] FileDTO fileDTO)
         {
             var file = fileDTO.File;
             var result = await _service.UploadEmpPayrolDetailsAsync(file);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
-        [HttpGet("GetEMPBonusList")]
+        [HttpGet("GetEMPBonusList"), RequirePageAccess("/emp-bonus-uploader")]
         public async Task<IActionResult> GetEMPBonusList()
         {
             var result = await _service.GetEMPBonusListAsync();
@@ -364,7 +365,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpPost("UploadPayrollWithChallan")]
+        [HttpPost("UploadPayrollWithChallan"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> UploadPayrollWithChallan(IFormFile excelFile, IFormFile challanPdf, string monthYear)
         {
             if (!DateTime.TryParseExact(
@@ -399,7 +400,7 @@ namespace HRMSAPI.Controllers
             return StatusCode((int)result.Code, result);
         }
 
-        [HttpGet("GetEmployeePayroll")]
+        [HttpGet("GetEmployeePayroll"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> GetEmployeePayroll([FromQuery] string? monthYear, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10, [FromQuery] string searchTerm = "")
         {
             if (!string.IsNullOrWhiteSpace(monthYear))
@@ -432,7 +433,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpPost("UploadEmployeeESIC")]
+        [HttpPost("UploadEmployeeESIC"), RequirePageAccess("/master/esic-emp")]
         public async Task<IActionResult> UploadEmployeeESIC([FromForm] IFormFile excelFile)
         {
             if (excelFile == null || excelFile.Length == 0)
@@ -464,7 +465,7 @@ namespace HRMSAPI.Controllers
             });
         }
 
-        [HttpGet("GetEmployeeESIC")]
+        [HttpGet("GetEmployeeESIC"), RequirePageAccess("/master/esic-emp")]
         public async Task<IActionResult> GetEmployeeESIC([FromQuery] string? searchTerm, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             var result = await _service.GetEmployeeESICAsync(
@@ -482,7 +483,7 @@ namespace HRMSAPI.Controllers
                 Data = result.Data
             });
         }
-        [HttpPost("UploadRetention")]
+        [HttpPost("UploadRetention"), RequirePageAccess("/uploaders/retention-bonus")]
         public async Task<IActionResult> UploadRetention([FromForm] IFormFile excelFile)
         {
             if (excelFile == null || excelFile.Length == 0)
@@ -512,7 +513,7 @@ namespace HRMSAPI.Controllers
                 Message = result.Message
             });
         }
-        [HttpGet("GetRetention")]
+        [HttpGet("GetRetention"), RequirePageAccess("/uploaders/retention-bonus")]
         public async Task<IActionResult> GetRetention(int pageNumber = 1,int pageSize = 10,string searchTerm = null,bool isExcel = false)
         {
             var result = await _service.GetRetentionAsync(

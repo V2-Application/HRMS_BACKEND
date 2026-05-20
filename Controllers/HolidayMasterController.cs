@@ -16,7 +16,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // [Authorize]
+    [Authorize]
+    [RequirePageAccess("/holiday-master/holidays")]
     public class HolidayMasterController : ControllerBase
     {
         private readonly IHolidayMasterService _holidayService;

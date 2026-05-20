@@ -11,6 +11,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/master/shift")]
     public class ShiftMasterController : ControllerBase
     {
         private readonly IShiftMasterService _shiftMasterService;

@@ -1,12 +1,16 @@
 ﻿using ClosedXML.Excel;
 using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Globalization;
 using System.Security.Claims;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
+[RequirePageAccess("/incentive/requests")]
 public class IncentivesController : ControllerBase
 {
     private readonly IIncentiveService _repo;

@@ -19,7 +19,7 @@ namespace HRMSAPI.Controllers
         {
             _locationService = locationService;
         }
-        [HttpPost("UploadLocationsExcel"), Authorize]
+        [HttpPost("UploadLocationsExcel"), Authorize, RequirePageAccess("/location-uploader")]
         public async Task<IActionResult> UploadLocationsExcel([FromForm] IFormFile file)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -46,7 +46,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpGet("Delete/{locationId}"), Authorize]
+        [HttpGet("Delete/{locationId}"), Authorize, RequirePageAccess("/location-master-view")]
         public async Task<IActionResult> SoftDeleteLocation(int locationId)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -72,7 +72,7 @@ namespace HRMSAPI.Controllers
             });
         }
 
-        [HttpGet("ToggleStatus/{locationId}"), Authorize]
+        [HttpGet("ToggleStatus/{locationId}"), Authorize, RequirePageAccess("/location-master-view")]
         public async Task<IActionResult> ToggleStatus(int locationId)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -97,7 +97,7 @@ namespace HRMSAPI.Controllers
                 Message = result.Message
             });
         }
-        [HttpGet("GetAll")]
+        [HttpGet("GetAll"), Authorize, RequirePageAccess("/location-master-view")]
         public async Task<IActionResult> GetAll()
         {
             var result = await _locationService.getAllLocation();
@@ -108,7 +108,7 @@ namespace HRMSAPI.Controllers
                 Data = result.Data
             });
         }
-        [HttpGet("GetLocationDataWithGeo")]
+        [HttpGet("GetLocationDataWithGeo"), Authorize, RequirePageAccess("/Geo-fence")]
         public async Task<IActionResult> GetLocationDataWithGeo()
         {
             var result = await _locationService.GetAllLocationsData();
@@ -119,7 +119,7 @@ namespace HRMSAPI.Controllers
                 Data = result.Data
             });
         }
-        [HttpPost("UpdateLocationGeo"), Authorize]
+        [HttpPost("UpdateLocationGeo"), Authorize, RequirePageAccess("/Geo-fence")]
         public async Task<IActionResult> UpdateGeo([FromBody] LocationGeoUpdateRequest req)
         {
             // must provide either LocationId or STCode

@@ -116,7 +116,7 @@ namespace HRMSAPI.Controllers
             return Ok($"Attendance data refreshed for {ecode} between {fromDate:yyyy-MM-dd} and {toDate:yyyy-MM-dd}.");
         }
 
-        [HttpPost("GetMonthlyAttendance")]
+        [HttpPost("GetMonthlyAttendance"), Authorize, RequirePageAccess("/attandance/track")]
         public async Task<IActionResult> GetMonthlyAttendance([FromBody] AttendanceGetDto request)
         {
             try
@@ -158,7 +158,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("GetMonthlyAttendance_Ishu")]
+        [HttpPost("GetMonthlyAttendance_Ishu"), Authorize, RequirePageAccess("/attandance/track")]
         public async Task<IActionResult> GetMonthlyAttendance_Ishu([FromBody] AttendanceGetDto request)
         {
             try
@@ -172,7 +172,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("regularization")]
+        [HttpPost("regularization"), Authorize, RequirePageAccess("/regularize-request")]
         [Authorize]
         public async Task<IActionResult> CreateAttendanceRequest([FromForm] AttendanceRegularizationRequestDto requestDto, IFormFile? attachment)
         {
@@ -245,7 +245,7 @@ namespace HRMSAPI.Controllers
             return ex.InnerException?.Message ?? ex.Message;
         }
 
-        [HttpGet("RegularizeRequestsformanager/{managerId}"), Authorize]
+        [HttpGet("RegularizeRequestsformanager/{managerId}"), Authorize, RequirePageAccess("/regularize-request")]
         public async Task<IActionResult> GetRegularizationRequests(
       long managerId,
       int statusId = 0,
@@ -279,7 +279,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpPost("regularize/approve/{requestId}"), Authorize]
+        [HttpPost("regularize/approve/{requestId}"), Authorize, RequirePageAccess("/regularize-request")]
         public async Task<IActionResult> ApproveRegularization(int requestId, [FromBody] UpdateAttendanceRequestDto dto)
         {
             var identity = User.Identity as ClaimsIdentity;
@@ -389,7 +389,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, $"Error: {ex.Message}");
             }
         }
-        [HttpPost("DownloadMonthlyAttendanceExcel"), Authorize]
+        [HttpPost("DownloadMonthlyAttendanceExcel"), Authorize, RequirePageAccess("/attandance/track")]
         public async Task<IActionResult> DownloadMonthlyPunchesExcel([FromBody] AttendanceRangeGetDto request)
         {
             try
@@ -536,7 +536,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpPost("DownloadMonthlyAttendance")]
+        [HttpPost("DownloadMonthlyAttendance"), Authorize, RequirePageAccess("/attandance/track")]
         public async Task<IActionResult> DownloadMonthlyAttendance([FromBody] AttendanceRangeGetDto request)
         {
             try
@@ -565,7 +565,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(400, $"Error : {ex.Message}");
             }
         }
-        [HttpGet("GetEmployeeAttendanceDetails")] 
+        [HttpGet("GetEmployeeAttendanceDetails"), Authorize, RequirePageAccess("/emp-attandance-list")]
         public async Task<IActionResult> GetEmployeeAttendanceDetails(
             int pageNumber = 1,
             int pageSize = 10,
@@ -603,7 +603,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Status = false, Message = ex.Message });
             }
         }
-        [HttpGet("GetRegularizationRequestsself"), Authorize]
+        [HttpGet("GetRegularizationRequestsself"), Authorize, RequirePageAccess("/regularize-request")]
         public async Task<IActionResult> GetRegularizationRequestsself()
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -622,7 +622,9 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpPost("GeoLocationAttendance")]
+        // Employee punch-in/out — used by every user from their own profile,
+        // not from the /Geo-fence admin page. Auth required, no page gate.
+        [HttpPost("GeoLocationAttendance"), Authorize]
         public async Task<IActionResult> GeoLocationAttendancePunch([FromForm] PunchDto dto)
         {
             try
@@ -649,7 +651,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-       [HttpGet("daily-summary-geo/{managerId:long}"), Authorize]
+       [HttpGet("daily-summary-geo/{managerId:long}"), Authorize, RequirePageAccess("/Geo-fence")]
         public async Task<IActionResult> GetDailyAttendanceSummaryGeo(
          long managerId,
          int statusId = 0,
@@ -676,7 +678,7 @@ namespace HRMSAPI.Controllers
                 PageSize = pageSize
             });
         }
-        [HttpPost("geo/attendance/status/{managerId:long}"), Authorize]
+        [HttpPost("geo/attendance/status/{managerId:long}"), Authorize, RequirePageAccess("/Geo-fence")]
         public async Task<IActionResult> SetGeoAttendanceStatus(
        long managerId,
        [FromBody] SetGeoAttendanceStatusDto body,
@@ -734,7 +736,7 @@ namespace HRMSAPI.Controllers
         /// SuperAdmin-only export: geofence/geo-attendance approvals for a date range,
         /// optionally filtered by finalStatus / managerStatus / masterStatus.
         /// </summary>
-        [HttpGet("geo/export"), Authorize]
+        [HttpGet("geo/export"), Authorize, RequirePageAccess("/Geo-fence")]
         public async Task<IActionResult> ExportGeoAttendance(
             [FromQuery] DateTime startDate,
             [FromQuery] DateTime endDate,
@@ -789,7 +791,7 @@ namespace HRMSAPI.Controllers
         /// <summary>
         /// Create a new attendance count approval request with file upload
         /// </summary>
-        [HttpPost("attendance-count-approval")]
+        [HttpPost("attendance-count-approval"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         [RequestSizeLimit(52428800)] // 50 MB limit
         public async Task<IActionResult> CreateAttendanceCountApproval([FromForm] CreateAttendanceCountApprovalWithFilesDto dto)
@@ -848,7 +850,7 @@ namespace HRMSAPI.Controllers
         /// <summary>
         /// CM (Cluster Manager) approves or rejects attendance count approval
         /// </summary>
-        [HttpPost("attendance-count-approval/cm-approve")]
+        [HttpPost("attendance-count-approval/cm-approve"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         public async Task<IActionResult> CMApproveAttendanceCount([FromBody] CMApprovalDto dto)
         {
@@ -887,7 +889,7 @@ namespace HRMSAPI.Controllers
         /// RM (Regional Manager) approves or rejects attendance count approval
         /// RM is upper level and can override CM's decision
         /// </summary>
-        [HttpPost("attendance-count-approval/rm-approve")]
+        [HttpPost("attendance-count-approval/rm-approve"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         public async Task<IActionResult> RMApproveAttendanceCount([FromBody] RMApprovalDto dto)
         {
@@ -925,7 +927,7 @@ namespace HRMSAPI.Controllers
         /// <summary>
         /// Get paginated list of attendance count approvals with filtering
         /// </summary>
-        [HttpGet("attendance-count-approval")]
+        [HttpGet("attendance-count-approval"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         public async Task<IActionResult> GetAttendanceCountApprovals(
             [FromQuery] int pageNumber = 1,
@@ -963,7 +965,7 @@ namespace HRMSAPI.Controllers
         /// <summary>
         /// Get attendance count approval by ID
         /// </summary>
-        [HttpGet("attendance-count-approval/{approvalId}")]
+        [HttpGet("attendance-count-approval/{approvalId}"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         public async Task<IActionResult> GetAttendanceCountApprovalById([FromRoute] long approvalId)
         {
@@ -1012,7 +1014,9 @@ namespace HRMSAPI.Controllers
         /// <param name="month">Month-Year in format "MMM-YY" (optional)</param>
         /// <param name="batchNo">Batch number (optional)</param>
         /// <returns>List of attendance snapshot records</returns>
-        [HttpGet("attendance-snapshot")]
+        // Called by /emp-final-data page and possibly others — not exclusive
+        // to /attandance/track, so don't gate to that single page.
+        [HttpGet("attendance-snapshot"), Authorize]
         [Authorize]
         public async Task<IActionResult> GetEmpAttendanceSnapshot(
             [FromQuery] string? ecode = null,
@@ -1048,7 +1052,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <param name="request">Request containing FromDate, ToDate, and Ecode (all mandatory)</param>
         /// <returns>List of merged punch records</returns>
-        [HttpPost("merge-monthly-punches-range")]
+        [HttpPost("merge-monthly-punches-range"), Authorize, RequirePageAccess("/attandance/track")]
         [Authorize]
         public async Task<IActionResult> MergeMonthlyPunchesRange([FromBody] MergeMonthlyPunchesRangeDto request)
         {

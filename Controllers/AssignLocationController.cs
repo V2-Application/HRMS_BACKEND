@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize]
+[RequirePageAccess("/emp-store-assignment")]
 public class AssignLocationController : ControllerBase
 {
     private readonly IAssignLocationService _assignLocationService;

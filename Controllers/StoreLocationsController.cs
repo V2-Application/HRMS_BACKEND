@@ -12,6 +12,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [HRMSAPI.Extension.RequirePageAccess("/master/seat")]
     public class StoreLocationsController : ControllerBase
     {
         private readonly IStoreService _storeService;

@@ -5,6 +5,7 @@ using HRMSAPI.Extension;
 using HRMSAPI.Implementation;
 using HRMSAPI.Interfaces;
 using HRMSAPI.Models.Candidate;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -19,6 +20,7 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
     public class PayrollController : ControllerBase
     {
         private readonly IPayrollService _payrollRepository;
@@ -30,7 +32,7 @@ namespace HRMSAPI.Controllers
             _env = env;
         }
 
-        [HttpGet("list")]
+        [HttpGet("list"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> ListPayroll(
     [FromQuery] string? searchTerm = null,
     [FromQuery] string? ecode = null,
@@ -61,7 +63,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("upload")]
+        [HttpPost("upload"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> UploadPayroll([FromForm] IFormFile file)
         {
             try
@@ -88,7 +90,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Message = "An error occurred while uploading payroll data." });
             }
         }
-        [HttpGet("download-excel")]
+        [HttpGet("download-excel"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> DownloadPayrollExcel(
          [FromQuery] string? searchTerm = null,
          [FromQuery] string? ecode = null,
@@ -189,7 +191,7 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Message = "An error occurred while generating the payroll Excel file." });
             }
         }
-        [HttpGet("payroll-summary")]
+        [HttpGet("payroll-summary"), RequirePageAccess("/payroll-summary")]
         public async Task<IActionResult> GetPayrollSummary(
           [FromQuery] DateTime startDate,
           [FromQuery] DateTime endDate,
@@ -216,7 +218,7 @@ namespace HRMSAPI.Controllers
                 });
             }
         }
-        [HttpPost("upsertPFApproval")]
+        [HttpPost("upsertPFApproval"), RequirePageAccess("/payroll")]
         public async Task<IActionResult> UpsertPFApproval([FromForm] PFApprovalRequest dto, CancellationToken ct)
         {
             var userIdentity = User.Identity as ClaimsIdentity;
@@ -284,7 +286,7 @@ namespace HRMSAPI.Controllers
                 Message = result.Message
             });
         }
-        [HttpGet("process-salary-list")]
+        [HttpGet("process-salary-list"), RequirePageAccess("/process-salary")]
         public async Task<IActionResult> GetProcessSalaryList(
             [FromQuery] string? searchTerm = null,
             [FromQuery] int page = 1,
@@ -307,7 +309,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("process-salary-upload")]
+        [HttpPost("process-salary-upload"), RequirePageAccess("/process-salary")]
         public async Task<IActionResult> UploadProcessSalary(IFormFile file)
         {
             try
@@ -340,7 +342,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpGet("process-salary-sample")]
+        [HttpGet("process-salary-sample"), RequirePageAccess("/process-salary")]
         public IActionResult DownloadProcessSalarySample()
         {
             try
@@ -394,7 +396,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpGet("ExportProcessedSalary")]
+        [HttpGet("ExportProcessedSalary"), RequirePageAccess("/processed-salary")]
         public async Task<IActionResult> ExportProcessedSalary([FromQuery] string? searchTerm = null)
         {
             try

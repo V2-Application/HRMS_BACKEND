@@ -11,6 +11,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [RequirePageAccess("/uploaders/retention-bonus")]
     public class RetentionBonusController : ControllerBase
     {
         private readonly IRetentionService _retentionService;

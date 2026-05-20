@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize]
+[RequirePageAccess("/shift-alignment-uploader")]
 public class ShiftMapController : ControllerBase
 {
     private readonly IShiftMapService _shiftMapService;

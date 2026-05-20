@@ -1,5 +1,7 @@
-﻿using HRMSAPI.Implementation;
+﻿using HRMSAPI.Extension;
+using HRMSAPI.Implementation;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Threading.Tasks;
@@ -10,6 +12,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/given-to-bank")]
     public class BankTransferController : ControllerBase
     {
         private readonly IBankTransferService _bankTransferService;

@@ -1,5 +1,7 @@
 using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Roomsy.DTOS.GenericsResponses;
@@ -9,7 +11,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    //[Authorize]
+    [Authorize]
+    [RequirePageAccess("/employee-role_list")]
     public class EmployeeRoleController : ControllerBase
     {
         private readonly IEmployeeRoleService _employeeRoleService;

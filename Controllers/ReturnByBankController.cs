@@ -1,9 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using System.Threading.Tasks;
+﻿using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Threading.Tasks;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
+[RequirePageAccess("/finance/return-by-bank")]
 public class ReturnByBankController : ControllerBase
 {
     private readonly IReturnByBankService _returnByBankService;

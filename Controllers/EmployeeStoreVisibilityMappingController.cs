@@ -1,12 +1,16 @@
-using Microsoft.AspNetCore.Mvc;
-using HRMSAPI.Interfaces;
-using Roomsy.DTOS.GenericsResponses;
+using HRMSAPI.Extension;
 using HRMSAPI.DTO;
+using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Roomsy.DTOS.GenericsResponses;
 
 namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/emp-store-assignment")]
     public class EmployeeStoreVisibilityMappingController : ControllerBase
     {
         private readonly IEmployeeStoreVisibilityMappingService _service;

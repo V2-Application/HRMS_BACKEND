@@ -24,6 +24,11 @@ namespace ASN.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    // NOTE: controller-level RequirePageAccess removed —
+    // GetCandidateDetails and Insertnewcandidate/Updatecandidate are called
+    // from MyProfile (user editing own candidate record). Apply per-method
+    // gates to admin-only actions when needed.
     public class CandidateController : ControllerBase
     {
         private readonly ICandidateService _candidateService;

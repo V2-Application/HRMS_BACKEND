@@ -1,14 +1,17 @@
 using HRMSAPI.DTO;
-using HRMSAPI.Interfaces;
-using Microsoft.AspNetCore.Mvc;
-using HRMSAPI.Services;
-using System.Security.Claims;
 using HRMSAPI.Extension;
+using HRMSAPI.Interfaces;
+using HRMSAPI.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/fnf")]
     public sealed class FnfController : ControllerBase
     {
         private readonly IFnfService _service;

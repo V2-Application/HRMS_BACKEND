@@ -652,6 +652,30 @@ namespace HRMSAPI.Implementation
                     })
                     .ToListAsync();
 
+                // Resolve reviewer Name + Ecode in a single round-trip. ReviewedBy
+                // columns store EmployeeId as a string (see UpdateCandidateApproval).
+                var reviewerEmpIds = list
+                    .SelectMany(r => new[] { r.HRReviewedBy, r.AuditReviewedBy, r.ClusterManagerReviewBy })
+                    .Where(s => long.TryParse(s, out _))
+                    .Select(s => long.Parse(s))
+                    .Distinct()
+                    .ToList();
+
+                var reviewerLookup = reviewerEmpIds.Count == 0
+                    ? new Dictionary<string, (string Name, string Ecode)>()
+                    : (await _context.tblEmployees
+                        .Where(e => reviewerEmpIds.Contains(e.EmployeeId))
+                        .Select(e => new { e.EmployeeId, e.FULL_NAME, e.Ecode })
+                        .ToListAsync())
+                        .ToDictionary(e => e.EmployeeId.ToString(), e => (e.FULL_NAME, e.Ecode));
+
+                (string Name, string Ecode) ResolveReviewer(string id)
+                {
+                    if (!string.IsNullOrWhiteSpace(id) && reviewerLookup.TryGetValue(id, out var info))
+                        return info;
+                    return (null, null);
+                }
+
                 // Compute ageing hours in memory (sequential pipeline: LP -> Cluster -> HR).
                 // The frontend surfaces a badge whenever a hours value crosses 24.
                 var listWithAgeing = list.Select(r =>
@@ -679,6 +703,10 @@ namespace HRMSAPI.Implementation
                         hrAgeHrs = (hrEnd - r.ClusterManagerApprovedOn.Value).TotalHours;
                     }
 
+                    var hrRev = ResolveReviewer(r.HRReviewedBy);
+                    var auditRev = ResolveReviewer(r.AuditReviewedBy);
+                    var clusterRev = ResolveReviewer(r.ClusterManagerReviewBy);
+
                     return new
                     {
                         r.ID, r.FirstName, r.MiddleName, r.LastName, r.Phone, r.Email,
@@ -687,6 +715,12 @@ namespace HRMSAPI.Implementation
                         r.HRApprovedOn, r.AuditApprovedOn, r.ClusterManagerApprovedOn,
                         r.HRRemarks, r.AuditRemarks, r.ClusterManagerRemarks,
                         r.HRReviewedBy, r.AuditReviewedBy, r.ClusterManagerReviewBy,
+                        HRReviewerName = hrRev.Name,
+                        HRReviewerEcode = hrRev.Ecode,
+                        AuditReviewerName = auditRev.Name,
+                        AuditReviewerEcode = auditRev.Ecode,
+                        ClusterManagerReviewerName = clusterRev.Name,
+                        ClusterManagerReviewerEcode = clusterRev.Ecode,
                         r.DocumentUploadedOn,
                         LpAgeingHours = lpAgeHrs,
                         ClusterAgeingHours = clusterAgeHrs,

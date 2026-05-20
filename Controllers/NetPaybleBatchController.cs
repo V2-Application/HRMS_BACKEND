@@ -1,11 +1,15 @@
-using Microsoft.AspNetCore.Mvc;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Roomsy.DTOS.GenericsResponses;
 
 namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/month")]
     public class NetPaybleBatchController : ControllerBase
     {
         private readonly INetPaybleBatchService _netPaybleBatchService;

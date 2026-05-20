@@ -1,5 +1,7 @@
 using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -10,6 +12,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/attendance-add-weekly-off")]
     public class EcodeWiseWeekOffMappingController : ControllerBase
     {
         private readonly IEcodeWiseWeekOffMappingService _service;

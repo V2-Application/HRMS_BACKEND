@@ -1,10 +1,12 @@
 ﻿using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Roomsy.DTOS.GenericsResponses;
 using System.Net;
+using System.Security.Claims;
 
 namespace HRMSAPI.Controllers
 {
@@ -14,13 +16,40 @@ namespace HRMSAPI.Controllers
     public class RBACController : ControllerBase
     {
         private readonly IRBACService _rbacService;
+        private readonly IPageAccessService _pageAccessService;
 
-        public RBACController(IRBACService rbacService)
+        public RBACController(IRBACService rbacService, IPageAccessService pageAccessService)
         {
             _rbacService = rbacService;
+            _pageAccessService = pageAccessService;
         }
 
-        [HttpPost("upsert-modules")]
+        /// <summary>
+        /// Frontend route-guard hits this before mounting any gated page.
+        /// Returns { allowed, reason, ... }. The route path is the React Router
+        /// pattern (e.g. "/employee/update/:id"), NOT a live URL with IDs.
+        /// </summary>
+        [HttpGet("CheckPageAccess"), Authorize]
+        public async Task<IActionResult> CheckPageAccess([FromQuery] string path)
+        {
+            var identity = HttpContext.User.Identity as ClaimsIdentity;
+            var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
+
+            if (userClaims == null || string.IsNullOrEmpty(userClaims.EmployeeId)
+                || !long.TryParse(userClaims.EmployeeId, out var employeeId))
+            {
+                return Unauthorized(new PageAccessResultDto
+                {
+                    Allowed = false,
+                    Reason = "Invalid or missing authentication."
+                });
+            }
+
+            var result = await _pageAccessService.HasPageAccessAsync(employeeId, path);
+            return Ok(result);
+        }
+
+        [HttpPost("upsert-modules"), Authorize, RequirePageAccess("/rbac-panel")]
         public async Task<ActionResult<ExecuteAndReponse>> UpsertModules([FromBody] List<ModuleDto> modules)
         {
             if (modules == null || modules.Count == 0)
@@ -68,7 +97,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("upsert-rbac-nodes")]
+        [HttpPost("upsert-rbac-nodes"), Authorize, RequirePageAccess("/rbac-panel")]
         public async Task<ActionResult<ExecuteAndReponse>> UpsertRbacNodes([FromBody] List<RolePermissionPost> rolePermissions)
         {
             if (rolePermissions == null || rolePermissions.Count == 0)
@@ -109,35 +138,35 @@ namespace HRMSAPI.Controllers
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpGet("module/{id:int}")]
+		[HttpGet("module/{id:int}"), Authorize, RequirePageAccess("/rbac-panel")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteModule(int id)
 		{
 			var result = await _rbacService.DeleteModuleAsync(id);
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpGet("submodule/{id:int}")]
+		[HttpGet("submodule/{id:int}"), Authorize, RequirePageAccess("/rbac-panel")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteSubModule(int id)
 		{
 			var result = await _rbacService.DeleteSubModuleAsync(id);
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpGet("action/{id:int}")]
+		[HttpGet("action/{id:int}"), Authorize, RequirePageAccess("/rbac-panel")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteAction(int id)
 		{
 			var result = await _rbacService.DeleteActionAsync(id);
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpGet("further-part/{id:int}")]
+		[HttpGet("further-part/{id:int}"), Authorize, RequirePageAccess("/rbac-panel")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteFurtherPart(int id)
 		{
 			var result = await _rbacService.DeleteFurtherPartAsync(id);
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpPost("upsert-role")]
+		[HttpPost("upsert-role"), Authorize, RequirePageAccess("/role-assign")]
 		public async Task<ActionResult<ExecuteAndReponse>> UpsertRole([FromBody] RoleDto role)
 		{
 			if (role == null)
@@ -154,14 +183,14 @@ namespace HRMSAPI.Controllers
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpGet("role/{id:int}")]
+		[HttpGet("role/{id:int}"), Authorize, RequirePageAccess("/role-assign")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteRole(int id)
 		{
 			var result = await _rbacService.DeleteRoleAsync(id);
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpPost("upsert-employee-role")]
+		[HttpPost("upsert-employee-role"), Authorize, RequirePageAccess("/employee-role_list")]
 		public async Task<ActionResult<ExecuteAndReponse>> UpsertEmployeeRole([FromBody] EmployeeRoleDto employeeRoleDto)
 		{
 			if (employeeRoleDto == null)
@@ -215,7 +244,7 @@ namespace HRMSAPI.Controllers
 			return StatusCode((int)result.Code, result);
 		}
 
-		[HttpPost("delete-employee-role")]
+		[HttpPost("delete-employee-role"), Authorize, RequirePageAccess("/employee-role_list")]
 		public async Task<ActionResult<ExecuteAndReponse>> DeleteEmployeeRole([FromBody] DeleteEmployeeRoleDto deleteRequest)
 		{
 			if (deleteRequest == null)

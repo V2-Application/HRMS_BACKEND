@@ -325,6 +325,8 @@ public partial class HRMSContext : DbContext
 
     public virtual DbSet<SubModuleMaster> SubModuleMasters { get; set; }
 
+    public virtual DbSet<tblPageRouteMap> tblPageRouteMaps { get; set; }
+
     public virtual DbSet<TBL_DCEMPLOYEE> TBL_DCEMPLOYEEs { get; set; }
 
     public virtual DbSet<TREND_V2R_Emp_DATum> TREND_V2R_Emp_DATAs { get; set; }
@@ -6163,6 +6165,18 @@ public partial class HRMSContext : DbContext
             entity.Property(e => e.SubModuleName).HasMaxLength(200);
             entity.Property(e => e.UpdatedBy).HasMaxLength(100);
             entity.Property(e => e.UpdatedOn).HasColumnType("datetime");
+        });
+
+        modelBuilder.Entity<tblPageRouteMap>(entity =>
+        {
+            entity.HasKey(e => e.PageRouteId);
+            entity.ToTable("tblPageRouteMap");
+            entity.HasIndex(e => e.RoutePath).IsUnique();
+
+            entity.Property(e => e.RoutePath).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Notes).HasMaxLength(500);
+            entity.Property(e => e.IsActive).HasDefaultValue(false);
+            entity.Property(e => e.CreatedOn).HasDefaultValueSql("(SYSUTCDATETIME())");
         });
 
         modelBuilder.Entity<TBL_DCEMPLOYEE>(entity =>

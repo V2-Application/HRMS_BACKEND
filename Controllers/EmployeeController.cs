@@ -21,6 +21,11 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    // NOTE: controller-level RequirePageAccess removed — endpoints like
+    // GetEmployee/{id} and SearchEmployee are called by MyProfile, dropdowns,
+    // and many other non-/employees/list pages. Apply per-method gates to
+    // admin-only actions (list/bulk/upload) when needed.
     public class EmployeeController : ControllerBase
     {
         public readonly HRMSContext _context;

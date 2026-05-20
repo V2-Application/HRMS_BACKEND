@@ -19,6 +19,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/salary_recal")]
     public class SalaryRecalculateController : ControllerBase
     {
         private readonly ISalaryRecalculate _salaryRecalculateService;

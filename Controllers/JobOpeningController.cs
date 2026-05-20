@@ -1,5 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -9,6 +11,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/openingslistView")]
     public class JobOpeningController : ControllerBase
     {
         private readonly IJobOpeningService _jobOpeningService;

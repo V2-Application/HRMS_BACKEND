@@ -63,15 +63,18 @@ BEGIN
         pa.PunchOutCount,
         pa.FirstPunchUtc,
         pa.LastPunchUtc,
-        sm.StatusName  AS ManagerStatus,
+        -- ISNULL → 'Pending' so punch-days with no GeoAttendanceApproval row
+        -- (created lazily on first approver action) render as Pending rather
+        -- than blank in the SuperAdmin export.
+        ISNULL(sm.StatusName,  'Pending') AS ManagerStatus,
         ga.ManagerApproverId,
         ga.ManagerApprovalOn,
         ga.ManagerRemarks,
-        sms.StatusName AS MasterStatus,
+        ISNULL(sms.StatusName, 'Pending') AS MasterStatus,
         ga.MasterApproverId,
         ga.MasterApprovalOn,
         ga.MasterRemarks,
-        sf.StatusName  AS FinalStatus
+        ISNULL(sf.StatusName,  'Pending') AS FinalStatus
     FROM PunchAgg pa
     INNER JOIN dbo.tblEmployee e        ON e.EmployeeId = pa.EmployeeId
     LEFT JOIN dbo.GeoAttendanceApproval ga
@@ -84,9 +87,11 @@ BEGIN
     LEFT JOIN dbo.tblLocation loc       ON loc.LocationId = e.LocationId
     LEFT JOIN dbo.tblEmployee rh        ON rh.Ecode = e.ReportheadEcode
     WHERE
-        (@FinalStatus   IS NULL OR @FinalStatus   = '' OR sf.StatusName  = @FinalStatus)
-        AND (@ManagerStatus IS NULL OR @ManagerStatus = '' OR sm.StatusName  = @ManagerStatus)
-        AND (@MasterStatus  IS NULL OR @MasterStatus  = '' OR sms.StatusName = @MasterStatus)
+        -- Filters mirror the SELECT projection: a NULL status (no approval row)
+        -- is treated as 'Pending' for both display AND filtering.
+        (@FinalStatus   IS NULL OR @FinalStatus   = '' OR ISNULL(sf.StatusName, 'Pending')  = @FinalStatus)
+        AND (@ManagerStatus IS NULL OR @ManagerStatus = '' OR ISNULL(sm.StatusName, 'Pending')  = @ManagerStatus)
+        AND (@MasterStatus  IS NULL OR @MasterStatus  = '' OR ISNULL(sms.StatusName, 'Pending') = @MasterStatus)
     ORDER BY pa.PunchDate DESC, e.Ecode;
 END
 GO

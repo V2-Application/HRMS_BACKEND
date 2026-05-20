@@ -23,6 +23,11 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    // NOTE: controller-level RequirePageAccess removed — GetApplicantById and
+    // applicantdetails/{id} are called from candidate workflows used by users
+    // who may not have /applicant/list permission. Apply per-method gates to
+    // admin-only actions when needed.
     public class ApplicantController : ControllerBase
     {
         public readonly ICandidateService _candidateService;

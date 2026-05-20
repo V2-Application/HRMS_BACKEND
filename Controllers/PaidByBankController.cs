@@ -1,4 +1,6 @@
 ﻿using HRMSAPI.DTO;
+using HRMSAPI.Extension;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Roomsy.DTOS.GenericsResponses;
 using System;
@@ -7,6 +9,8 @@ using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize]
+[RequirePageAccess("/finance/paid-by-bank")]
 public class PaidByBankController : ControllerBase
 {
     private readonly IPaidByBankService _paidByBankRepository;

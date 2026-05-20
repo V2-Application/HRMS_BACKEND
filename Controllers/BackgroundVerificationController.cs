@@ -2,6 +2,7 @@
 using HRMSAPI.DTO;
 using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
@@ -9,6 +10,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/BGV")]
     public class BackgroundVerificationController : ControllerBase
     {
         private readonly IBackgroundVerificationService _service;

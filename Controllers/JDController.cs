@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using Roomsy.DTOS.GenericsResponses;
 
@@ -6,6 +8,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/jd-list")]
     public class JDController : ControllerBase
     {
         private readonly IJDService _jdService;

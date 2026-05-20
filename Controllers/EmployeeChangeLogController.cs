@@ -1,3 +1,4 @@
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +8,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/employee-logs")]
     public class EmployeeChangeLogController : ControllerBase
     {
         private readonly IEmployeeChangeLogService _employeeChangeLogService;

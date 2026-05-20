@@ -23,7 +23,7 @@ namespace HRMSAPI.Controllers
             _uow = uow;
             _context = context;
         }
-        [HttpPost("ApplyLeave")]
+        [HttpPost("ApplyLeave"), Authorize, RequirePageAccess("/apply-leave")]
         public async Task<IActionResult> Post([FromBody] LeaveRequestDto DtoObject)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -57,7 +57,7 @@ namespace HRMSAPI.Controllers
                 });
             }
         }
-        [HttpGet("GetLeave/{id}")]
+        [HttpGet("GetLeave/{id}"), Authorize, RequirePageAccess("/apply-leave")]
         public async Task<IActionResult> Get(long id)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -72,7 +72,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpGet("GetEmployeeLeaveBalance/{employeeId}")]
+        [HttpGet("GetEmployeeLeaveBalance/{employeeId}"), Authorize, RequirePageAccess("/emp-leave-status")]
         public async Task<IActionResult> GetEmployeeLeaveBalance(long employeeId)
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;
@@ -107,7 +107,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpGet("LeaveRequestsformanager"), Authorize]
+        [HttpGet("LeaveRequestsformanager"), Authorize, RequirePageAccess("/employee-leave-list")]
         public async Task<IActionResult> GetLeaveRequests(
     
      int statusId = 0,
@@ -131,7 +131,7 @@ namespace HRMSAPI.Controllers
             });
         }
     
-    [HttpPost("UpdateLeaveRequestStatus/{requestId}"), Authorize]
+    [HttpPost("UpdateLeaveRequestStatus/{requestId}"), Authorize, RequirePageAccess("/employee-leave-list")]
         public async Task<IActionResult> UpdateLeaveRequestStatus(long requestId, [FromBody] UpdateLeaveRequestDto updateDto)
         {
             var userIdentity = User.Identity as ClaimsIdentity;
@@ -194,7 +194,7 @@ namespace HRMSAPI.Controllers
         }
 
 
-        [HttpGet("GetEmployeeLeaveBalanceById/{employeeId}")]
+        [HttpGet("GetEmployeeLeaveBalanceById/{employeeId}"), Authorize, RequirePageAccess("/emp-leave-status")]
         public async Task<IActionResult> GetEmployeeLeaveBalanceById(long employeeId)
         {
             var leaveBalance = await _uow.GetEmployeeLeaveBalanceById(employeeId);

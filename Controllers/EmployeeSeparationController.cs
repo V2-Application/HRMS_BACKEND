@@ -1,6 +1,7 @@
 ﻿using HRMSAPI.DTO;
 using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -10,6 +11,8 @@ namespace HRMSAPI.Controllers
 
     [Route("api/[controller]")]
     [ApiController]
+    [Authorize]
+    [RequirePageAccess("/sepration/resignation_applications")]
     public class EmployeeSeparationController : ControllerBase
     {
         private readonly IEmployeeSeparationService _service;

@@ -1,3 +1,4 @@
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using HRMSAPI.Models.Auth;
 using Microsoft.AspNetCore.Authorization;
@@ -8,7 +9,8 @@ namespace HRMSAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    //[Authorize]
+    [Authorize]
+    [RequirePageAccess("/fnf")]
     public class FnfDetailsController : ControllerBase
     {
         private readonly IFnfDetailsService _fnfDetailsService;

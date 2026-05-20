@@ -186,7 +186,16 @@ Attachments AS
         0 AS [Leave Encashment],                  
         0 AS [Medical Reim],                  
         0 AS [Lta],        
-  CASE WHEN ISNULL(e.BonusApplicable, N'No') IN (N'Ctc', N'Stat', N'Yes') THEN 'Yes' ELSE 'No' END AS [Bonus/Ex-Gratia],                  
+        -- Preserve the underlying BonusApplicable bucket (Ctc / Stat / Yes / No)
+        -- in the export instead of collapsing everything to Yes/No. NULL and
+        -- legacy junk values ('0', empty) fall back to 'No'.
+        CASE
+            WHEN e.BonusApplicable IS NULL OR LTRIM(RTRIM(e.BonusApplicable)) = N'' THEN N'No'
+            WHEN UPPER(LTRIM(RTRIM(e.BonusApplicable))) = N'CTC'  THEN N'Ctc'
+            WHEN UPPER(LTRIM(RTRIM(e.BonusApplicable))) = N'STAT' THEN N'Stat'
+            WHEN UPPER(LTRIM(RTRIM(e.BonusApplicable))) IN (N'YES', N'TRUE', N'1') THEN N'Yes'
+            ELSE N'No'
+        END AS [Bonus/Ex-Gratia],
         0 AS [Cca],                  
         0 AS [P.Tax],           
         0 AS [L.W.F.],                  

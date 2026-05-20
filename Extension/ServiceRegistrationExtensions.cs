@@ -121,6 +121,7 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IPaidInCashService, PaidInCashService>();
             services.AddScoped<ISalaryRecalculate, SalaryRecalculateRepository>();
             services.AddScoped<IRBACService, RBACService>();
+            services.AddScoped<IPageAccessService, PageAccessService>();
             services.AddScoped<IPermissionNotificationService, PermissionNotificationService>();
             services.AddScoped<IGroupService, GroupService>();
             services.AddScoped<IGroupWiseStoreCodeMappingService, GroupWiseStoreCodeMappingService>();

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 
 [Route("api/[controller]")]
 [ApiController]
+[Microsoft.AspNetCore.Authorization.Authorize]
+[HRMSAPI.Extension.RequirePageAccess("/new-stores")]
 public class StoreRoutingController : ControllerBase
 {
     private readonly IStoreRoutingService _storeRoutingService;

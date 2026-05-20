@@ -1,5 +1,6 @@
 using HRMSAPI.Data;
 using HRMSAPI.DTO;
+using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // [Authorize]
+    [Authorize]
+    [RequirePageAccess("/holiday-master/groups")]
     public class GroupController : ControllerBase
     {
         private readonly IGroupService _groupService;

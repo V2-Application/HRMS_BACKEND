@@ -13,6 +13,7 @@ namespace HRMSAPI.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize]
+    [RequirePageAccess("/applicant/list")]
     public class ApplicantUploadController : ControllerBase
     {
         private readonly IApplicantUploadService _applicantUploadService;

@@ -15,6 +15,7 @@ using System.Security.Claims;
 [ApiController]
 [Authorize]
 [Route("api/[controller]/[action]")]
+[HRMSAPI.Extension.RequirePageAccess("/vendor/master-list")]
 public class VendorController : ControllerBase
 {
     private readonly IVendorService _service;

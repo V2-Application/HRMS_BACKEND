@@ -12,6 +12,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [RequirePageAccess("/emp-bonus-uploader")]
     public class EcodeWiseBonusProvisioningPolicyMappingController : ControllerBase
     {
         private readonly IEcodeWiseBonusProvisioningPolicyMappingService _service;

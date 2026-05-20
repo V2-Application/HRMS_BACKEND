@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using HRMSAPI.Interfaces;
 using Roomsy.DTOS.GenericsResponses;
@@ -8,6 +9,8 @@ namespace HRMSAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize]
+    [RequirePageAccess("/attendance-regularization")]
     public class AttendanceRegularizationController : ControllerBase
     {
         private readonly IAttendanceRegularizationService _attendanceRegularizationService;
