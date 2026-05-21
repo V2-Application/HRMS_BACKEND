@@ -251,6 +251,7 @@ namespace ASN.Controllers
 
         [HttpPost]
         [Route("Insertnewcandidate")]
+        [AllowAnonymous]
         [RequestFormLimits(MultipartBodyLengthLimit = 524288000)]
         public async Task<IActionResult> Insertnewcandidate([FromForm] CandidateUpdate details, [FromForm] CandidateDocs files)
         {

@@ -435,7 +435,9 @@ namespace HRMSAPI.Implementation
                     RequestDate = requestDto.RequestDate,
                     Reason = requestDto.Reason?.Trim(),
                     EmployeeRemarks = requestDto.Remarks?.Trim(),
-                    StatusId = requestDto.StatusId ?? 4,
+                    StatusId = requestDto.StatusId ?? AttendanceStatuses.Pending,
+                    ManagerApprovalStatusId = AttendanceStatuses.Pending,
+                    LpApprovalStatusId = AttendanceStatuses.Pending,
                     ReportingManagerId = reportingManagerId,
                     PunchIn = requestDto.PunchIn,
                     PunchOut = requestDto.PunchOut,
@@ -969,13 +971,13 @@ namespace HRMSAPI.Implementation
                     .Select(e => e.LocationId)
                     .FirstOrDefaultAsync();
 
-                // === Pending tab: limit to current attendance cycle (26th of prev month → 25th of current month) for all roles ===
+                // === Pending tab: limit to current attendance cycle (26th of prev month → today inclusive) for all roles ===
                 if (statusId == 4)
                 {
                     var today = DateTime.Today;
                     var prevMonth = today.AddMonths(-1);
                     var cycleFrom = new DateTime(prevMonth.Year, prevMonth.Month, 26);
-                    var cycleToExclusive = new DateTime(today.Year, today.Month, 26); // 25 inclusive == < 26
+                    var cycleToExclusive = today.AddDays(1); // today inclusive
                     query = query.Where(x => x.request.RequestDate >= cycleFrom && x.request.RequestDate < cycleToExclusive);
                 }
 
@@ -1006,6 +1008,15 @@ namespace HRMSAPI.Implementation
                         x.employee.LocationId.HasValue &&
                         currentEmployeeLocationId.HasValue &&
                         x.employee.LocationId == currentEmployeeLocationId);
+                }
+                else if (roleNorm == "lp" || roleNorm == "audit")
+                {
+                    // LP / Audit pending queue: only rows the manager has already approved
+                    // and the LP hasn't acted on yet. Two-stage flow.
+                    query = query.Where(x =>
+                        x.request.ManagerApprovalStatusId == AttendanceStatuses.Approved
+                        && (x.request.LpApprovalStatusId == AttendanceStatuses.Pending
+                            || x.request.LpApprovalStatusId == null));
                 }
                 else
                 {
@@ -1334,7 +1345,7 @@ namespace HRMSAPI.Implementation
                         command.Parameters.Add(new SqlParameter("@ClientIp", ip ?? (object)DBNull.Value));
                         command.Parameters.Add(new SqlParameter("@Address", address ?? (object)DBNull.Value));
                         command.Parameters.Add(new SqlParameter("@ProofPath", proofPath ?? (object)DBNull.Value));
-                        command.Parameters.Add(new SqlParameter("@StatusId", 1)); 
+                        command.Parameters.Add(new SqlParameter("@StatusId", 4));
                         command.Parameters.Add(new SqlParameter("@LastUpdatedBy", "System"));
                         command.Parameters.Add(new SqlParameter("@LastUpdatedOn", punchTimeLocal));
 
@@ -1476,6 +1487,7 @@ namespace HRMSAPI.Implementation
             cmd.Parameters.Add(P("@TimeZoneId", SqlDbType.NVarChar, timeZoneId, 64));
 
             var summaries = new List<DailyAttendanceSummaryDto>();
+            int procTotalRecords = 0;
 
             await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -1540,6 +1552,8 @@ namespace HRMSAPI.Implementation
                     MasterRemarks = (oMasterRemarks >= 0 && !reader.IsDBNull(oMasterRemarks)) ? reader.GetString(oMasterRemarks) : null,
                     ApprovalFinalStatusId = (oApprovalFinalStatusId >= 0 && !reader.IsDBNull(oApprovalFinalStatusId)) ? reader.GetInt32(oApprovalFinalStatusId) : null,
                 };
+                if (procTotalRecords == 0 && !reader.IsDBNull(oTotalRecords))
+                    procTotalRecords = reader.GetInt32(oTotalRecords);
                 summaries.Add(dto);
             }
 
@@ -1614,25 +1628,10 @@ namespace HRMSAPI.Implementation
                 }
             }
 
-            // Total count is constant across page; read it from the first summary row if present.
-            var total = summaries.Count > 0 ? summaries[0].TotalRecords = summaries[0].TotalRecords == 0
-                ? // when not explicitly set, grab from first row of result-set #1 we cached:
-                  // we cached oTotalRecords ordinal; but we've already moved the reader. So instead:
-                  // the proc already repeats the same number on each row; we captured none.
-                  // Safer: run a simple calc here:
-                  // (we can't; so fallback: set to summaries.Count if the proc didn't set)
-                  summaries.Count
-                : summaries[0].TotalRecords
-                : 0;
-
-            // If your proc's first result set puts @TotalRecords in each row,
-            // you can also recompute safely like this:
-            if (summaries.Count > 0 && summaries[0].TotalRecords == 0)
-            {
-                // It’s fine to set it once; caller uses the PagedResult total.
-                // If you want the exact value from the proc, add a third result set with just @TotalRecords and read it.
-                total = summaries.Count;
-            }
+            // The SP repeats @TotalRecords on every row of result-set #1; we captured it
+            // during the read loop into procTotalRecords. Fall back to page size only if
+            // the proc didn't surface a value.
+            var total = procTotalRecords > 0 ? procTotalRecords : summaries.Count;
 
             return new PagedResult<DailyAttendanceSummaryDto>(summaries, total);
         }

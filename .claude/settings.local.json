@@ -104,7 +104,8 @@
       "Bash(sqlcmd -S '192.168.151.27\\\\KARMA' -d HRMS -U nikhil -P 'Vrl@12345' -Q \"SET NOCOUNT ON; SELECT OBJECT_DEFINITION\\(OBJECT_ID\\(N'dbo.usp_Incentive'\\)\\);\" -y 0 -o \"C:\\\\\\\\Users\\\\\\\\Administrator\\\\\\\\Desktop\\\\\\\\HRMS_BACKEND\\\\\\\\Scripts\\\\\\\\_extracted_usp_Incentive.sql\")",
       "Bash(echo \"EXIT=$?\")",
       "Bash(sqlcmd -S '192.168.151.27\\\\KARMA' -d HRMS -U nikhil -P 'Vrl@12345' -i \"C:\\\\\\\\Users\\\\\\\\Administrator\\\\\\\\Desktop\\\\\\\\HRMS_BACKEND\\\\\\\\Scripts\\\\\\\\_PROD_Update_usp_Incentive_AddCreatedByFilter.sql\")",
-      "Bash(sqlcmd -S \"192.168.151.28\\\\hrms\" -U sa_hrms -P \"CIHTY5pBmRRwjAw\" -d HRMS -C -Q \"SELECT cc.name, cc.definition FROM sys.check_constraints cc WHERE cc.name = 'CK_tblEmployee_DateOfLeft';\")"
+      "Bash(sqlcmd -S \"192.168.151.28\\\\hrms\" -U sa_hrms -P \"CIHTY5pBmRRwjAw\" -d HRMS -C -Q \"SELECT cc.name, cc.definition FROM sys.check_constraints cc WHERE cc.name = 'CK_tblEmployee_DateOfLeft';\")",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\v41797\\\\Desktop\\\\HRMS_FRONTEND\" | ForEach-Object { $_.Name })"
     ],
     "additionalDirectories": [
       "c:\\Users\\Administrator\\Desktop\\HRMS_BACKEND\\Scripts"

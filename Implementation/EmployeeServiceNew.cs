@@ -2535,7 +2535,11 @@ namespace HRMSAPI.Implementation
                             new SqlParameter("@EmployeeId", emp.EmployeeId))
                         .AsEnumerable()
                         .FirstOrDefault();
-                    emp.DateOfLeft = leavingData ?? request.LeavingDate;
+                    var candidateDOL = leavingData ?? request.LeavingDate;
+                    // CK_tblEmployee_DateOfLeft requires DateOfLeft IS NULL OR DateOfLeft >= DOJ.
+                    if (emp.DOJ.HasValue && candidateDOL.HasValue && candidateDOL.Value < emp.DOJ.Value)
+                        candidateDOL = emp.DOJ.Value;
+                    emp.DateOfLeft = candidateDOL;
                 }
 
                 if (await _context.SaveChangesAsync() < 1)
