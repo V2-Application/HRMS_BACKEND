@@ -651,7 +651,7 @@ namespace HRMSAPI.Controllers
             }
         }
 
-       [HttpGet("daily-summary-geo/{managerId:long}"), Authorize, RequirePageAccess("/Geo-fence")]
+       [HttpGet("daily-summary-geo/{managerId:long}"), Authorize, RequirePageAccess("/geofence-request")]
         public async Task<IActionResult> GetDailyAttendanceSummaryGeo(
          long managerId,
          int statusId = 0,
@@ -678,7 +678,7 @@ namespace HRMSAPI.Controllers
                 PageSize = pageSize
             });
         }
-        [HttpPost("geo/attendance/status/{managerId:long}"), Authorize, RequirePageAccess("/Geo-fence")]
+        [HttpPost("geo/attendance/status/{managerId:long}"), Authorize, RequirePageAccess("/geofence-request")]
         public async Task<IActionResult> SetGeoAttendanceStatus(
        long managerId,
        [FromBody] SetGeoAttendanceStatusDto body,
@@ -736,7 +736,7 @@ namespace HRMSAPI.Controllers
         /// SuperAdmin-only export: geofence/geo-attendance approvals for a date range,
         /// optionally filtered by finalStatus / managerStatus / masterStatus.
         /// </summary>
-        [HttpGet("geo/export"), Authorize, RequirePageAccess("/Geo-fence")]
+        [HttpGet("geo/export"), Authorize, RequirePageAccess("/geofence-request")]
         public async Task<IActionResult> ExportGeoAttendance(
             [FromQuery] DateTime startDate,
             [FromQuery] DateTime endDate,

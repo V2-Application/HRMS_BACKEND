@@ -57,7 +57,7 @@ Attachments AS
           
         e.[PLACE OF BIRTH] AS [Home Town],                  
         REPLACE(CONVERT(VARCHAR(9), e.DOJ, 6),' ','-') AS [D.O.J.],               
-        REPLACE(CONVERT(VARCHAR(9), sep.SeparationDate, 6),' ','-') AS [D.O.L.], 
+        REPLACE(CONVERT(VARCHAR(9), CASE WHEN ISNULL(e.IsActive, 0) = 0 THEN COALESCE(sep.SeparationDate, e.UpdatedOn, e.DateOfLeft) END, 6),' ','-') AS [D.O.L.],
         REPLACE(CONVERT(VARCHAR(9), e.DateOfResignation, 6),' ','-') AS [Resignation Date],               
           
         COALESCE(NULLIF(NULLIF(e.[BANK NAME], ''), 'NA'), NULLIF(c.[BANK NAME], ''), 'NA') AS [Name of Bank],                  
@@ -272,7 +272,7 @@ Attachments AS
         COALESCE(r.RoleName, 'Employee') AS [Role Name],            
         cc.[FULL NAME] +' ('+cc.Ecode+')' as CreatedBy,              
         uu.[FULL NAME] +' ('+uu.Ecode+')' as UpdatedBy,    
-       REPLACE(CONVERT(VARCHAR(9), sep.SeparationDate, 6),' ','-') AS [Separation Date],
+       REPLACE(CONVERT(VARCHAR(9), CASE WHEN ISNULL(e.IsActive, 0) = 0 THEN COALESCE(sep.SeparationDate, e.UpdatedOn, e.DateOfLeft) END, 6),' ','-') AS [Separation Date],
 REPLACE(CONVERT(VARCHAR(9), lp.LastPunchDate, 6),' ','-') AS [Last Punch Date],   
     
 CASE    
