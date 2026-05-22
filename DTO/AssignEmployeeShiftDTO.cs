@@ -14,6 +14,8 @@ namespace HRMSAPI.DTO
         [Required]
         public DateTime EffectiveFrom { get; set; }
 
+        public DateTime? EffectiveTo { get; set; }
+
         public string AssignedBy { get; set; }
 
         [MaxLength(200)]

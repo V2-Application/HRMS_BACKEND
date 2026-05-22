@@ -7,6 +7,7 @@ namespace HRMSAPI.DTO
 
         public int ShiftId { get; set; }
         public DateTime EffectiveFrom { get; set; }
+        public DateTime? EffectiveTo { get; set; }
         public string? AssignedBy { get; set; }
         public string? Remarks { get; set; }
     }

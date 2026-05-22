@@ -95,10 +95,25 @@ namespace HRMSAPI.Implementation
 
                 // ── PASS 2: create any missing master entities, save to get real DB IDs ──
 
-                var zoneDict    = (await _context.tblZones.ToListAsync()).ToDictionary(z => z.ZoneName, z => z, StringComparer.OrdinalIgnoreCase);
-                var clusterDict = (await _context.Clusters.ToListAsync()).ToDictionary(c => c.ClusterName, c => c, StringComparer.OrdinalIgnoreCase);
-                var regionDict  = (await _context.tblRegions.ToListAsync()).ToDictionary(r => r.RegionName, r => r, StringComparer.OrdinalIgnoreCase);
-                var stateDict   = (await _context.tblStates.ToListAsync()).ToDictionary(s => s.StateName, s => s, StringComparer.OrdinalIgnoreCase);
+                // First-wins: some lookup tables have duplicate names (e.g. tblState has two
+                // rows for "delhi"). Group + First() keeps the dictionary build resilient
+                // without mutating the underlying data.
+                var zoneDict = (await _context.tblZones.ToListAsync())
+                    .Where(z => !string.IsNullOrWhiteSpace(z.ZoneName))
+                    .GroupBy(z => z.ZoneName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                var clusterDict = (await _context.Clusters.ToListAsync())
+                    .Where(c => !string.IsNullOrWhiteSpace(c.ClusterName))
+                    .GroupBy(c => c.ClusterName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                var regionDict = (await _context.tblRegions.ToListAsync())
+                    .Where(r => !string.IsNullOrWhiteSpace(r.RegionName))
+                    .GroupBy(r => r.RegionName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+                var stateDict = (await _context.tblStates.ToListAsync())
+                    .Where(s => !string.IsNullOrWhiteSpace(s.StateName))
+                    .GroupBy(s => s.StateName.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
                 foreach (var (_, _, zoneName, regionName, clusterName, stateName, _, _) in parsedRows)
                 {

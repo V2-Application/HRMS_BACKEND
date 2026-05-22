@@ -32,6 +32,8 @@ namespace HRMSAPI.DTO
         public DateTime? EffectiveTo { get; set; }
         public DateTime? AssignedOn { get; set; }
         public string AssignedBy { get; set; }
+        public string AssignedByEcode { get; set; }
+        public string AssignedByName { get; set; }
         public string Remarks { get; set; }
         public DateTime? AppliedOn { get; set; }
         public string ShiftStatus { get; set; }
