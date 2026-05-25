@@ -790,15 +790,15 @@ namespace HRMSAPI.Implementation
                             "Only the reporting manager, LP/Audit, or SuperAdmin can approve this request.", null);
                     }
 
+                    // Two-stage flow: reporting manager updates only Manager fields.
+                    // LP fields stay Pending so the request shows up in LP's queue when
+                    // manager approves. If manager rejects, finalStatus below resolves to
+                    // Rejected from the manager side alone and the LP queue filter
+                    // (ManagerApprovalStatusId == Approved) excludes it.
                     req.ManagerApprovalStatusId = dto.StatusId;
                     req.ManagerApproverId = callerEmployeeId;
                     req.ManagerApprovalOn = now;
                     req.ManagerRemarks = trimmedRemarks;
-
-                    req.LpApprovalStatusId = dto.StatusId;
-                    req.LpApproverId = callerEmployeeId;
-                    req.LpApprovalOn = now;
-                    req.LpRemarks = trimmedRemarks;
                 }
 
                 // ===== Final Status =====
@@ -982,20 +982,30 @@ namespace HRMSAPI.Implementation
                 }
 
                 // === Role-based filtering ===
-                // Approved / Rejected tabs: only role "SuperAdmin" (strict) sees the entire organisation.
-                // Everyone else (incl. IT Superadmin / Master / Manager / LP / employees) sees ONLY
-                // rows where they personally acted on the request (Manager or LP approver).
+                // Two-stage flow tabs (Pending/Approved/Rejected) are scoped to the caller's *own* tier:
+                //  - Manager's Approved tab  = requests the manager personally approved (regardless of LP).
+                //  - Manager's Rejected tab  = requests the manager personally rejected.
+                //  - Manager's Pending  tab  = reportees' requests the manager hasn't acted on yet.
+                //  - LP's     Approved tab  = requests this LP personally approved.
+                //  - LP's     Rejected tab  = requests this LP personally rejected.
+                //  - LP's     Pending  tab  = manager-approved requests LP hasn't acted on.
+                //  - SuperAdmin / StoreHR (non-actors) still see the entire org / their store by the
+                //    overall request.StatusId.
                 bool isSuperAdmin = roleNorm == "superadmin";
-                bool isApprovedOrRejectedView = statusId == 1 || statusId == 2;
+                bool isApprovedOrRejectedView = statusId == AttendanceStatuses.Approved || statusId == AttendanceStatuses.Rejected;
+                bool isPendingView = statusId == AttendanceStatuses.Pending;
 
                 if (isApprovedOrRejectedView)
                 {
                     if (!isSuperAdmin)
                     {
-                        query = query.Where(x => x.request.ManagerApproverId == currentEmployeeId
-                                              || x.request.LpApproverId == currentEmployeeId);
+                        // Match on the caller's own tier status — manager-approved rows stay
+                        // visible in the manager's Approved tab even while LP is still acting.
+                        query = query.Where(x =>
+                            (x.request.ManagerApproverId == currentEmployeeId && x.request.ManagerApprovalStatusId == statusId) ||
+                            (x.request.LpApproverId == currentEmployeeId && x.request.LpApprovalStatusId == statusId));
                     }
-                    // SuperAdmin: no additional filter
+                    // SuperAdmin: no additional row filter; uses overall request.StatusId filter below.
                 }
                 else if (isSuperAdmin)
                 {
@@ -1009,24 +1019,43 @@ namespace HRMSAPI.Implementation
                         currentEmployeeLocationId.HasValue &&
                         x.employee.LocationId == currentEmployeeLocationId);
                 }
-                else if (roleNorm == "lp" || roleNorm == "audit")
+                else if (roleNorm == "lp" || roleNorm == "audit" || roleNorm == "master")
                 {
-                    // LP / Audit pending queue: only rows the manager has already approved
-                    // and the LP hasn't acted on yet. Two-stage flow.
+                    // Some Audit/LP/Master users are ALSO reporting managers (e.g. V20193 has
+                    // RoleId=5 "Audit" but is V32810's ReportHeadEcode). Without the second
+                    // OR-branch their team's manager-pending requests never surface because
+                    // those rows haven't entered the LP queue yet. Merge both queues here.
                     query = query.Where(x =>
-                        x.request.ManagerApprovalStatusId == AttendanceStatuses.Approved
-                        && (x.request.LpApprovalStatusId == AttendanceStatuses.Pending
-                            || x.request.LpApprovalStatusId == null));
+                        // LP/Audit queue: manager-approved, LP-pending (stage 2)
+                        (x.request.ManagerApprovalStatusId == AttendanceStatuses.Approved
+                         && (x.request.LpApprovalStatusId == AttendanceStatuses.Pending
+                             || x.request.LpApprovalStatusId == null))
+                        // Manager queue: caller is the reporting manager, request still
+                        // pending manager action (stage 1)
+                        || (x.request.ReportingManagerId == currentEmployeeId
+                            && (x.request.ManagerApprovalStatusId == AttendanceStatuses.Pending
+                                || x.request.ManagerApprovalStatusId == null)));
                 }
                 else
                 {
                     // Default: team manager view (sees reportees' pending/all requests)
                     var effectiveManagerId = managerId > 0 ? managerId : currentEmployeeId;
                     query = query.Where(x => x.request.ReportingManagerId == effectiveManagerId);
+
+                    // Manager's Pending tab must hide requests the manager has already acted on
+                    // (overall request.StatusId may still be Pending while LP is acting).
+                    if (isPendingView)
+                    {
+                        query = query.Where(x =>
+                            x.request.ManagerApprovalStatusId == AttendanceStatuses.Pending
+                            || x.request.ManagerApprovalStatusId == null);
+                    }
                 }
 
-                // Status filter (0 = all)
-                if (statusId != 0)
+                // Overall status filter applies only to roles that don't act on the request
+                // (SuperAdmin, StoreHR). Manager / LP / Audit are already tier-filtered above,
+                // so applying request.StatusId here would re-hide rows that the tier sees.
+                if (statusId != 0 && (isSuperAdmin || isStoreHr))
                     query = query.Where(x => x.request.StatusId == statusId);
 
                 // Search (now also on STCode / LocationName)

@@ -513,6 +513,42 @@ namespace HRMSAPI.Implementation
                         .FirstOrDefaultAsync();
                 }
 
+                // ESVM-based store filtering: reviewer roles (ClusterManager / LP / Audit / HR
+                // and similar non-admin, non-StoreManager roles) only see candidates whose
+                // LOCATION is mapped to them via tblEmployeeStroreVisibilityMapping.
+                // Admin-tier roles bypass the filter and see everything.
+                var bypassEsvm = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "Master", "SuperAdmin", "IT SuperAdmin", "Admin"
+                };
+                List<string> esvmLocationIds = null;
+                if (role != "StoreManager" && !bypassEsvm.Contains(role ?? string.Empty))
+                {
+                    var employeeEcode = await _context.tblEmployees
+                        .Where(e => e.EmployeeId == employeeId)
+                        .Select(e => e.Ecode)
+                        .FirstOrDefaultAsync();
+
+                    if (!string.IsNullOrEmpty(employeeEcode))
+                    {
+                        esvmLocationIds = await (
+                            from m in _context.tblEmployeeStroreVisibilityMappings
+                            join l in _context.tblLocations on m.StCode equals l.STCode
+                            where m.ECode == employeeEcode
+                                  && m.IsActive == true
+                                  && (m.IsDeleted == false || m.IsDeleted == null)
+                            select l.LocationId
+                        )
+                        .Distinct()
+                        .Select(id => id.ToString())
+                        .ToListAsync();
+                    }
+                    else
+                    {
+                        esvmLocationIds = new List<string>();
+                    }
+                }
+
                 // Base query with joins
                 var baseQuery = _context.Candidates
                     .AsNoTracking()
@@ -553,6 +589,15 @@ namespace HRMSAPI.Implementation
                 if (storeLocationId.HasValue)
                 {
                     baseQuery = baseQuery.Where(x => x.Candidate.LOCATION == storeLocationId.Value.ToString());
+                }
+
+                // Apply ESVM-mapped-stores filter only when the user has at least one
+                // active mapping. ESVM is additive (it grants store-specific access). Users
+                // with no mappings — typical for HR / LP / Audit and many ClusterManagers —
+                // keep the original "see all candidates" behavior.
+                if (esvmLocationIds != null && esvmLocationIds.Count > 0)
+                {
+                    baseQuery = baseQuery.Where(x => esvmLocationIds.Contains(x.Candidate.LOCATION));
                 }
 
                 // Apply search filter if searchTerm is provided

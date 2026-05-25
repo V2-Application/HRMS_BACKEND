@@ -172,8 +172,10 @@ namespace HRMSAPI.Controllers
             }
         }
 
-        [HttpPost("regularization"), Authorize, RequirePageAccess("/regularize-request")]
-        [Authorize]
+        // Self-service submit: any authenticated employee may create their own regularize request.
+        // No RequirePageAccess gate — the endpoint scopes the request to the caller's own EmployeeId
+        // (from the JWT), so page-level RBAC would only block legitimate employees from raising tickets.
+        [HttpPost("regularization"), Authorize]
         public async Task<IActionResult> CreateAttendanceRequest([FromForm] AttendanceRegularizationRequestDto requestDto, IFormFile? attachment)
         {
             var userIdentity = User.Identity as ClaimsIdentity;
@@ -603,7 +605,9 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Status = false, Message = ex.Message });
             }
         }
-        [HttpGet("GetRegularizationRequestsself"), Authorize, RequirePageAccess("/regularize-request")]
+        // Self-service list: returns only the caller's own regularize requests (scoped via JWT EmployeeId).
+        // No RequirePageAccess gate — see comment on POST regularization above.
+        [HttpGet("GetRegularizationRequestsself"), Authorize]
         public async Task<IActionResult> GetRegularizationRequestsself()
         {
             var identity = HttpContext.User.Identity as ClaimsIdentity;

@@ -145,32 +145,21 @@ namespace HRMSAPI.Implementation
 
                 await _context.SaveChangesAsync(); // master entities now have real DB IDs
 
-                // ── PASS 3: delete all existing locations ──────────────────────────────
-                var oldCount = await _context.tblLocations.CountAsync();
+                // ── PASS 3: upsert by STCode — never delete or wipe existing rows ───────
+                // STCode-keyed upsert preserves LocationId across uploads. Downstream
+                // tables (StoreRoutingTransaction, employee location mappings, attendance
+                // punches bridged via ATTENDANCE_PUNCH_DETAIL.STCode) reference LocationId,
+                // so re-inserting would orphan them — the same incident that drove the
+                // tblLocation recovery work. Columns not present in the Excel
+                // (StoreLat/StoreLong/AllowedRadiusMeters/ADDRESS/LocationType/geofence
+                // flags) are left untouched on existing rows.
+                var existingByStCode = (await _context.tblLocations.ToListAsync())
+                    .Where(l => !string.IsNullOrWhiteSpace(l.STCode))
+                    .GroupBy(l => l.STCode.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-                // 1. Disable the 4 FK constraints from StoreRoutingTransaction
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__1C281490");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__24BD5A91");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__2799C73C");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction NOCHECK CONSTRAINT FK__StoreRout__Locat__2C5E7C59");
-
-                // 2. Turn off temporal versioning (required for DELETE on temporal tables)
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.tblLocation SET (SYSTEM_VERSIONING = OFF)");
-
-                // 3. Delete all rows
-                await _context.Database.ExecuteSqlRawAsync("DELETE FROM dbo.tblLocation");
-
-                // 4. Re-enable temporal versioning
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.tblLocation SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.tblLocation_History, DATA_CONSISTENCY_CHECK = OFF))");
-
-                // 5. Re-enable FK constraints (WITH NOCHECK to skip validating existing orphaned rows)
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__1C281490");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__24BD5A91");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__2799C73C");
-                await _context.Database.ExecuteSqlRawAsync("ALTER TABLE dbo.StoreRoutingTransaction WITH NOCHECK CHECK CONSTRAINT FK__StoreRout__Locat__2C5E7C59");
-
-                // ── PASS 4: insert new locations with correct FK IDs ───────────────────
                 var newLocations = new List<tblLocation>();
+                int updatedCount = 0;
 
                 foreach (var (locCode, locationName, zoneName, regionName, clusterName, stateName, status, openingDate) in parsedRows)
                 {
@@ -179,25 +168,45 @@ namespace HRMSAPI.Implementation
                     int? regionId  = !string.IsNullOrEmpty(regionName)  && regionDict.TryGetValue(regionName, out var r)   ? r.RegionId : null;
                     int? stateId   = !string.IsNullOrEmpty(stateName)   && stateDict.TryGetValue(stateName, out var s)     ? s.StateId  : null;
 
-                    newLocations.Add(new tblLocation
+                    bool isActive = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase);
+
+                    if (existingByStCode.TryGetValue(locCode, out var existing))
                     {
-                        LocationName = locationName,
-                        STCode       = locCode,
-                        ZoneId       = zoneId,
-                        ClusterId    = clusterId,
-                        RegionId     = regionId,
-                        StateId      = stateId,
-                        IsActive     = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase),
-                        IsDeleted    = false,
-                        OpeningDate  = openingDate,
-                        CreatedOn    = DateTime.UtcNow
-                    });
+                        existing.LocationName = locationName;
+                        existing.ZoneId       = zoneId;
+                        existing.ClusterId    = clusterId;
+                        existing.RegionId     = regionId;
+                        existing.StateId      = stateId;
+                        existing.IsActive     = isActive;
+                        existing.OpeningDate  = openingDate;
+                        updatedCount++;
+                    }
+                    else
+                    {
+                        newLocations.Add(new tblLocation
+                        {
+                            LocationName = locationName,
+                            STCode       = locCode,
+                            ZoneId       = zoneId,
+                            ClusterId    = clusterId,
+                            RegionId     = regionId,
+                            StateId      = stateId,
+                            IsActive     = isActive,
+                            IsDeleted    = false,
+                            OpeningDate  = openingDate,
+                            CreatedOn    = DateTime.UtcNow
+                        });
+                    }
                 }
 
-                await _context.tblLocations.AddRangeAsync(newLocations);
+                if (newLocations.Count > 0)
+                    await _context.tblLocations.AddRangeAsync(newLocations);
+
                 await _context.SaveChangesAsync();
 
-                return BuildFetchSuccessResponse($"Location hierarchy replaced. {oldCount} old records deleted, {newLocations.Count} new records inserted.", null);
+                return BuildFetchSuccessResponse(
+                    $"Location upload complete. {updatedCount} existing rows updated, {newLocations.Count} new rows inserted. No rows deleted.",
+                    null);
             }
             catch (Exception ex)
             {
