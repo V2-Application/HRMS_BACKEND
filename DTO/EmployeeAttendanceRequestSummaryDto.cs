@@ -8,7 +8,7 @@ namespace HRMSAPI.DTO
         public string? Ecode { get; set; }
         public string? EmployeeName { get; set; }
         public DateTime PunchDate { get; set; }
-        
+
         public int PunchCount { get; set; }
         public int PunchInCount { get; set; }
         public int PunchOutCount { get; set; }
@@ -16,7 +16,12 @@ namespace HRMSAPI.DTO
         public string? Remarks { get; set; }
         public string? Address { get; set; }
         public string? ProofPath { get; set; }
-        
+
+        // Per-tier manager approval for the employee's own history view.
+        // Populated from dbo.GeoAttendanceApproval keyed on (EmployeeId, PunchDate).
+        // Null when no approval row exists for that date (i.e. still pending).
+        public int? ManagerApprovalStatusId { get; set; }
+
         public List<GetAttendanceRecordsByEmployeeResult>? Details { get; set; }
     }
 

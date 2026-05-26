@@ -3465,7 +3465,17 @@ namespace HRMSAPI.Implementation
                 var attendanceRequests = await _context.GetProcedures().GetAttendanceRecordsByEmployeeAsync(employeeId, date);
                 // Get employee details once
                 var employee = _context.tblEmployees.FirstOrDefault(e => e.EmployeeId == employeeId);
-                
+
+                // Per-date manager-approval lookup so the "My History" tab can show
+                // the right Manager Status badge. Without this the field is always
+                // missing from the response and the frontend defaults to Pending
+                // even after the manager has already approved/rejected.
+                var dates = attendanceRequests.Select(x => x.PunchTimeUtc.Date).Distinct().ToList();
+                var approvalByDate = await _context.GeoAttendanceApprovals
+                    .AsNoTracking()
+                    .Where(g => g.EmployeeId == employeeId && dates.Contains(g.PunchDate))
+                    .ToDictionaryAsync(g => g.PunchDate, g => (int?)g.ManagerApprovalStatusId);
+
                 // Group by date and create summary
                 var groupedByDate = attendanceRequests
                     .GroupBy(x => x.PunchTimeUtc.Date)
@@ -3481,6 +3491,7 @@ namespace HRMSAPI.Implementation
                         PunchCount = g.Count(),
                         PunchInCount = g.Count(x => x.PunchType == 1),
                         PunchOutCount = g.Count(x => x.PunchType == 2),
+                        ManagerApprovalStatusId = approvalByDate.TryGetValue(g.Key, out var mgrStatus) ? mgrStatus : null,
                         Details = g.OrderByDescending(x => x.PunchTimeUtc).ToList()
                     })
                     .OrderByDescending(x => x.PunchDate);
