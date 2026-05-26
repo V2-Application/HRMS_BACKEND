@@ -80,6 +80,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <returns>List of states with minimum wages</returns>
         [HttpGet("states")]
+        [AllowAnonymous]
         public async Task<IActionResult> GetStateMinWagesList()
         {
             try

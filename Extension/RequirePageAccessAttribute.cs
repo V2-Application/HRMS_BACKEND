@@ -1,5 +1,6 @@
 using HRMSAPI.Extension;
 using HRMSAPI.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using System.Security.Claims;
@@ -43,6 +44,14 @@ namespace HRMSAPI.Extension
 
         public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
         {
+            // If the action (or any closer ancestor) is marked [AllowAnonymous],
+            // skip the page-access check entirely. This lets a controller keep
+            // class-level [Authorize] + [RequirePageAccess] for the bulk of its
+            // actions while exposing a single action publicly (e.g. dropdown
+            // sources consumed by the public applicant form).
+            if (context.ActionDescriptor.EndpointMetadata.Any(m => m is IAllowAnonymous))
+                return;
+
             var identity = context.HttpContext.User.Identity as ClaimsIdentity;
             var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
 

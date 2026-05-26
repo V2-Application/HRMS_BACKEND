@@ -86,6 +86,8 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IEmployeeService, EmployeeService>();
             services.AddScoped<IEmployeeServiceNew, EmployeeServiceNew>();
             services.AddScoped<IDropDownService, DropDownService>();
+            services.AddScoped<IDepartmentService, DepartmentService>();
+            services.AddScoped<IDesignationService, DesignationService>();
             services.AddHostedService<Backgroundservices>();
             services.AddHostedService<ScheduledShiftApplicationService>();
             services.AddHttpContextAccessor();
