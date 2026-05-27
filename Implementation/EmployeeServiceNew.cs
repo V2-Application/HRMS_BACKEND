@@ -410,6 +410,7 @@ namespace HRMSAPI.Implementation
                         candidate.isBankPassbookAttachmentUploaded = employeeEntity.IsBankPassbookAttachmentUpoaded ?? false;
                         candidate.isEducationAttachmentUploaded = employeeEntity.IsEducationAttachmentUploaded ?? false;
                         candidate.isResumeAttachmentUploaded = employeeEntity.IsResumeUploaded ?? false;
+                        candidate.medicalCardUrl = employeeEntity.MedicalCardUrl;
                         candidate.isOtherAttachmentUploaded = candidateEntity?.IsOtherAttachmentUploaded ?? false;
                     candidate.prevEstNo = candidateEntity?.PREV__EST_NO_ ?? "";
                         // Audit fields
@@ -1095,6 +1096,9 @@ namespace HRMSAPI.Implementation
                 employeeData.IsResumeUploaded = details.isResumeAttachmentUploaded ?? false;
                 employeeData.IsOtherAttachmentUploaded = details.isOtherAttachmentUploaded ?? false;
                 employeeData.IsPrevOfferLetterUploaded = details.isOfferLetterAttachmentUploaded ?? false;
+                // Persist MedicalCardUrl when provided; preserve existing value on null.
+                if (details.medicalCardUrl != null)
+                    employeeData.MedicalCardUrl = details.medicalCardUrl;
                 //employeeData.Off
                 await SaveNewAttachments(Convert.ToInt64(idPass), employeeData.EMAIL_ADDRESS, files, updatedBy);
                 try

@@ -85,6 +85,7 @@ namespace HRMSAPI.Extensions
             services.AddScoped<ILeaveLockService, LeaveLockService>();
             services.AddScoped<IEmployeeService, EmployeeService>();
             services.AddScoped<IEmployeeServiceNew, EmployeeServiceNew>();
+            services.AddScoped<IMedicalCardService, MedicalCardService>();
             services.AddScoped<IDropDownService, DropDownService>();
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IDesignationService, DesignationService>();

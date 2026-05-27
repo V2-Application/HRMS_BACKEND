@@ -100,6 +100,9 @@ namespace HRMSAPI.Models.Abstract
         public bool? isEducationAttachmentUploaded { get; set; }
         public bool? isResumeAttachmentUploaded { get; set; } = false;
         public bool? isOfferLetterAttachmentUploaded { get; set; } = false;
+        // Optional URL of an uploaded Medical Card document.
+        // Persisted on tblEmployee.MedicalCardUrl. Non-mandatory.
+        public string? medicalCardUrl { get; set; }
       
         public int? statusId { get; set; } = 4;
         public decimal? BasicSalary { get; set; }
