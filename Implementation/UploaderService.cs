@@ -213,126 +213,159 @@ namespace HRMSAPI.Implementation
             if (file == null || file.Length == 0)
                 return BuildFetchErrorResponse("No file uploaded", HttpStatusCode.BadRequest);
 
-            using var stream = file.OpenReadStream();
-            using var workbook = new XLWorkbook(stream);
-            var worksheet = workbook.Worksheet(1);
-
-            // Validate headers
-            for (int i = 0; i < expectedHeaders.Length; i++)
+            // Tolerant decimal parse: numeric cells, numeric-as-text, "", "-", "N/A" all -> 0.
+            decimal SafeDecimal(IXLCell cell)
             {
-                var cellValue = worksheet.Cell(1, i + 1).GetValue<string>().Trim();
-                if (!string.Equals(cellValue, expectedHeaders[i], System.StringComparison.OrdinalIgnoreCase))
-                    return BuildFetchErrorResponse($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'", HttpStatusCode.BadRequest);
-            }
-            if (worksheet.Row(1).CellsUsed().Count() != expectedHeaders.Length)
-                return BuildFetchErrorResponse("Header count mismatch", HttpStatusCode.BadRequest);
-
-            var rows = worksheet.RowsUsed().Skip(1).ToList();
-
-            // Helper to format month as MMM-yy
-            string FormatMonth(string input)
-            {
-                if (string.IsNullOrWhiteSpace(input)) return string.Empty;
-                input = input.Trim();
-                DateTime dt;
-                // Try parse as date
-                if (DateTime.TryParse(input, out dt))
-                {
-                    return dt.ToString("MMM-yy").ToUpper();
-                }
-                // Try parse as MMM-yy or similar
-                if (DateTime.TryParseExact(input, new[] { "MMM-yy", "MMM-yyyy", "MM-yyyy", "MM-yy", "yyyy-MM", "yy-MM" }, null, System.Globalization.DateTimeStyles.None, out dt))
-                {
-                    return dt.ToString("MMM-yy").ToUpper();
-                }
-                // If already in format, just uppercase
-                if (input.Length == 6 && input[3] == '-')
-                    return input.ToUpper();
-                return input.ToUpper();
-            }
-
-            // Check for duplicate (E_CODE, MONTH) in Excel
-            var seenKeys = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-            foreach (var row in rows)
-            {
-                var ecode = row.Cell(1).GetValue<string>()?.Trim();
-                var monthRaw = row.Cell(2).GetValue<string>()?.Trim();
-                var month = FormatMonth(monthRaw);
-                var key = $"{ecode}|{month}";
-                if (!seenKeys.Add(key))
-                    return BuildFetchErrorResponse($"Duplicate combination of E_CODE '{ecode}' and MONTH '{month}' found in Excel.", HttpStatusCode.BadRequest);
-            }
-
-            // Upsert logic using (E_CODE, MONTH) as key
-            var keys = rows.Select(r => new
-            {
-                E_CODE = r.Cell(1).GetValue<string>()?.Trim(),
-                MONTH = FormatMonth(r.Cell(2).GetValue<string>()?.Trim())
-            }).ToList();
-
-            var ecodes = keys.Select(k => k.E_CODE).Distinct().ToList();
-            var months = keys.Select(k => k.MONTH).Distinct().ToList();
-
-            // Fetch all possible matches from DB
-            var existing = await _context.EmpAttendanceMasters.AsQueryable()
-                .Where(x => ecodes.Contains(x.E_CODE) && months.Contains(x.MONTH))
-                .ToListAsync();
-
-            // Build dictionary with composite key
-            var existingDict = existing.ToDictionary(x => $"{x.E_CODE}|{x.MONTH}", System.StringComparer.OrdinalIgnoreCase);
-
-            var newRows = new List<EmpAttendanceMaster>();
-            var updatedRows = new List<EmpAttendanceMaster>();
-
-            foreach (var row in rows)
-            {
-                var ecode = row.Cell(1).GetValue<string>()?.Trim();
-                var monthRaw = row.Cell(2).GetValue<string>()?.Trim();
-                var month = FormatMonth(monthRaw);
-                if (string.IsNullOrEmpty(ecode) || string.IsNullOrEmpty(month)) continue;
-                var key = $"{ecode}|{month}";
-
-                if (existingDict.TryGetValue(key, out var existingRow))
-                {
-                    // Update
-                    existingRow.MACHINE = row.Cell(3).GetValue<string>()?.Trim();
-                    existingRow.MANUAL = row.Cell(4).GetValue<string>()?.Trim();
-                    existingRow.TOTAL_PRESENT = row.Cell(5).GetValue<decimal>();
-                    existingRow.PRESENT_ON_WEEKLYOFF = row.Cell(6).GetValue<decimal>();
-                    existingRow.MONTH = month; // Ensure format
-                    existingRow.GF = existingRow.GF;
-                    updatedRows.Add(existingRow);
-                }
-                else
-                {
-                    // Insert
-                    newRows.Add(new EmpAttendanceMaster
-                    {
-                        E_CODE = ecode,
-                        MONTH = month,
-                        MACHINE = row.Cell(3).GetValue<string>()?.Trim(),
-                        MANUAL = row.Cell(4).GetValue<string>()?.Trim(),
-                        TOTAL_PRESENT = row.Cell(5).GetValue<decimal>(),
-                        PRESENT_ON_WEEKLYOFF = row.Cell(6).GetValue<decimal>(),
-                        GF = 0
-                    });
-                }
+                if (cell == null || cell.IsEmpty()) return 0m;
+                try { if (cell.TryGetValue<decimal>(out var d)) return d; } catch { /* fall through to string */ }
+                var s = cell.GetValue<string>()?.Trim();
+                if (string.IsNullOrEmpty(s)) return 0m;
+                return decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2) ? d2 : 0m;
             }
 
             try
             {
-                if (newRows.Any())
-                    await _context.EmpAttendanceMasters.AddRangeAsync(newRows);
-                if (updatedRows.Any())
-                    _context.EmpAttendanceMasters.UpdateRange(updatedRows);
+                using var stream = file.OpenReadStream();
+                XLWorkbook workbook;
+                try { workbook = new XLWorkbook(stream); }
+                catch (System.Exception ex)
+                { return BuildFetchErrorResponse($"Could not read Excel file. Please re-save as .xlsx and try again. ({ex.Message})", HttpStatusCode.BadRequest); }
 
-                await _context.SaveChangesAsync();
-                return BuildFetchSuccessResponse("EmpAttendanceMaster uploaded successfully", null);
+                using (workbook)
+                {
+                    var worksheet = workbook.Worksheet(1);
+
+                    // Validate headers
+                    for (int i = 0; i < expectedHeaders.Length; i++)
+                    {
+                        var cellValue = worksheet.Cell(1, i + 1).GetValue<string>().Trim();
+                        if (!string.Equals(cellValue, expectedHeaders[i], System.StringComparison.OrdinalIgnoreCase))
+                            return BuildFetchErrorResponse($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'", HttpStatusCode.BadRequest);
+                    }
+                    if (worksheet.Row(1).CellsUsed().Count() != expectedHeaders.Length)
+                        return BuildFetchErrorResponse("Header count mismatch", HttpStatusCode.BadRequest);
+
+                    var rows = worksheet.RowsUsed().Skip(1).ToList();
+
+                    // Helper to format month as MMM-yy
+                    string FormatMonth(string input)
+                    {
+                        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+                        input = input.Trim();
+                        DateTime dt;
+                        // Try parse as date
+                        if (DateTime.TryParse(input, out dt))
+                        {
+                            return dt.ToString("MMM-yy").ToUpper();
+                        }
+                        // Try parse as MMM-yy or similar
+                        if (DateTime.TryParseExact(input, new[] { "MMM-yy", "MMM-yyyy", "MM-yyyy", "MM-yy", "yyyy-MM", "yy-MM" }, null, System.Globalization.DateTimeStyles.None, out dt))
+                        {
+                            return dt.ToString("MMM-yy").ToUpper();
+                        }
+                        // If already in format, just uppercase
+                        if (input.Length == 6 && input[3] == '-')
+                            return input.ToUpper();
+                        return input.ToUpper();
+                    }
+
+                    // Check for duplicate (E_CODE, MONTH) in Excel
+                    var seenKeys = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+                    foreach (var row in rows)
+                    {
+                        var ecode = row.Cell(1).GetValue<string>()?.Trim();
+                        var monthRaw = row.Cell(2).GetValue<string>()?.Trim();
+                        var month = FormatMonth(monthRaw);
+                        var key = $"{ecode}|{month}";
+                        if (!seenKeys.Add(key))
+                            return BuildFetchErrorResponse($"Duplicate combination of E_CODE '{ecode}' and MONTH '{month}' found in Excel.", HttpStatusCode.BadRequest);
+                    }
+
+                    // Upsert logic using (E_CODE, MONTH) as key
+                    var keys = rows.Select(r => new
+                    {
+                        E_CODE = r.Cell(1).GetValue<string>()?.Trim(),
+                        MONTH = FormatMonth(r.Cell(2).GetValue<string>()?.Trim())
+                    }).ToList();
+
+                    var ecodes = keys.Select(k => k.E_CODE).Distinct().ToList();
+                    var months = keys.Select(k => k.MONTH).Distinct().ToList();
+
+                    // Fetch all possible matches from DB
+                    var existing = await _context.EmpAttendanceMasters.AsQueryable()
+                        .Where(x => ecodes.Contains(x.E_CODE) && months.Contains(x.MONTH))
+                        .ToListAsync();
+
+                    // Build dictionary with composite key.
+                    // Trim BOTH sides — prod has historical MONTH values stored with a
+                    // trailing space (e.g. "MAY-26 ") while incoming Excel produces clean
+                    // "MAY-26". SQL Server's unique-key collation treats them as equal,
+                    // but C# string equality (StringComparer) does not — without trimming,
+                    // the lookup misses and we try to INSERT a duplicate, hitting
+                    // UQ_EmpAttendanceMaster_ECode_Month.
+                    var existingDict = existing.ToDictionary(
+                        x => $"{(x.E_CODE ?? string.Empty).Trim()}|{(x.MONTH ?? string.Empty).Trim()}",
+                        System.StringComparer.OrdinalIgnoreCase);
+
+                    var newRows = new List<EmpAttendanceMaster>();
+                    var updatedRows = new List<EmpAttendanceMaster>();
+
+                    foreach (var row in rows)
+                    {
+                        var ecode = row.Cell(1).GetValue<string>()?.Trim();
+                        var monthRaw = row.Cell(2).GetValue<string>()?.Trim();
+                        var month = FormatMonth(monthRaw);
+                        if (string.IsNullOrEmpty(ecode) || string.IsNullOrEmpty(month)) continue;
+                        var key = $"{ecode}|{month}";
+
+                        if (existingDict.TryGetValue(key, out var existingRow))
+                        {
+                            // Update — only the data columns. MONTH text format is
+                            // intentionally preserved (do not rewrite "MAY-26 " to "MAY-26")
+                            // so we never alter the structural key of an existing row.
+                            existingRow.MACHINE = row.Cell(3).GetValue<string>()?.Trim();
+                            existingRow.MANUAL = row.Cell(4).GetValue<string>()?.Trim();
+                            existingRow.TOTAL_PRESENT = SafeDecimal(row.Cell(5));
+                            existingRow.PRESENT_ON_WEEKLYOFF = SafeDecimal(row.Cell(6));
+                            updatedRows.Add(existingRow);
+                        }
+                        else
+                        {
+                            // Insert
+                            newRows.Add(new EmpAttendanceMaster
+                            {
+                                E_CODE = ecode,
+                                MONTH = month,
+                                MACHINE = row.Cell(3).GetValue<string>()?.Trim(),
+                                MANUAL = row.Cell(4).GetValue<string>()?.Trim(),
+                                TOTAL_PRESENT = SafeDecimal(row.Cell(5)),
+                                PRESENT_ON_WEEKLYOFF = SafeDecimal(row.Cell(6)),
+                                GF = 0
+                            });
+                        }
+                    }
+
+                    if (newRows.Any())
+                        await _context.EmpAttendanceMasters.AddRangeAsync(newRows);
+                    if (updatedRows.Any())
+                        _context.EmpAttendanceMasters.UpdateRange(updatedRows);
+
+                    await _context.SaveChangesAsync();
+                    return BuildFetchSuccessResponse(
+                        $"EmpAttendanceMaster uploaded successfully. Inserted: {newRows.Count}, Updated: {updatedRows.Count}.", null);
+                }
             }
             catch (System.Exception ex)
             {
                 _logger.LogError(ex, "Error uploading EmpAttendanceMaster");
-                return BuildFetchErrorResponse($"Error uploading EmpAttendanceMaster: {ex.Message}", HttpStatusCode.BadRequest);
+                // Walk the inner-exception chain so EF's generic "See the inner exception"
+                // doesn't hide the actual SQL/constraint message from the caller.
+                var msgs = new List<string>();
+                for (var cur = ex; cur != null; cur = cur.InnerException)
+                    msgs.Add($"{cur.GetType().Name}: {cur.Message}");
+                return BuildFetchErrorResponse(
+                    "Error uploading EmpAttendanceMaster: " + string.Join(" -> ", msgs),
+                    HttpStatusCode.BadRequest);
             }
         }
         public async Task<FetchAndResponse> GetAllEmpAttendanceMasterAsync()
