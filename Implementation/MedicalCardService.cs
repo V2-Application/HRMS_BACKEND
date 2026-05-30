@@ -52,6 +52,36 @@ public class MedicalCardService : IMedicalCardService
         return true;
     }
 
+    public async Task<(bool success, string message, string url)> UploadAndAttachAsync(string ecode, Microsoft.AspNetCore.Http.IFormFile file, string updatedBy)
+    {
+        if (string.IsNullOrWhiteSpace(ecode)) return (false, "Ecode is required.", null);
+        if (file == null || file.Length == 0) return (false, "No file uploaded.", null);
+
+        var emp = await _context.tblEmployees.FirstOrDefaultAsync(e => e.Ecode == ecode);
+        if (emp == null) return (false, $"Employee not found for ecode: {ecode}", null);
+
+        var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        var folder = Path.Combine(webRoot, "MedicalCard", ecode);
+        Directory.CreateDirectory(folder);
+
+        var safeName = Path.GetFileName(file.FileName);
+        var fileName = $"{DateTime.Now:yyyyMMddHHmmss}_{safeName}";
+        var diskPath = Path.Combine(folder, fileName);
+        using (var fs = new FileStream(diskPath, FileMode.Create))
+            await file.CopyToAsync(fs);
+
+        var relativeUrl = $"MedicalCard/{ecode}/{fileName}";
+        emp.MedicalCardUrl = relativeUrl;
+        emp.LastUpdatedBy = updatedBy;
+        await _context.SaveChangesAsync();
+
+        // Best-effort: re-parse so the cards table is populated for this ecode.
+        try { await ReparseForEcodeAsync(ecode, updatedBy); }
+        catch (Exception ex) { _log.LogWarning(ex, "Reparse after upload failed for {Ecode}", ecode); }
+
+        return (true, "Uploaded", relativeUrl);
+    }
+
     public Task<MedicalCardReparseResult> ReparseForEcodeAsync(string ecode, string updatedBy)
         => ReparseInternalAsync(updatedBy, ecodeFilter: ecode, dryRun: false);
 

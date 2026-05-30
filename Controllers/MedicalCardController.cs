@@ -65,4 +65,16 @@ public class MedicalCardController : ControllerBase
         var result = await _svc.ReparseForEcodeAsync(ecode, user);
         return Ok(new { status = true, result });
     }
+
+    // POST api/MedicalCard/upload/{ecode}  — uploads a PDF, sets
+    // tblEmployee.MedicalCardUrl, and reparses cards for the ecode.
+    [HttpPost("upload/{ecode}")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UploadPdf(string ecode, IFormFile file)
+    {
+        var user = User?.Identity?.Name ?? "System";
+        var r = await _svc.UploadAndAttachAsync(ecode, file, user);
+        if (!r.success) return BadRequest(new { status = false, message = r.message });
+        return Ok(new { status = true, url = r.url });
+    }
 }
