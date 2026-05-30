@@ -789,12 +789,12 @@ namespace HRMSAPI.Implementation
                 }
 
                 //  Check duplicates
-                var (panExists, aadhaarExists, emailExist, mobileExists) = await CheckDuplicatesAsync(request, connection);
+                var (panExists, aadhaarExists, emailExist, mobileExists, aadhaarEcode) = await CheckDuplicatesAsync(request, connection);
 
                 if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"PAN already exists: {request.PANNo}" };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar already exists: {request.AadharNo}" };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar number already exists for Ecode {aadhaarEcode}: {request.AadharNo}" };
                 if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Email already exists: {request.Email}" };
-                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Mobile number already exists: {request.Mobile}" };
+                // Mobile uniqueness check intentionally skipped — mobile is optional and not enforced as unique on add/bulk.
 
                 //  Contract dates
                 DateTime? contractStart = request.ContractStartDate?.Date;
@@ -903,12 +903,12 @@ namespace HRMSAPI.Implementation
             try
             {
                 //  Check duplicates
-                var (panExists, aadhaarExists, emailExist, mobileExists) = await CheckDuplicatesAsync2(request, connection, transaction);
+                var (panExists, aadhaarExists, emailExist, mobileExists, aadhaarEcode) = await CheckDuplicatesAsync2(request, connection, transaction);
 
                 if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"PAN already exists: {request.PANNo}" };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar already exists: {request.AadharNo}" };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar number already exists for Ecode {aadhaarEcode}: {request.AadharNo}" };
                 if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Email already exists: {request.Email}" };
-                if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Mobile number already exists: {request.Mobile}" };
+                // Mobile uniqueness check intentionally skipped — mobile is optional and not enforced as unique on add/bulk.
 
                 //  Contract dates
                 DateTime? contractStart = request.ContractStartDate?.Date;
@@ -997,7 +997,7 @@ namespace HRMSAPI.Implementation
             return response;
         }
 
-        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists)>
+        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists, string aadhaarEcode)>
   CheckDuplicatesAsync(VendorEmployeeRequestDTO request, DbConnection connection)
         {
 
@@ -1007,7 +1007,8 @@ namespace HRMSAPI.Implementation
              SUM(CASE WHEN [PAN NO] = @PAN THEN 1 ELSE 0 END),
              SUM(CASE WHEN [AADHAR NO] = @AADHAR THEN 1 ELSE 0 END),
              SUM(CASE WHEN LOWER(LTRIM(RTRIM([EMAIL ADDRESS]))) = LOWER(@Email) THEN 1 ELSE 0 END),
-             SUM(CASE WHEN [MOBILE] = @Mobile THEN 1 ELSE 0 END)
+             SUM(CASE WHEN [MOBILE] = @Mobile THEN 1 ELSE 0 END),
+             (SELECT TOP 1 [Ecode] FROM tblEmployee WHERE [AADHAR NO] = @AADHAR) AS AadhaarEcode
              FROM tblEmployee";
 
             command.Parameters.Add(new SqlParameter("@PAN", request.PANNo));
@@ -1022,11 +1023,12 @@ namespace HRMSAPI.Implementation
             bool aadhaarExists = !string.IsNullOrWhiteSpace(request.AadharNo) && reader.GetInt32(1) > 0;
             bool emailExists = !string.IsNullOrWhiteSpace(request.Email) && reader.GetInt32(2) > 0;
             bool mobileExists = !string.IsNullOrWhiteSpace(request.Mobile) && reader.GetInt32(3) > 0;
+            string aadhaarEcode = reader.IsDBNull(4) ? null : reader.GetString(4);
 
-            return (panExists, aadhaarExists, emailExists, mobileExists);
+            return (panExists, aadhaarExists, emailExists, mobileExists, aadhaarEcode);
         }
 
-        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists)> CheckDuplicatesAsync2(VendorEmployeeRequestDTO request, DbConnection connection, SqlTransaction transaction)
+        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists, string aadhaarEcode)> CheckDuplicatesAsync2(VendorEmployeeRequestDTO request, DbConnection connection, SqlTransaction transaction)
         {
 
             using var command = connection.CreateCommand();
@@ -1036,7 +1038,8 @@ namespace HRMSAPI.Implementation
              SUM(CASE WHEN [PAN NO] = @PAN THEN 1 ELSE 0 END),
              SUM(CASE WHEN [AADHAR NO] = @AADHAR THEN 1 ELSE 0 END),
              SUM(CASE WHEN LOWER(LTRIM(RTRIM([EMAIL ADDRESS]))) = LOWER(@Email) THEN 1 ELSE 0 END),
-             SUM(CASE WHEN [MOBILE] = @Mobile THEN 1 ELSE 0 END)
+             SUM(CASE WHEN [MOBILE] = @Mobile THEN 1 ELSE 0 END),
+             (SELECT TOP 1 [Ecode] FROM tblEmployee WHERE [AADHAR NO] = @AADHAR) AS AadhaarEcode
              FROM tblEmployee";
 
             command.Parameters.Add(new SqlParameter("@PAN", request.PANNo));
@@ -1051,8 +1054,9 @@ namespace HRMSAPI.Implementation
             bool aadhaarExists = !string.IsNullOrWhiteSpace(request.AadharNo) && reader.GetInt32(1) > 0;
             bool emailExists = !string.IsNullOrWhiteSpace(request.Email) && reader.GetInt32(2) > 0;
             bool mobileExists = !string.IsNullOrWhiteSpace(request.Mobile) && reader.GetInt32(3) > 0;
+            string aadhaarEcode = reader.IsDBNull(4) ? null : reader.GetString(4);
 
-            return (panExists, aadhaarExists, emailExists, mobileExists);
+            return (panExists, aadhaarExists, emailExists, mobileExists, aadhaarEcode);
         }
 
 
@@ -1097,11 +1101,11 @@ namespace HRMSAPI.Implementation
 
                 //  Duplicate check
 
-                var (panExists, aadhaarExists, emailExists, mobileExists) =
+                var (panExists, aadhaarExists, emailExists, mobileExists, aadhaarEcode) =
                     await CheckDuplicatesForUpdateAsync(request, Ecode, ContractorCode, connection);
 
                 if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "PAN already exists for another employee." };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Aadhaar already exists for another employee." };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar number already exists for Ecode {aadhaarEcode}: {request.AadharNo}" };
                 if (emailExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Email already exists for another employee." };
                 if (mobileExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = "Mobile number already exists for another employee." };
 
@@ -1175,7 +1179,7 @@ namespace HRMSAPI.Implementation
             return response;
         }
 
-        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists)>
+        private async Task<(bool panExists, bool aadhaarExists, bool emailExists, bool mobileExists, string aadhaarEcode)>
 CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string ecode, string contractorCode, DbConnection connection)
         {
 
@@ -1183,9 +1187,10 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
             command.CommandText = @"
         SELECT
             SUM(CASE WHEN [PAN NO] = @PAN AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END),
-            SUM(CASE WHEN [AADHAR NO] = @AADHAR AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END), 
+            SUM(CASE WHEN [AADHAR NO] = @AADHAR AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END),
             SUM(CASE WHEN [EMAIL ADDRESS] = @Email AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END),
-            SUM(CASE WHEN [MOBILE] = @Mobile AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END)
+            SUM(CASE WHEN [MOBILE] = @Mobile AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode THEN 1 ELSE 0 END),
+            (SELECT TOP 1 [Ecode] FROM tblEmployee WHERE [AADHAR NO] = @AADHAR AND [Ecode] <> @Ecode AND [ContractorCode] <> @ContractorCode) AS AadhaarEcode
         FROM tblEmployee";
 
             command.Parameters.Add(new SqlParameter("@PAN", (object?)request.PANNo ?? DBNull.Value));
@@ -1202,8 +1207,9 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
             bool aadhaarExists = reader.GetInt32(1) > 0;
             bool emailExists = !string.IsNullOrWhiteSpace(request.Email) && reader.GetInt32(2) > 0;
             bool mobileExists = !string.IsNullOrWhiteSpace(request.Mobile) && reader.GetInt32(3) > 0;
+            string aadhaarEcode = reader.IsDBNull(4) ? null : reader.GetString(4);
 
-            return (panExists, aadhaarExists, emailExists, mobileExists);
+            return (panExists, aadhaarExists, emailExists, mobileExists, aadhaarEcode);
         }
 
 
@@ -1684,6 +1690,88 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
 
             // Read data from the Excel file into a list of VendorEmployeeRequestDTOBulk objects
             var employees = await ReadExcel(file, contractorCode);
+
+            // Pre-scan: report ALL Aadhaar duplicates in one shot (with both the Excel-side
+            // data and the existing-employee data) so the user can resolve them together.
+            var aadhaarByRow = employees
+                .Select((e, i) => new
+                {
+                    Row = i + 2,
+                    Aadhaar = e.AadharNo?.Trim(),
+                    ExcelName = string.Join(" ", new[] { e.FirstName, e.MiddleName, e.LastName }
+                        .Where(s => !string.IsNullOrWhiteSpace(s))).Trim(),
+                    ExcelMobile = e.Mobile,
+                    ExcelEcode = e.Ecode
+                })
+                .Where(x => !string.IsNullOrEmpty(x.Aadhaar))
+                .ToList();
+
+            if (aadhaarByRow.Count > 0)
+            {
+                await using var preConn = new SqlConnection(_context.Database.GetConnectionString());
+                await preConn.OpenAsync();
+
+                var distinctAadhaars = aadhaarByRow.Select(x => x.Aadhaar).Distinct().ToList();
+                var paramNames = distinctAadhaars.Select((_, i) => $"@a{i}").ToArray();
+
+                using var preCmd = preConn.CreateCommand();
+                preCmd.CommandText = $@"SELECT [AADHAR NO], [Ecode], [FirstName], [MiddleName], [LastName], [ContractorCode], [MOBILE]
+                                        FROM tblEmployee
+                                        WHERE [AADHAR NO] IN ({string.Join(",", paramNames)})";
+                for (int i = 0; i < distinctAadhaars.Count; i++)
+                    preCmd.Parameters.Add(new SqlParameter(paramNames[i], distinctAadhaars[i]));
+
+                var existing = new Dictionary<string, (string Ecode, string Name, string ContractorCode, string Mobile)>(StringComparer.Ordinal);
+                using (var rdr = await preCmd.ExecuteReaderAsync())
+                {
+                    while (await rdr.ReadAsync())
+                    {
+                        var ad = rdr.IsDBNull(0) ? null : rdr.GetString(0).Trim();
+                        if (string.IsNullOrEmpty(ad)) continue;
+                        var ec = rdr.IsDBNull(1) ? null : rdr.GetString(1).Trim();
+                        var fn = rdr.IsDBNull(2) ? null : rdr.GetString(2).Trim();
+                        var mn = rdr.IsDBNull(3) ? null : rdr.GetString(3).Trim();
+                        var ln = rdr.IsDBNull(4) ? null : rdr.GetString(4).Trim();
+                        var cc = rdr.IsDBNull(5) ? null : rdr.GetString(5).Trim();
+                        var mb = rdr.IsDBNull(6) ? null : rdr.GetString(6).Trim();
+                        var fullName = string.Join(" ", new[] { fn, mn, ln }
+                            .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+                        existing[ad] = (ec, fullName, cc, mb);
+                    }
+                }
+
+                var duplicates = aadhaarByRow
+                    .Where(x => existing.ContainsKey(x.Aadhaar))
+                    .Select(x =>
+                    {
+                        var e = existing[x.Aadhaar];
+                        return new
+                        {
+                            row = x.Row,
+                            aadhaar = x.Aadhaar,
+                            excelName = x.ExcelName,
+                            excelMobile = x.ExcelMobile,
+                            excelEcode = x.ExcelEcode,
+                            existingEcode = e.Ecode,
+                            existingName = e.Name,
+                            existingContractorCode = e.ContractorCode,
+                            existingMobile = e.Mobile
+                        };
+                    })
+                    .ToList();
+
+                if (duplicates.Count > 0)
+                {
+                    return new Response
+                    {
+                        Status = false,
+                        StatusCode = HttpStatusCode.Conflict,
+                        Message = $"{duplicates.Count} Aadhaar number(s) already exist in the database.",
+                        Data = new { duplicates }
+                    };
+                }
+            }
+
             await using var connection = new SqlConnection(_context.Database.GetConnectionString());
             await connection.OpenAsync();
 
@@ -1951,8 +2039,8 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     if (string.IsNullOrEmpty(gender))
                         throw new Exception($"Missing required value 'Gender' in Row {table.Rows.IndexOf(row) + 1}, Column 'Gender'");
 
-                    if (string.IsNullOrEmpty(mobile))
-                        throw new Exception($"Missing required value 'Mobile' in Row {table.Rows.IndexOf(row) + 1}, Column 'Mobile'");
+                    if (!string.IsNullOrEmpty(mobile) && !System.Text.RegularExpressions.Regex.IsMatch(mobile, @"^\d{10}$"))
+                        throw new Exception($"Invalid value 'Mobile' in Row {table.Rows.IndexOf(row) + 1}, Column 'Mobile' — must be exactly 10 digits.");
 
                 //    if (string.IsNullOrEmpty(address))
                 //        throw new Exception($"Missing required value 'Address' in Row {table.Rows.IndexOf(row) + 1}, Column 'Address'");

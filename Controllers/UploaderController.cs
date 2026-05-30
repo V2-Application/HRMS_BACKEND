@@ -30,7 +30,13 @@ namespace HRMSAPI.Controllers
         public async Task<IActionResult> UploadEmpAttendanceMaster([FromForm] FileDTO fileD)
         {
             var file = fileD.File;
-            var result = await _service.UploadEmpAttendanceMasterAsync(file);
+            // Resolve the uploading user's EmployeeId so we can stamp CreatedBy / UpdatedBy
+            // on each row written. Falls back to "" when claims can't be resolved.
+            var identity = HttpContext.User.Identity as ClaimsIdentity;
+            var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
+            var updatedBy = userClaims?.EmployeeId ?? string.Empty;
+
+            var result = await _service.UploadEmpAttendanceMasterAsync(file, updatedBy);
             return StatusCode((int)result.Code, new ApiExecuteAndReponse { Status = result.Status, Message = result.Message });
         }
 
