@@ -8,7 +8,7 @@ namespace HRMSAPI.Interfaces
 {
     public interface IUploaderService
     {
-        Task<FetchAndResponse> UploadEmpAttendanceMasterAsync(IFormFile file);
+        Task<FetchAndResponse> UploadEmpAttendanceMasterAsync(IFormFile file, string updatedBy = null);
         Task<FetchAndResponse> GetAllEmpAttendanceMasterAsync();
         Task<FetchAndResponse> UploadEmpTDSTableAsync(IFormFile file);
         Task<FetchAndResponse> GetAllEmpTDSTableAsync();

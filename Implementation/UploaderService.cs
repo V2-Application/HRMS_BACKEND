@@ -207,11 +207,18 @@ namespace HRMSAPI.Implementation
             return !string.IsNullOrEmpty(value) && value.Trim().ToLower() == "yes";
         }
 
-        public async Task<FetchAndResponse> UploadEmpAttendanceMasterAsync(IFormFile file)
+        public async Task<FetchAndResponse> UploadEmpAttendanceMasterAsync(IFormFile file, string updatedBy = null)
         {
             var expectedHeaders = new[] { "E.CODE", "MONTH", "MACHINE", "MANUAL", "TOTAL PRESENT", "PRESENT ON WEEKLYOFF" };
             if (file == null || file.Length == 0)
                 return BuildFetchErrorResponse("No file uploaded", HttpStatusCode.BadRequest);
+
+            // Stamp for audit columns. "M" in ActionStatus marks this row as
+            // having been touched by the manual-attendance Excel uploader (vs
+            // 'A' for the auto/machine-punch path).
+            var nowUtc = DateTime.UtcNow;
+            var actor = string.IsNullOrWhiteSpace(updatedBy) ? "uploader" : updatedBy;
+            const string ManualActionStatus = "M";
 
             // Tolerant decimal parse: numeric cells, numeric-as-text, "", "-", "N/A" all -> 0.
             decimal SafeDecimal(IXLCell cell)
@@ -318,6 +325,9 @@ namespace HRMSAPI.Implementation
                         if (string.IsNullOrEmpty(ecode) || string.IsNullOrEmpty(month)) continue;
                         var key = $"{ecode}|{month}";
 
+                        var totalPresent = SafeDecimal(row.Cell(5));
+                        var presentOnWeeklyOff = SafeDecimal(row.Cell(6));
+
                         if (existingDict.TryGetValue(key, out var existingRow))
                         {
                             // Update — only the data columns. MONTH text format is
@@ -325,8 +335,12 @@ namespace HRMSAPI.Implementation
                             // so we never alter the structural key of an existing row.
                             existingRow.MACHINE = row.Cell(3).GetValue<string>()?.Trim();
                             existingRow.MANUAL = row.Cell(4).GetValue<string>()?.Trim();
-                            existingRow.TOTAL_PRESENT = SafeDecimal(row.Cell(5));
-                            existingRow.PRESENT_ON_WEEKLYOFF = SafeDecimal(row.Cell(6));
+                            existingRow.TOTAL_PRESENT = totalPresent;
+                            existingRow.NC_TOTAL_PRESENT = totalPresent; // mirror TOTAL_PRESENT for manual uploads
+                            existingRow.PRESENT_ON_WEEKLYOFF = presentOnWeeklyOff;
+                            existingRow.ActionStatus = ManualActionStatus;
+                            existingRow.UpdatedBy = actor;
+                            existingRow.UpdatedOn = nowUtc;
                             updatedRows.Add(existingRow);
                         }
                         else
@@ -338,9 +352,15 @@ namespace HRMSAPI.Implementation
                                 MONTH = month,
                                 MACHINE = row.Cell(3).GetValue<string>()?.Trim(),
                                 MANUAL = row.Cell(4).GetValue<string>()?.Trim(),
-                                TOTAL_PRESENT = SafeDecimal(row.Cell(5)),
-                                PRESENT_ON_WEEKLYOFF = SafeDecimal(row.Cell(6)),
-                                GF = 0
+                                TOTAL_PRESENT = totalPresent,
+                                NC_TOTAL_PRESENT = totalPresent, // mirror TOTAL_PRESENT for manual uploads
+                                PRESENT_ON_WEEKLYOFF = presentOnWeeklyOff,
+                                GF = 0,
+                                ActionStatus = ManualActionStatus,
+                                CreatedBy = actor,
+                                CreatedOn = nowUtc,
+                                UpdatedBy = actor,
+                                UpdatedOn = nowUtc
                             });
                         }
                     }

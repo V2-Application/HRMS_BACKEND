@@ -551,7 +551,7 @@ public class VendorController : ControllerBase
             var response = await _service.ImportVendorEmployeesBulk(file, employeeId, contractorCode);
 
             if (!response.Status)
-                return BadRequest(new { Status = false, Message = response.Message ?? "Unexpected Error." });
+                return BadRequest(new { Status = false, Message = response.Message ?? "Unexpected Error.", data = response.Data });
 
             return Ok(response.Message);
         }

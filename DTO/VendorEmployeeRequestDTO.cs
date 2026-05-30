@@ -65,10 +65,8 @@ public class VendorEmployeeRequestDTO : IValidatableObject
         //    else if (!Regex.IsMatch(ESICNo, @"^\d{10}$"))
         //        yield return new ValidationResult("ESIC number must be 10 digits", new[] { nameof(ESICNo) });
         //}
-        // Mobile number validation
-        if (string.IsNullOrWhiteSpace(Mobile))
-            yield return new ValidationResult("Mobile number is required", new[] { nameof(Mobile) });
-        else if (!Regex.IsMatch(Mobile, @"^[6-9]\d{9}$"))
+        // Mobile number validation (optional; format enforced only when provided)
+        if (!string.IsNullOrWhiteSpace(Mobile) && !Regex.IsMatch(Mobile, @"^[6-9]\d{9}$"))
             yield return new ValidationResult("Mobile number must be 10 digits starting with 6-9", new[] { nameof(Mobile) });
 
         // Email validation (optional)
