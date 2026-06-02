@@ -72,6 +72,46 @@ namespace HRMSAPI.Controllers
                 return Ok(new { Employees = employees.Employees });
             //}
         }
+        // Read-only enrichment: pulls each employee's latest approved-resignation
+        // row (LastUpdatedBy = the approver's ecode at the time of action), the
+        // approver's full name via a self-join on tblEmployee, and LastUpdatedOn
+        // (the timestamp the approve action ran). No writes.
+        private async Task<Dictionary<string, (string? Date, string? Ecode, string? Name, string? ApprovedOn)>> GetResignationApproverMap(System.Data.Common.DbConnection conn)
+        {
+            var dict = new Dictionary<string, (string?, string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+WITH latest AS (
+    SELECT s.EmployeeId, s.ResignationDate, s.LastUpdatedBy, s.LastUpdatedOn,
+           ROW_NUMBER() OVER (PARTITION BY s.EmployeeId ORDER BY s.EmployeeSeprationId DESC) AS rn
+    FROM tblEmployeeSepration s
+    WHERE (s.IsApprovedByManager = 1 OR s.IsApprovedByHR = 1)
+)
+SELECT e.Ecode,
+       CONVERT(varchar(10), l.ResignationDate, 23)                                              AS ResignationDate,
+       l.LastUpdatedBy                                                                          AS ApproverEcode,
+       LTRIM(RTRIM(ISNULL(a.FirstName, '') + ' ' + ISNULL(a.MiddleName, '') + ' ' + ISNULL(a.LastName, ''))) AS ApproverName,
+       CONVERT(varchar(19), l.LastUpdatedOn, 120)                                                AS ApprovedOn
+FROM latest l
+JOIN tblEmployee e ON e.EmployeeId = l.EmployeeId
+LEFT JOIN tblEmployee a ON a.Ecode = l.LastUpdatedBy
+WHERE l.rn = 1";
+
+            using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var ec = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+                if (string.IsNullOrEmpty(ec)) continue;
+                var dt = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+                var apEc = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+                var apNm = rdr.IsDBNull(3) ? null : rdr.GetString(3);
+                var apOn = rdr.IsDBNull(4) ? null : rdr.GetString(4);
+                if (!string.IsNullOrWhiteSpace(apNm) && apNm.Replace(" ", "").Length == 0) apNm = null;
+                dict[ec] = (dt, apEc, apNm, apOn);
+            }
+            return dict;
+        }
+
         [HttpGet("download-excel")]
         public async Task<IActionResult> DownloadEmployeeExcel(bool isActive = true, bool allEmployee = false, int companyId = 0)
         {
@@ -97,6 +137,34 @@ namespace HRMSAPI.Controllers
                             // Create a DataTable to hold the results
                             var dataTable = new DataTable();
                             dataTable.Load(reader);
+
+                            // Enrich with resignation approver columns (read-only side query).
+                            // Adds: "Resignation Approved By Ecode" + "Resignation Approved By Name".
+                            // Existing "Resignation Date" column (returned by the SP) is left untouched.
+                            reader.Close();
+                            var approverMap = await GetResignationApproverMap(connection);
+                            var ecodeColumn = dataTable.Columns.Contains("Employee Code") ? "Employee Code"
+                                              : dataTable.Columns.Contains("EmployeeCode") ? "EmployeeCode"
+                                              : dataTable.Columns.Contains("Ecode") ? "Ecode" : null;
+                            if (ecodeColumn != null)
+                            {
+                                if (!dataTable.Columns.Contains("Resignation Approved By Ecode"))
+                                    dataTable.Columns.Add("Resignation Approved By Ecode", typeof(string));
+                                if (!dataTable.Columns.Contains("Resignation Approved By Name"))
+                                    dataTable.Columns.Add("Resignation Approved By Name", typeof(string));
+                                if (!dataTable.Columns.Contains("Resignation Approved On"))
+                                    dataTable.Columns.Add("Resignation Approved On", typeof(string));
+                                foreach (DataRow row in dataTable.Rows)
+                                {
+                                    var ec = row[ecodeColumn]?.ToString();
+                                    if (!string.IsNullOrEmpty(ec) && approverMap.TryGetValue(ec, out var info))
+                                    {
+                                        row["Resignation Approved By Ecode"] = info.Ecode ?? (object)DBNull.Value;
+                                        row["Resignation Approved By Name"] = info.Name ?? (object)DBNull.Value;
+                                        row["Resignation Approved On"] = info.ApprovedOn ?? (object)DBNull.Value;
+                                    }
+                                }
+                            }
 
                             // Create Excel workbook and worksheet
                             using (var workbook = new XLWorkbook())
@@ -370,6 +438,32 @@ namespace HRMSAPI.Controllers
                                 }
 
                                 employees.Add(employee);
+                            }
+
+                            // Enrich with resignation approver fields. Read-only side
+                            // query against tblEmployeeSepration + tblEmployee. Adds
+                            // resignationApprovedByEcode + resignationApprovedByName per row.
+                            reader.Close();
+                            var approverMap = await GetResignationApproverMap(connection);
+                            foreach (var emp in employees)
+                            {
+                                string ec = null;
+                                if (emp.TryGetValue("Employee Code", out var v1) && v1 != null) ec = v1.ToString();
+                                else if (emp.TryGetValue("EmployeeCode", out var v2) && v2 != null) ec = v2.ToString();
+                                else if (emp.TryGetValue("Ecode", out var v3) && v3 != null) ec = v3.ToString();
+
+                                if (!string.IsNullOrEmpty(ec) && approverMap.TryGetValue(ec, out var info))
+                                {
+                                    emp["resignationApprovedByEcode"] = (object)info.Ecode ?? null;
+                                    emp["resignationApprovedByName"] = (object)info.Name ?? null;
+                                    emp["resignationApprovedOn"] = (object)info.ApprovedOn ?? null;
+                                }
+                                else
+                                {
+                                    emp["resignationApprovedByEcode"] = null;
+                                    emp["resignationApprovedByName"] = null;
+                                    emp["resignationApprovedOn"] = null;
+                                }
                             }
 
                             // Return the data with additional metadata

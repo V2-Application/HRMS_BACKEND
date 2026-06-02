@@ -290,6 +290,7 @@ namespace ASN.Controllers
                     Form11Attachment = files?.Form11Attachment ?? new List<IFormFile>(),
                     Form2Attachment = files?.Form2Attachment ?? new List<IFormFile>(),
                     GratuityFormAttachment = files?.GratuityFormAttachment ?? new List<IFormFile>(),
+                    UanCardAttachment = files?.UanCardAttachment ?? new List<IFormFile>(),
                 };
 
                 var validationError = DocumentValidationHelper.ValidateCandidateDocuments(candidateDocs);
@@ -374,6 +375,7 @@ namespace ASN.Controllers
                     Form11Attachment = files?.Form11Attachment ?? new List<IFormFile>(),
                     Form2Attachment = files?.Form2Attachment ?? new List<IFormFile>(),
                     GratuityFormAttachment = files?.GratuityFormAttachment ?? new List<IFormFile>(),
+                    UanCardAttachment = files?.UanCardAttachment ?? new List<IFormFile>(),
                 };
 
                 var validationError = DocumentValidationHelper.ValidateCandidateDocuments(candidateDocs);

@@ -45,6 +45,7 @@ namespace HRMSAPI.Models.Candidate
         public List<IFormFile>? Form11Attachment { get; set; }
         public List<IFormFile>? GratuityFormAttachment { get; set; }
         public List<IFormFile>? Form2Attachment { get; set; }
+        public List<IFormFile>? UanCardAttachment { get; set; }
 
     }
 

@@ -7,6 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Kestrel + form limits: medical-card bulk upload accepts a ZIP of ~3000 PDFs
+// (~150 MB compressed). Default Kestrel cap is 30 MB which would reject it.
+builder.WebHost.ConfigureKestrel(o => { o.Limits.MaxRequestBodySize = 2_147_483_648; }); // 2 GB
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = 2_147_483_648; // 2 GB
+    o.ValueLengthLimit = int.MaxValue;
+});
 // Configure Serilog
 //Log.Logger = new LoggerConfiguration()
 //    .MinimumLevel.Information()

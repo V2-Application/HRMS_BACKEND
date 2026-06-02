@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text.RegularExpressions;
 using HRMSAPI.Data;
 using HRMSAPI.Interfaces;
@@ -87,6 +88,193 @@ public class MedicalCardService : IMedicalCardService
 
     public Task<MedicalCardReparseResult> ReparseAllAsync(string updatedBy, bool dryRun = false)
         => ReparseInternalAsync(updatedBy, ecodeFilter: null, dryRun: dryRun);
+
+    // Bulk upload. Accepts loose PDFs, ZIPs containing PDFs, or a mix.
+    // Each file's name (without extension) is treated as the employee Ecode
+    // (e.g. V00362.pdf -> V00362). Files mapped to an unknown ecode are
+    // reported as skipped instead of failing the whole batch. After all
+    // saves succeed the parser is invoked once per touched ecode.
+    public async Task<MedicalCardBulkUploadResult> BulkUploadAsync(IEnumerable<Microsoft.AspNetCore.Http.IFormFile> files, string updatedBy, bool skipReparse = false)
+    {
+        var result = new MedicalCardBulkUploadResult();
+        if (files == null) { result.Errors.Add("No files provided."); return result; }
+
+        var incoming = files.Where(f => f != null && f.Length > 0).ToList();
+        if (incoming.Count == 0) { result.Errors.Add("No non-empty files in the upload."); return result; }
+
+        // Flatten: PDFs pass through; ZIPs are expanded to their .pdf entries.
+        // ZIP entries are streamed to per-entry temp files up-front (during
+        // ZipArchive enumeration) because the IFormFile request stream is
+        // not seekable — opening entries lazily later throws
+        // InvalidOperationException("inner stream position changed").
+        var entries = new List<(string fileName, Func<Stream> openStream)>();
+        var tempFilesToDelete = new List<string>();
+        try
+        {
+            foreach (var f in incoming)
+            {
+                var name = f.FileName ?? "(unnamed)";
+                if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Spool the ZIP to a temp file first — gives us a seekable
+                    // stream that ZipArchive can read without surprise.
+                    var zipTempPath = Path.Combine(Path.GetTempPath(), $"mc-zip-{Guid.NewGuid():N}.zip");
+                    tempFilesToDelete.Add(zipTempPath);
+                    try
+                    {
+                        using (var fs = new FileStream(zipTempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                            await f.CopyToAsync(fs);
+
+                        using var seekable = new FileStream(zipTempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        using var zip = new ZipArchive(seekable, ZipArchiveMode.Read, leaveOpen: false);
+
+                        var pdfEntries = zip.Entries
+                            .Where(e => e.Length > 0 &&
+                                        !string.IsNullOrEmpty(e.Name) &&
+                                        e.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+                        if (pdfEntries.Count == 0)
+                            result.Errors.Add($"{name}: ZIP contains no .pdf entries.");
+
+                        // Drain each entry into its own temp file *now* while
+                        // the archive is open. Closure captures the path only.
+                        foreach (var entry in pdfEntries)
+                        {
+                            var entryTemp = Path.Combine(Path.GetTempPath(), $"mc-pdf-{Guid.NewGuid():N}.pdf");
+                            tempFilesToDelete.Add(entryTemp);
+                            using (var es = entry.Open())
+                            using (var ts = new FileStream(entryTemp, FileMode.Create, FileAccess.Write, FileShare.None))
+                                await es.CopyToAsync(ts);
+
+                            var entryName = entry.Name;
+                            var captured = entryTemp;
+                            entries.Add((entryName, () => new FileStream(captured, FileMode.Open, FileAccess.Read, FileShare.Read)));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Errors.Add($"{name}: failed to read ZIP - {ex.Message}");
+                        _log.LogError(ex, "Failed to read ZIP {File}", name);
+                    }
+                }
+                else
+                {
+                    var captured = f;
+                    entries.Add((name, () => captured.OpenReadStream()));
+                }
+            }
+
+            result.TotalFiles = entries.Count;
+            if (entries.Count == 0)
+            {
+                if (result.Errors.Count == 0)
+                    result.Errors.Add("No usable files (PDFs or ZIPs containing PDFs) in the upload.");
+                return result;
+            }
+
+            // Pre-load valid ecodes once so we don't query the DB per file.
+            var requestedEcodes = entries
+                .Select(e => Path.GetFileNameWithoutExtension(e.fileName)?.Trim())
+                .Where(e => !string.IsNullOrEmpty(e))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var validEcodes = await _context.tblEmployees
+                .Where(e => requestedEcodes.Contains(e.Ecode))
+                .Select(e => e.Ecode)
+                .ToListAsync();
+            var validSet = new HashSet<string>(validEcodes, StringComparer.OrdinalIgnoreCase);
+
+            var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            var touchedEcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (fileName, openStream) in entries)
+            {
+                var item = new MedicalCardBulkUploadItem { FileName = fileName };
+                try
+                {
+                    var ecode = Path.GetFileNameWithoutExtension(fileName)?.Trim();
+                    item.Ecode = ecode;
+                    if (string.IsNullOrEmpty(ecode))
+                    {
+                        item.Error = "Filename has no ecode prefix.";
+                        result.SkippedCount++;
+                        result.Items.Add(item);
+                        continue;
+                    }
+                    if (!validSet.Contains(ecode))
+                    {
+                        item.Error = $"Ecode '{ecode}' not found in tblEmployee.";
+                        result.SkippedCount++;
+                        result.Items.Add(item);
+                        continue;
+                    }
+
+                    var folder = Path.Combine(webRoot, "MedicalCard", ecode);
+                    Directory.CreateDirectory(folder);
+                    var safeName = Path.GetFileName(fileName);
+                    var newName = $"{DateTime.Now:yyyyMMddHHmmssfff}_{safeName}";
+                    var diskPath = Path.Combine(folder, newName);
+                    using (var fs = new FileStream(diskPath, FileMode.Create))
+                    using (var src = openStream())
+                    {
+                        await src.CopyToAsync(fs);
+                    }
+
+                    var relativeUrl = $"MedicalCard/{ecode}/{newName}";
+                    // ExecuteUpdateAsync issues a single UPDATE without loading
+                    // the row into the change tracker — critical at 3k+ files.
+                    await _context.tblEmployees
+                        .Where(e => e.Ecode == ecode)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(e => e.MedicalCardUrl, relativeUrl)
+                            .SetProperty(e => e.LastUpdatedBy, updatedBy));
+
+                    item.Saved = true;
+                    item.Url = relativeUrl;
+                    touchedEcodes.Add(ecode);
+                    result.SavedCount++;
+                }
+                catch (Exception ex)
+                {
+                    item.Error = $"{ex.GetType().Name}: {ex.Message}";
+                    result.Errors.Add($"{fileName}: {item.Error}");
+                    _log.LogError(ex, "Bulk upload failed for file {File}", fileName);
+                }
+                result.Items.Add(item);
+            }
+
+            // Re-parse each touched ecode so the cards table is up-to-date.
+            // At scale (2k+) the parser phase dominates wall-time, so callers
+            // can pass skipReparse=true and trigger Re-parse all afterwards.
+            if (!skipReparse)
+            {
+                foreach (var ec in touchedEcodes)
+                {
+                    try
+                    {
+                        var r = await ReparseForEcodeAsync(ec, updatedBy);
+                        result.CardsParsed += r.CardsInserted;
+                        if (r.Errors.Count > 0) result.Errors.AddRange(r.Errors.Select(e => $"{ec}: {e}"));
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Errors.Add($"{ec}: reparse failed - {ex.Message}");
+                        _log.LogWarning(ex, "Bulk reparse failed for {Ecode}", ec);
+                    }
+                }
+            }
+
+            return result;
+        }
+        finally
+        {
+            foreach (var p in tempFilesToDelete)
+            {
+                try { if (File.Exists(p)) File.Delete(p); } catch { /* best-effort */ }
+            }
+        }
+    }
 
     private async Task<MedicalCardReparseResult> ReparseInternalAsync(string updatedBy, string ecodeFilter, bool dryRun)
     {

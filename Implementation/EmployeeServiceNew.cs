@@ -1800,6 +1800,7 @@ namespace HRMSAPI.Implementation
             await SaveFileListIfExists(files.EducationAttachment, "Education", "Education");
             await SaveFileListIfExists(files.ResumeAttachment, "Resume", "Resume");
             await SaveFileListIfExists(files.BankStatementVideo, "BankStatementVideo", "BankStatementVideo");
+            await SaveFileListIfExists(files.UanCardAttachment, "UanCard", "UanCard");
         }
 
         public async Task<string> SaveFile(IFormFile file, string folderName, string candidateId)

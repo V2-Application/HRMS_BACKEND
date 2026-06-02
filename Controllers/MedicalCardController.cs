@@ -77,4 +77,24 @@ public class MedicalCardController : ControllerBase
         if (!r.success) return BadRequest(new { status = false, message = r.message });
         return Ok(new { status = true, url = r.url });
     }
+
+    // POST api/MedicalCard/bulk-upload  — accepts many PDFs at once. Each
+    // file's name (without extension) maps to an employee ecode. Accepts
+    // loose PDFs, a ZIP of PDFs, or a mix.
+    //
+    // skipReparse=true skips the per-ecode PDF parse phase, returning as
+    // soon as files are saved + URLs updated. Use it for big imports (2k+)
+    // and trigger Re-parse all manually afterwards.
+    //
+    // Size cap is bumped to 2 GB to comfortably fit a 3000-PDF ZIP.
+    [HttpPost("bulk-upload")]
+    [Consumes("multipart/form-data")]
+    [RequestFormLimits(MultipartBodyLengthLimit = 2_147_483_648, ValueLengthLimit = int.MaxValue)]
+    [RequestSizeLimit(2_147_483_648)]
+    public async Task<IActionResult> BulkUpload(List<IFormFile> files, [FromQuery] bool skipReparse = false)
+    {
+        var user = User?.Identity?.Name ?? "System";
+        var r = await _svc.BulkUploadAsync(files, user, skipReparse);
+        return Ok(new { status = true, result = r });
+    }
 }

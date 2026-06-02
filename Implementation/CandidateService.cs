@@ -4132,6 +4132,7 @@ namespace HRMSAPI.Implementation
             await SaveFileListIfExists(files.Form11Attachment, "Form11", "Form11");
             await SaveFileListIfExists(files.Form2Attachment, "Form2", "Form2");
             await SaveFileListIfExists(files.Form11Attachment, "GratuityForm", "GratuityForm");
+            await SaveFileListIfExists(files.UanCardAttachment, "UanCard", "UanCard");
         }
         #endregion
 
