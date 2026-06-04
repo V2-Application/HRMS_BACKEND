@@ -10,7 +10,11 @@ namespace HRMSAPI.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
-    [RequirePageAccess("/emp-store-assignment")]
+    // NOTE: [RequirePageAccess("/emp-store-assignment")] is applied per-action on the
+    // admin endpoints below, NOT at the class level. GetPermissionIndexForECode is the
+    // per-user visibility lookup consumed by Employee Master for EVERY logged-in user
+    // (e.g. ClusterManager/StoreHR), so it must stay [Authorize]-only — gating it behind
+    // the admin page returned 403 for non-admins and silently blanked their store list.
     public class EmployeeStoreVisibilityMappingController : ControllerBase
     {
         private readonly IEmployeeStoreVisibilityMappingService _service;
@@ -36,6 +40,7 @@ namespace HRMSAPI.Controllers
         //    });
         //}
 
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpGet("GetActiveLocations")]
         public async Task<IActionResult> GetActiveLocations()
         {
@@ -53,6 +58,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <param name="eCode">Employee code to check store states for</param>
         /// <returns>FetchAndResponse with list of store states</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpGet("GetStoreState")]
         public async Task<IActionResult> GetStoreState([FromQuery] string eCode)
         {
@@ -71,6 +77,7 @@ namespace HRMSAPI.Controllers
         /// <param name="eCode">Employee code to check department states for</param>
         /// <param name="stCode">Store code to check department states for</param>
         /// <returns>FetchAndResponse with list of department states</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpGet("GetDeptState")]
         public async Task<IActionResult> GetDeptState([FromQuery] string eCode, [FromQuery] string stCode)
         {
@@ -88,6 +95,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <param name="request">Request containing ECode, StCode, and deselected department IDs</param>
         /// <returns>ExecuteAndReponse</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpPost("SetDeptExceptionsForStore")]
         public async Task<IActionResult> SetDeptExceptionsForStore([FromBody] SetDeptExceptionsForStoreDto request)
         {
@@ -115,6 +123,7 @@ namespace HRMSAPI.Controllers
         /// <param name="stCode">Store code to check designation states for</param>
         /// <param name="deptId">Department ID to check designation states for</param>
         /// <returns>FetchAndResponse with list of designation states</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpGet("GetDesigState")]
         public async Task<IActionResult> GetDesigState([FromQuery] string eCode, [FromQuery] string stCode, [FromQuery] string deptId)
         {
@@ -132,6 +141,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <param name="request">Request containing ECode, StCode, DeptId, and deselected designation IDs</param>
         /// <returns>ExecuteAndReponse</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpPost("SetDesigExceptionsForStoreDept")]
         public async Task<IActionResult> SetDesigExceptionsForStoreDept([FromBody] SetDesigExceptionsForStoreDeptDto request)
         {
@@ -177,6 +187,7 @@ namespace HRMSAPI.Controllers
         /// </summary>
         /// <param name="upsertDto">List of ECode and StCodes mappings</param>
         /// <returns>ExecuteAndReponse</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpPost("UpsertMappings")]
         public async Task<IActionResult> UpsertMappings([FromBody] EmployeeStoreMappingUpsertDto upsertDto)
         {
@@ -264,6 +275,7 @@ namespace HRMSAPI.Controllers
         /// <param name="file">Excel file containing ECode, StCode, and DeptName mappings</param>
         /// <param name="createdBy">User creating the mappings</param>
         /// <returns>ExecuteAndReponse with detailed validation results</returns>
+        [RequirePageAccess("/emp-store-assignment")]
         [HttpPost("UploadExcelWithDept")]
         public async Task<IActionResult> UploadExcelWithDept([FromForm] FileDTO fileD, [FromForm] string? createdBy = null)
         {
