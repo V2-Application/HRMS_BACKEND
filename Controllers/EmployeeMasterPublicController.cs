@@ -4,6 +4,7 @@ using HRMSAPI.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace HRMSAPI.Controllers
 {
@@ -18,16 +19,30 @@ namespace HRMSAPI.Controllers
     public class EmployeeMasterPublicController : ControllerBase
     {
         private readonly HRMSContext _db;
+        private readonly IMemoryCache _cache;
 
-        public EmployeeMasterPublicController(HRMSContext db)
+        // Cache key + TTL. Data only needs daily freshness, so a 1-hour TTL
+        // hides the 4-join 14k-row scan from per-request callers and keeps
+        // DB pressure off other endpoints (login, etc.).
+        private const string CACHE_KEY = "EmployeeMasterPublic:all";
+        private static readonly TimeSpan CACHE_TTL = TimeSpan.FromHours(1);
+
+        public EmployeeMasterPublicController(HRMSContext db, IMemoryCache cache)
         {
             _db = db;
+            _cache = cache;
         }
 
         // GET api/EmployeeMasterPublic
+        // GET api/EmployeeMasterPublic?refresh=true   (bypass + refill cache)
         [HttpGet]
-        public async Task<IActionResult> Get(CancellationToken ct)
+        public async Task<IActionResult> Get([FromQuery] bool refresh = false, CancellationToken ct = default)
         {
+            if (!refresh && _cache.TryGetValue(CACHE_KEY, out object? cached) && cached != null)
+            {
+                return Ok(cached);
+            }
+
             const string sql = @"
 SELECT
     e.Ecode                                                                            AS ecode,
@@ -76,13 +91,21 @@ ORDER BY e.Ecode;
                 }
             }
 
-            return Ok(new
+            var payload = new
             {
                 status = true,
                 generatedAt = DateTime.UtcNow,
                 count = rows.Count,
                 data = rows
+            };
+
+            _cache.Set(CACHE_KEY, payload, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = CACHE_TTL,
+                Size = 1
             });
+
+            return Ok(payload);
         }
     }
 }

@@ -10,6 +10,11 @@ namespace HRMSAPI.Models.Candidate
         public string? husbandName { get; set; }
         public string? location { get; set; }
         public string? department { get; set; }
+        // Sub-department chain selections (ids from tblSubDepartment). Optional; arrive as
+        // form-field strings like `department`. Parsed to int? when persisted.
+        public string? subDepartmentId1 { get; set; }
+        public string? subDepartmentId2 { get; set; }
+        public string? subDepartmentId3 { get; set; }
         public DateTime? joiningDate { get; set; }
         public string? grossSalary { get; set; }
         [JsonPropertyName("uanNo")]

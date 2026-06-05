@@ -40,5 +40,11 @@ namespace HRMSAPI.Data
         public string LocationName { get; set; }
         [StringLength(4000)]
         public string OpeningDate { get; set; }
+        [StringLength(255)]
+        public string SubDepartment1 { get; set; }
+        [StringLength(255)]
+        public string SubDepartment2 { get; set; }
+        [StringLength(255)]
+        public string SubDepartment3 { get; set; }
     }
 }

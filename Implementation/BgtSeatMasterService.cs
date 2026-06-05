@@ -101,6 +101,29 @@ namespace HRMSAPI.Implementation
     if (missingRepMgrDesig.Count > 0)
         return BuildFetchErrorResponse($"These reporting manager designations do not exist: {string.Join(", ", missingRepMgrDesig)}", HttpStatusCode.BadRequest);
 
+            // ===== Load active sub-department hierarchy for validation (raw SQL; no EF entity) =====
+            // Key: "{DepartmentId}|{ParentId(0=root)}|{DepthLevel}|{lower(name)}" -> (Id, canonical Name)
+            var subByKey = new Dictionary<string, (int Id, string Name)>(StringComparer.OrdinalIgnoreCase);
+            {
+                var subConnStr = _configuration.GetConnectionString("DefaultConnection");
+                await using var sconn = new SqlConnection(subConnStr);
+                await sconn.OpenAsync();
+                await using var scmd = new SqlCommand(
+                    @"SELECT SubDepartmentId, SubDepartmentName, DepartmentId, ISNULL(ParentSubDepartmentId,0) AS ParentId, DepthLevel
+                      FROM dbo.tblSubDepartment WHERE ISNULL(isDeleted,0)=0 AND ISNULL(isActive,1)=1", sconn);
+                await using var srdr = await scmd.ExecuteReaderAsync();
+                while (await srdr.ReadAsync())
+                {
+                    var sid = srdr.GetInt32(0);
+                    var snm = (srdr["SubDepartmentName"] as string ?? "").Trim();
+                    var sdept = srdr.GetInt32(2);
+                    var sparent = Convert.ToInt32(srdr["ParentId"]);
+                    var slvl = Convert.ToInt32(srdr["DepthLevel"]);
+                    subByKey[$"{sdept}|{sparent}|{slvl}|{snm.ToLowerInvariant()}"] = (sid, snm);
+                }
+            }
+            var subErrors = new List<string>();
+
             // ===== Build XML for the stored procedure (IDs only; names come from DB) =====
             var xRows = new XElement("rows");
 
@@ -145,6 +168,42 @@ namespace HRMSAPI.Implementation
                               : activeStr.Equals("InActive", StringComparison.OrdinalIgnoreCase) ? "InActive"
                               : string.Empty;
 
+                // Sub-department chain (optional). Blank => skip. If any value is provided it MUST
+                // match the hierarchy under this department/parent chain, else the row is rejected.
+                var sub1 = row.Cell(8).GetValue<string>()?.Trim();
+                var sub2 = row.Cell(9).GetValue<string>()?.Trim();
+                var sub3 = row.Cell(10).GetValue<string>()?.Trim();
+                string sub1Out = string.Empty, sub2Out = string.Empty, sub3Out = string.Empty;
+                if (!string.IsNullOrWhiteSpace(sub1) || !string.IsNullOrWhiteSpace(sub2) || !string.IsNullOrWhiteSpace(sub3))
+                {
+                    if (string.IsNullOrWhiteSpace(sub1))
+                        subErrors.Add($"Row {i + 2}: Sub Dept 1 is required when Sub Dept 2/3 are provided.");
+                    else if (!string.IsNullOrWhiteSpace(sub3) && string.IsNullOrWhiteSpace(sub2))
+                        subErrors.Add($"Row {i + 2}: Sub Dept 2 is required when Sub Dept 3 is provided.");
+                    else if (!subByKey.TryGetValue($"{dept.DepartmentId}|0|1|{sub1.ToLowerInvariant()}", out var n1))
+                        subErrors.Add($"Row {i + 2}: Sub Dept 1 '{sub1}' not found under department '{deptName}'.");
+                    else
+                    {
+                        sub1Out = n1.Name;
+                        if (!string.IsNullOrWhiteSpace(sub2))
+                        {
+                            if (!subByKey.TryGetValue($"{dept.DepartmentId}|{n1.Id}|2|{sub2.ToLowerInvariant()}", out var n2))
+                                subErrors.Add($"Row {i + 2}: Sub Dept 2 '{sub2}' not found under '{sub1}' (department '{deptName}').");
+                            else
+                            {
+                                sub2Out = n2.Name;
+                                if (!string.IsNullOrWhiteSpace(sub3))
+                                {
+                                    if (!subByKey.TryGetValue($"{dept.DepartmentId}|{n2.Id}|3|{sub3.ToLowerInvariant()}", out var n3))
+                                        subErrors.Add($"Row {i + 2}: Sub Dept 3 '{sub3}' not found under '{sub2}' (department '{deptName}').");
+                                    else
+                                        sub3Out = n3.Name;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 xRows.Add(new XElement("row",
                     new XAttribute("idx", i + 1),                // <— parse on SQL side
                     new XAttribute("loc", loc ?? string.Empty),
@@ -153,9 +212,18 @@ namespace HRMSAPI.Implementation
                     new XAttribute("rep_mgr_desig_id", repMgrDesigId),  // 0 => NULL in SQL
                     new XAttribute("salary", salaryOut),
                     new XAttribute("org", orgChart ?? string.Empty),
-                    new XAttribute("active", activeOut)
+                    new XAttribute("active", activeOut),
+                    new XAttribute("sub1", sub1Out),
+                    new XAttribute("sub2", sub2Out),
+                    new XAttribute("sub3", sub3Out)
                 ));
             }
+
+            // Hierarchy validation failures: reject the whole upload with row-level details.
+            if (subErrors.Count > 0)
+                return BuildFetchErrorResponse(
+                    "Sub-department hierarchy not matched:\n" + string.Join("\n", subErrors),
+                    HttpStatusCode.BadRequest);
 
             // Call proc and optionally read (SeatMasterNo, idx)
             using (var conn = _context.Database.GetDbConnection()) {
@@ -230,6 +298,9 @@ namespace HRMSAPI.Implementation
                 worksheet.Cell(1, 13).Value = "BGTReportingDesig";
                 worksheet.Cell(1, 14).Value = "ActualReportingDesig";
                 worksheet.Cell(1, 15).Value = "ACTIVE";
+                worksheet.Cell(1, 16).Value = "SubDepartment1";
+                worksheet.Cell(1, 17).Value = "SubDepartment2";
+                worksheet.Cell(1, 18).Value = "SubDepartment3";
 
                 for (int i = 0; i < data.Count; i++)
                 {
@@ -249,6 +320,9 @@ namespace HRMSAPI.Implementation
                     worksheet.Cell(i + 2, 13).Value = r.BGTReportingDesig;
                     worksheet.Cell(i + 2, 14).Value = r.ActualReportingDesig;
                     worksheet.Cell(i + 2, 15).Value = r.ACTIVE==true?"Active":"Inactive";
+                    worksheet.Cell(i + 2, 16).Value = r.SubDepartment1;
+                    worksheet.Cell(i + 2, 17).Value = r.SubDepartment2;
+                    worksheet.Cell(i + 2, 18).Value = r.SubDepartment3;
                 }
 
                 worksheet.Columns().AdjustToContents();

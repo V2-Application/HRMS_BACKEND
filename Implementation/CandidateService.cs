@@ -178,7 +178,10 @@ namespace HRMSAPI.Implementation
                         IsBankPassbookAttachmentUpoaded = isBankPassbook,
                         IsEducationAttachmentUploaded = isEducationAttachment,
                         StatusId = 4,
-                        PREV__EST_NO_ = candidate.prevEstNo
+                        PREV__EST_NO_ = candidate.prevEstNo,
+                        SubDepartmentId1 = candidate.subDepartmentId1,
+                        SubDepartmentId2 = candidate.subDepartmentId2,
+                        SubDepartmentId3 = candidate.subDepartmentId3
                     };
 
                     await _context.AddAsync(dataToBeInserted);
@@ -1661,6 +1664,25 @@ namespace HRMSAPI.Implementation
         }
 
 
+        // Resolves up to three tblSubDepartment ids to their names (one query) for read-only views.
+        private async Task<(string n1, string n2, string n3)> ResolveSubDeptNamesAsync(int? id1, int? id2, int? id3)
+        {
+            var ids = new[] { id1, id2, id3 }.Where(x => x.HasValue).Select(x => x.Value).Distinct().ToList();
+            if (ids.Count == 0) return ("", "", "");
+            var map = new Dictionary<int, string>();
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = $"SELECT SubDepartmentId, SubDepartmentName FROM dbo.tblSubDepartment WHERE SubDepartmentId IN ({string.Join(",", ids)})";
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                while (await rdr.ReadAsync())
+                    map[Convert.ToInt32(rdr["SubDepartmentId"])] = rdr["SubDepartmentName"] as string ?? "";
+            }
+            string Get(int? id) => id.HasValue && map.TryGetValue(id.Value, out var v) ? v : "";
+            return (Get(id1), Get(id2), Get(id3));
+        }
+
         public async Task<Response> GetCandidateInfo(int candidateID)
         {
             try
@@ -1695,6 +1717,7 @@ namespace HRMSAPI.Implementation
                                       .FirstOrDefault();
 
                 // Map to Candidate Model
+                var (csn1, csn2, csn3) = await ResolveSubDeptNamesAsync(candidateEntity.SubDepartmentId1, candidateEntity.SubDepartmentId2, candidateEntity.SubDepartmentId3);
                 var candidate = new Candidate
                 {
                     reportingHeadId = reportingHeadId ?? 0,
@@ -1709,6 +1732,12 @@ namespace HRMSAPI.Implementation
                     husbandName = candidateEntity.HUSBAND_NAME ?? "",
                     joiningDate = candidateEntity.JOINING_DATE,
                     department = candidateEntity.DEPARTMENT ?? "",
+                    subDepartmentId1 = candidateEntity.SubDepartmentId1,
+                    subDepartmentId2 = candidateEntity.SubDepartmentId2,
+                    subDepartmentId3 = candidateEntity.SubDepartmentId3,
+                    subDepartment1Name = csn1,
+                    subDepartment2Name = csn2,
+                    subDepartment3Name = csn3,
                     location = candidateEntity.LOCATION ?? "",
                     grossSalary = candidateEntity.GROSS_SALARY?.ToString() ?? "0",
                     uanNo = candidateEntity.UAN_NO ?? "",
@@ -3885,6 +3914,14 @@ namespace HRMSAPI.Implementation
             data.MOTHER_NAME = update.mothersName ?? data.MOTHER_NAME;
             data.DESIGNATION = update.designation ?? data.DESIGNATION;
             data.DEPARTMENT = update.department ?? data.DEPARTMENT;
+            // Sub-department chain (optional; ids from tblSubDepartment). Only applied when the form
+            // sent the field (null = not sent → preserve; "" = sent blank → clear).
+            if (update.subDepartmentId1 != null)
+                data.SubDepartmentId1 = int.TryParse(update.subDepartmentId1, out var _csd1) ? _csd1 : (int?)null;
+            if (update.subDepartmentId2 != null)
+                data.SubDepartmentId2 = int.TryParse(update.subDepartmentId2, out var _csd2) ? _csd2 : (int?)null;
+            if (update.subDepartmentId3 != null)
+                data.SubDepartmentId3 = int.TryParse(update.subDepartmentId3, out var _csd3) ? _csd3 : (int?)null;
             data.JOINING_DATE = update.joiningDate ?? data.JOINING_DATE;
             data.DOB = update.dob ?? data.DOB;
             data.LOCATION = update.location ?? data.LOCATION;

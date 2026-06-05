@@ -113,6 +113,26 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        // Resolves up to three tblSubDepartment ids to their names (one query). Used so read-only
+        // view pages can display sub-department names without running the cascading dropdowns.
+        private async Task<(string n1, string n2, string n3)> ResolveSubDeptNamesAsync(int? id1, int? id2, int? id3)
+        {
+            var ids = new[] { id1, id2, id3 }.Where(x => x.HasValue).Select(x => x.Value).Distinct().ToList();
+            if (ids.Count == 0) return ("", "", "");
+            var map = new Dictionary<int, string>();
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = $"SELECT SubDepartmentId, SubDepartmentName FROM dbo.tblSubDepartment WHERE SubDepartmentId IN ({string.Join(",", ids)})";
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                while (await rdr.ReadAsync())
+                    map[Convert.ToInt32(rdr["SubDepartmentId"])] = rdr["SubDepartmentName"] as string ?? "";
+            }
+            string Get(int? id) => id.HasValue && map.TryGetValue(id.Value, out var v) ? v : "";
+            return (Get(id1), Get(id2), Get(id3));
+        }
+
         public async Task<FetchAndResponse> GetEmployeeOrCandidateById(int Id,bool isCandidate = true)
         {
             try {
@@ -125,6 +145,7 @@ namespace HRMSAPI.Implementation
                     }
 
                     // Map to Candidate Model
+                    var (csn1, csn2, csn3) = await ResolveSubDeptNamesAsync(candidateEntity.SubDepartmentId1, candidateEntity.SubDepartmentId2, candidateEntity.SubDepartmentId3);
                     var candidate = new HRMSAPI.Models.Candidate.Candidate
                     {
                         cid = candidateEntity.Id,
@@ -136,6 +157,12 @@ namespace HRMSAPI.Implementation
                         husbandName = candidateEntity.HUSBAND_NAME ?? "",
                         joiningDate = candidateEntity.JOINING_DATE,
                         department = candidateEntity.DEPARTMENT ?? "",
+                        subDepartmentId1 = candidateEntity.SubDepartmentId1,
+                        subDepartmentId2 = candidateEntity.SubDepartmentId2,
+                        subDepartmentId3 = candidateEntity.SubDepartmentId3,
+                        subDepartment1Name = csn1,
+                        subDepartment2Name = csn2,
+                        subDepartment3Name = csn3,
                         location = candidateEntity.LOCATION ?? "",
                         grossSalary = candidateEntity.GROSS_SALARY?.ToString() ?? "0",
                         uanNo = candidateEntity.UAN_NO ?? "",
@@ -351,6 +378,13 @@ namespace HRMSAPI.Implementation
                         candidate.husbandName = candidateEntity?.HUSBAND_NAME ?? "";
                         candidate.joiningDate = employeeEntity.DOJ;
                         candidate.department = employeeEntity?.DepartmentId.ToString() ?? "";
+                        candidate.subDepartmentId1 = employeeEntity?.SubDepartmentId1;
+                        candidate.subDepartmentId2 = employeeEntity?.SubDepartmentId2;
+                        candidate.subDepartmentId3 = employeeEntity?.SubDepartmentId3;
+                        var (esn1, esn2, esn3) = await ResolveSubDeptNamesAsync(employeeEntity?.SubDepartmentId1, employeeEntity?.SubDepartmentId2, employeeEntity?.SubDepartmentId3);
+                        candidate.subDepartment1Name = esn1;
+                        candidate.subDepartment2Name = esn2;
+                        candidate.subDepartment3Name = esn3;
                         //location = candidateEntity.LOCATION ?? "";
                         candidate.location = employeeEntity.LocationId.ToString() ?? "";
                         candidate.grossSalary = employeeEntity.GROSS_SALARY?.ToString() ?? "0";
@@ -768,6 +802,14 @@ namespace HRMSAPI.Implementation
                 // candidateData.HUSBAND_NAME = employee.candidateInfo.husbandName ?? "";
                 employeeData.DOJ = employee.candidateInfo.joiningDate;
                 employeeData.DepartmentId = Convert.ToInt32(employee.candidateInfo.department);
+                // Sub-department chain (optional; ids from tblSubDepartment). Only applied when the
+                // form actually sent the field (null = not sent → preserve; "" = sent blank → clear).
+                if (details.subDepartmentId1 != null)
+                    employeeData.SubDepartmentId1 = int.TryParse(details.subDepartmentId1, out var _sd1) ? _sd1 : (int?)null;
+                if (details.subDepartmentId2 != null)
+                    employeeData.SubDepartmentId2 = int.TryParse(details.subDepartmentId2, out var _sd2) ? _sd2 : (int?)null;
+                if (details.subDepartmentId3 != null)
+                    employeeData.SubDepartmentId3 = int.TryParse(details.subDepartmentId3, out var _sd3) ? _sd3 : (int?)null;
                 // candidateData.LOCATION = employee.candidateInfo.location ?? "";
                 employeeData.LocationId = Convert.ToInt32(employee.candidateInfo.location);
                 employeeData.GROSS_SALARY = decimal.TryParse(employee.candidateInfo.grossSalary, out var grossSalary)

@@ -33,6 +33,11 @@ public partial class Candidate
 
     public string DEPARTMENT { get; set; }
 
+    // Sub-department chain (ids from tblSubDepartment); nullable/optional.
+    public int? SubDepartmentId1 { get; set; }
+    public int? SubDepartmentId2 { get; set; }
+    public int? SubDepartmentId3 { get; set; }
+
     public DateTime? JOINING_DATE { get; set; }
 
     public decimal? GROSS_SALARY { get; set; }

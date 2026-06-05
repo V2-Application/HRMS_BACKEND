@@ -14,6 +14,14 @@ namespace HRMSAPI.Models.Candidate
         public string designationName { get; internal set; }
         public string? companyName { get; internal set; }
         public string? esicno { get; set; }
+        // Sub-department chain (ids from tblSubDepartment); used for edit prefill + insert binding.
+        public int? subDepartmentId1 { get; set; }
+        public int? subDepartmentId2 { get; set; }
+        public int? subDepartmentId3 { get; set; }
+        // Resolved names (for read-only view pages that can't run the cascading dropdowns).
+        public string? subDepartment1Name { get; set; }
+        public string? subDepartment2Name { get; set; }
+        public string? subDepartment3Name { get; set; }
     }
     public class CandidateDocs
     {
