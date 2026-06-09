@@ -94,6 +94,11 @@
         public string DepartmentName { get; set; }
         public string DesignationName { get; set; }
 
+        // Sub-department names (resolved from tblEmployee.SubDepartmentId1/2/3 via tblSubDepartment)
+        public string? SubDepartment1Name { get; set; }
+        public string? SubDepartment2Name { get; set; }
+        public string? SubDepartment3Name { get; set; }
+
         public DateTime? DOJ { get; set; }
         public string ResignationTypeName { get; set; }
         public DateTime? DateOfLeft { get; set; }

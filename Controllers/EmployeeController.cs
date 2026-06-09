@@ -112,6 +112,45 @@ WHERE l.rn = 1";
             return dict;
         }
 
+        // Builds a map of Ecode -> (subDept1, subDept2, subDept3) names from tblEmployee +
+        // tblSubDepartment. Read-only; used to enrich Employee Master report downloads.
+        private async Task<Dictionary<string, (string? n1, string? n2, string? n3)>> GetSubDeptNameMapByEcode(System.Data.Common.DbConnection conn)
+        {
+            var result = new Dictionary<string, (string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
+            var emp = new List<(string ec, int? s1, int? s2, int? s3)>();
+            var subIds = new HashSet<int>();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT Ecode, SubDepartmentId1, SubDepartmentId2, SubDepartmentId3 FROM dbo.tblEmployee WHERE SubDepartmentId1 IS NOT NULL OR SubDepartmentId2 IS NOT NULL OR SubDepartmentId3 IS NOT NULL";
+                cmd.CommandTimeout = 0;
+                using var rdr = await cmd.ExecuteReaderAsync();
+                while (await rdr.ReadAsync())
+                {
+                    var ec = rdr["Ecode"] as string;
+                    if (string.IsNullOrWhiteSpace(ec)) continue;
+                    int? Gid(string c) => rdr[c] == DBNull.Value ? (int?)null : Convert.ToInt32(rdr[c]);
+                    var s1 = Gid("SubDepartmentId1"); var s2 = Gid("SubDepartmentId2"); var s3 = Gid("SubDepartmentId3");
+                    emp.Add((ec.Trim(), s1, s2, s3));
+                    if (s1.HasValue) subIds.Add(s1.Value);
+                    if (s2.HasValue) subIds.Add(s2.Value);
+                    if (s3.HasValue) subIds.Add(s3.Value);
+                }
+            }
+            var names = new Dictionary<int, string>();
+            if (subIds.Count > 0)
+            {
+                using var cmd2 = conn.CreateCommand();
+                cmd2.CommandText = $"SELECT SubDepartmentId, SubDepartmentName FROM dbo.tblSubDepartment WHERE SubDepartmentId IN ({string.Join(",", subIds)})";
+                using var rdr2 = await cmd2.ExecuteReaderAsync();
+                while (await rdr2.ReadAsync())
+                    names[Convert.ToInt32(rdr2["SubDepartmentId"])] = rdr2["SubDepartmentName"] as string ?? "";
+            }
+            string NameOf(int? id) => id.HasValue && names.TryGetValue(id.Value, out var v) ? v : "";
+            foreach (var e in emp)
+                result[e.ec] = (NameOf(e.s1), NameOf(e.s2), NameOf(e.s3));
+            return result;
+        }
+
         [HttpGet("download-excel")]
         public async Task<IActionResult> DownloadEmployeeExcel(bool isActive = true, bool allEmployee = false, int companyId = 0)
         {
@@ -163,6 +202,42 @@ WHERE l.rn = 1";
                                         row["Resignation Approved By Name"] = info.Name ?? (object)DBNull.Value;
                                         row["Resignation Approved On"] = info.ApprovedOn ?? (object)DBNull.Value;
                                     }
+                                }
+                            }
+
+                            // Enrich with sub-department name columns (read-only side query),
+                            // resolved from tblEmployee.SubDepartmentId1/2/3 via tblSubDepartment.
+                            if (ecodeColumn != null)
+                            {
+                                var subDeptMap = await GetSubDeptNameMapByEcode(connection);
+                                if (!dataTable.Columns.Contains("Sub Department 1"))
+                                    dataTable.Columns.Add("Sub Department 1", typeof(string));
+                                if (!dataTable.Columns.Contains("Sub Department 2"))
+                                    dataTable.Columns.Add("Sub Department 2", typeof(string));
+                                if (!dataTable.Columns.Contains("Sub Department 3"))
+                                    dataTable.Columns.Add("Sub Department 3", typeof(string));
+                                foreach (DataRow row in dataTable.Rows)
+                                {
+                                    var ec = row[ecodeColumn]?.ToString();
+                                    if (!string.IsNullOrEmpty(ec) && subDeptMap.TryGetValue(ec, out var sd))
+                                    {
+                                        row["Sub Department 1"] = (object?)sd.n1 ?? DBNull.Value;
+                                        row["Sub Department 2"] = (object?)sd.n2 ?? DBNull.Value;
+                                        row["Sub Department 3"] = (object?)sd.n3 ?? DBNull.Value;
+                                    }
+                                }
+
+                                // Position the sub-department columns right after the Department column
+                                var deptCol = dataTable.Columns.Cast<DataColumn>().FirstOrDefault(c =>
+                                    c.ColumnName.IndexOf("Department", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                                    c.ColumnName.IndexOf("Sub", StringComparison.OrdinalIgnoreCase) < 0);
+                                if (deptCol != null)
+                                {
+                                    int baseOrd = deptCol.Ordinal;
+                                    int max = dataTable.Columns.Count - 1;
+                                    dataTable.Columns["Sub Department 1"].SetOrdinal(Math.Min(baseOrd + 1, max));
+                                    dataTable.Columns["Sub Department 2"].SetOrdinal(Math.Min(baseOrd + 2, max));
+                                    dataTable.Columns["Sub Department 3"].SetOrdinal(Math.Min(baseOrd + 3, max));
                                 }
                             }
 
@@ -463,6 +538,29 @@ WHERE l.rn = 1";
                                     emp["resignationApprovedByEcode"] = null;
                                     emp["resignationApprovedByName"] = null;
                                     emp["resignationApprovedOn"] = null;
+                                }
+                            }
+
+                            // Enrich with sub-department names (read-only side query).
+                            var subDeptMap = await GetSubDeptNameMapByEcode(connection);
+                            foreach (var emp in employees)
+                            {
+                                string ecSub = null;
+                                if (emp.TryGetValue("Employee Code", out var s1) && s1 != null) ecSub = s1.ToString();
+                                else if (emp.TryGetValue("EmployeeCode", out var s2) && s2 != null) ecSub = s2.ToString();
+                                else if (emp.TryGetValue("Ecode", out var s3) && s3 != null) ecSub = s3.ToString();
+
+                                if (!string.IsNullOrEmpty(ecSub) && subDeptMap.TryGetValue(ecSub, out var sd))
+                                {
+                                    emp["subDepartment1"] = sd.n1;
+                                    emp["subDepartment2"] = sd.n2;
+                                    emp["subDepartment3"] = sd.n3;
+                                }
+                                else
+                                {
+                                    emp["subDepartment1"] = null;
+                                    emp["subDepartment2"] = null;
+                                    emp["subDepartment3"] = null;
                                 }
                             }
 

@@ -3120,6 +3120,59 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
+                        // ── Enrich with sub-department names (batch; 2 small lookups, no per-row queries) ──
+                        // The proc doesn't return sub-dept ids, so resolve them from tblEmployee and map
+                        // SubDepartmentId1/2/3 -> name. Only employees that actually have a sub-dept set
+                        // are fetched, so the maps stay small.
+                        if (employees.Count > 0)
+                        {
+                            var empSub = new Dictionary<long, (int? s1, int? s2, int? s3)>();
+                            var subIds = new HashSet<int>();
+                            using (var cmdEmp = connection.CreateCommand())
+                            {
+                                cmdEmp.CommandText = "SELECT EmployeeId, SubDepartmentId1, SubDepartmentId2, SubDepartmentId3 FROM dbo.tblEmployee WHERE SubDepartmentId1 IS NOT NULL OR SubDepartmentId2 IS NOT NULL OR SubDepartmentId3 IS NOT NULL";
+                                cmdEmp.CommandTimeout = 0;
+                                using (var rdr = await cmdEmp.ExecuteReaderAsync())
+                                {
+                                    while (await rdr.ReadAsync())
+                                    {
+                                        long eid = Convert.ToInt64(rdr["EmployeeId"]);
+                                        int? Gid(string c) => rdr[c] == DBNull.Value ? (int?)null : Convert.ToInt32(rdr[c]);
+                                        var s1 = Gid("SubDepartmentId1"); var s2 = Gid("SubDepartmentId2"); var s3 = Gid("SubDepartmentId3");
+                                        empSub[eid] = (s1, s2, s3);
+                                        if (s1.HasValue) subIds.Add(s1.Value);
+                                        if (s2.HasValue) subIds.Add(s2.Value);
+                                        if (s3.HasValue) subIds.Add(s3.Value);
+                                    }
+                                }
+                            }
+
+                            var subNames = new Dictionary<int, string>();
+                            if (subIds.Count > 0)
+                            {
+                                using (var cmdSub = connection.CreateCommand())
+                                {
+                                    cmdSub.CommandText = $"SELECT SubDepartmentId, SubDepartmentName FROM dbo.tblSubDepartment WHERE SubDepartmentId IN ({string.Join(",", subIds)})";
+                                    using (var rdr2 = await cmdSub.ExecuteReaderAsync())
+                                    {
+                                        while (await rdr2.ReadAsync())
+                                            subNames[Convert.ToInt32(rdr2["SubDepartmentId"])] = rdr2["SubDepartmentName"] as string ?? "";
+                                    }
+                                }
+                            }
+
+                            string NameOf(int? id) => id.HasValue && subNames.TryGetValue(id.Value, out var v) ? v : "";
+                            foreach (var e in employees)
+                            {
+                                if (e.EmployeeId > 0 && empSub.TryGetValue(e.EmployeeId, out var ids))
+                                {
+                                    e.SubDepartment1Name = NameOf(ids.s1);
+                                    e.SubDepartment2Name = NameOf(ids.s2);
+                                    e.SubDepartment3Name = NameOf(ids.s3);
+                                }
+                            }
+                        }
+
                         // Retrieve Output Parameters
                         long totalCount = Convert.ToInt64(totalEmployeesParam.Value);
                         int currentPageNumber = Convert.ToInt32(currentPageNumberParam.Value);

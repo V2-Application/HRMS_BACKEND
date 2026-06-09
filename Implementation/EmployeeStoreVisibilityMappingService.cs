@@ -359,6 +359,21 @@ namespace HRMSAPI.Implementation
 
                     // Get existing mappings for this ECode
                     var existingForEcode = existingMappings.Where(x => x.ECode == mapping.ECode).ToList();
+
+                    // Clear any active dept/designation DENY exceptions for this ECode so that
+                    // saving a store assignment grants FULL visibility of the assigned stores'
+                    // employees. This prevents the stale "Upload Excel With Dept" blanket-deny rows
+                    // (DeptId/DesigId set, IsActive=0) from hiding assigned-store employees — the
+                    // recurring ClusterManager "stores assigned but no employees visible" issue.
+                    foreach (var deny in existingForEcode.Where(x => x.IsDeleted != true
+                                && (x.DeptId != null || x.DesigId != null)))
+                    {
+                        deny.IsActive = false;
+                        deny.IsDeleted = true;
+                        deny.UpdatedOn = DateTime.Now;
+                        deny.UpdatedBy = upsertDto.UpdatedBy;
+                    }
+
                     if (!hasStCodes)
                     {
                         foreach (var existing in existingForEcode)
@@ -790,25 +805,22 @@ namespace HRMSAPI.Implementation
                     return BuildExecuteErrorResponse($"Invalid department names found: {string.Join(", ", invalidDeptNames)}", HttpStatusCode.BadRequest);
                 }
 
-                // ── Pre-fetch all master data in one shot (avoid N+1 queries) ──────
-                var allDeptIds = await _context.tblDepartments
-                    .Select(d => d.DepartmentId)
+                // ── Additive, allow-only insert (NEVER truncate; never modify existing data) ──────
+                // Per the data-safety requirement: this uploader only ADDS store-access (base-allow)
+                // rows for ECode+Store combos that aren't already present. It does NOT truncate, does
+                // NOT touch/soft-delete/update existing rows, and does NOT create any dept/designation
+                // DENY exception rows (those blanket denies previously hid assigned-store employees).
+                var uploadedEcodes = validMappings.Select(m => m.ECode).Distinct().ToList();
+
+                // Existing active store-access combos for the uploaded ECodes → skip to avoid duplicates
+                var existingAllowList = await _context.tblEmployeeStroreVisibilityMappings
+                    .Where(x => uploadedEcodes.Contains(x.ECode)
+                                && x.DeptId == null && x.DesigId == null
+                                && x.IsActive == true && x.IsDeleted != true)
+                    .Select(x => new { x.ECode, x.StCode })
                     .ToListAsync();
-
-                var allDesigIdsInSystem = await _context.tblDesignations
-                    .Select(d => d.DesignationId)
-                    .ToListAsync();
-
-                // dept → list of mapped (allowed) designation IDs
-                var deptDesigMap = (await _context.DepartmentDesignationMappings
-                    .Where(ddm => ddm.ISActive == true && ddm.IsDeleted != true && ddm.DesigId.HasValue)
-                    .Select(ddm => new { ddm.DeptId, DesigId = ddm.DesigId!.Value })
-                    .ToListAsync())
-                    .GroupBy(x => x.DeptId)
-                    .ToDictionary(g => g.Key, g => g.Select(x => x.DesigId).ToHashSet());
-
-                // ── Delete all existing records and replace with new hierarchy ──────
-                await _context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE dbo.tblEmployeeStroreVisibilityMapping");
+                var existingAllowSet = new HashSet<string>(
+                    existingAllowList.Select(x => (x.ECode ?? "") + "|" + (x.StCode ?? "")));
 
                 var storeAccessGroups = validMappings
                     .GroupBy(m => new { m.ECode, m.StCode })
@@ -820,9 +832,13 @@ namespace HRMSAPI.Implementation
                 {
                     var eCode = group.Key.ECode;
                     var stCode = group.Key.StCode;
-                    var allowedDeptNames = group.Select(m => m.DeptName).ToList();
 
-                    // Store access record
+                    // Skip combos that already have an active store-access row — no duplicates and
+                    // no modification of existing data.
+                    if (existingAllowSet.Contains((eCode ?? "") + "|" + (stCode ?? "")))
+                        continue;
+
+                    // Store-access (base-allow) row only — no deny/exception rows.
                     newRecords.Add(new tblEmployeeStroreVisibilityMapping
                     {
                         ECode = eCode, StCode = stCode,
@@ -830,40 +846,6 @@ namespace HRMSAPI.Implementation
                         IsActive = true, IsDeleted = false,
                         CreatedOn = DateTime.Now, CreatedBy = createdBy
                     });
-
-                    var allowedDeptIds = allowedDeptNames
-                        .Select(name => deptNameToIdMap[name.ToUpperInvariant()])
-                        .ToHashSet();
-
-                    // Excluded department records
-                    foreach (var deptId in allDeptIds.Where(d => !allowedDeptIds.Contains(d)))
-                    {
-                        newRecords.Add(new tblEmployeeStroreVisibilityMapping
-                        {
-                            ECode = eCode, StCode = stCode,
-                            DeptId = deptId.ToString(), DesigId = null,
-                            IsActive = false, IsDeleted = false,
-                            CreatedOn = DateTime.Now, CreatedBy = createdBy
-                        });
-                    }
-
-                    // Designation exclusions for allowed departments
-                    foreach (var deptId in allowedDeptIds)
-                    {
-                        if (!deptDesigMap.TryGetValue(deptId, out var mappedDesigIds) || !mappedDesigIds.Any())
-                            continue;
-
-                        foreach (var desigId in allDesigIdsInSystem.Where(d => !mappedDesigIds.Contains(d)))
-                        {
-                            newRecords.Add(new tblEmployeeStroreVisibilityMapping
-                            {
-                                ECode = eCode, StCode = stCode,
-                                DeptId = deptId.ToString(), DesigId = desigId.ToString(),
-                                IsActive = false, IsDeleted = false,
-                                CreatedOn = DateTime.Now, CreatedBy = createdBy
-                            });
-                        }
-                    }
                 }
 
                 // Insert in batches of 5000 to avoid memory/timeout issues
@@ -877,7 +859,7 @@ namespace HRMSAPI.Implementation
                 }
 
                 response.Success = true;
-                response.Message = $"Hierarchy replaced. {newRecords.Count} records inserted for {response.ValidRows} mappings.";
+                response.Message = $"Store access added (allow-only). {newRecords.Count} new store-access row(s) inserted for {response.ValidRows} mapping(s); existing rows left untouched.";
                 response.DuplicateRows = 0;
 
                 return BuildExecuteSuccessResponse(response.Message);
