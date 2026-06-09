@@ -1,0 +1,916 @@
+﻿  
+--V28460    
+    --Select * from [fn_GetMonthlyPunchesRange_productionnewnick_live]('2025-11-05','2025-11-05','rtnr63')    
+    --Order by AttendanceDate    
+CREATE     FUNCTION [dbo].[fn_GetMonthlyPunchesRange_productionnewnick_live]   --('2025-10-01','2025-10-31',null     
+(        
+    @FromDate DATE,        
+    @ToDate   DATE,        
+    @ECode    NVARCHAR(50) = NULL        
+)        
+RETURNS TABLE        
+AS        
+RETURN        
+  
+(      
+select  * from tbl_fn_GetMonthlyPunchesRange_productionnewnick_test (nolock) where   
+AttendanceDate between @FromDate  and @ToDate  
+and (ECode=@ECode or  @ECode is null)  
+  
+--    /* ------------------------ Base calendar & employees ------------------------ */        
+--    WITH Numbers AS (        
+--        SELECT n FROM (VALUES        
+--            (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),        
+--            (10),(11),(12),(13),(14),(15),(16),(17),(18),(19),        
+--            (20),(21),(22),(23),(24),(25),(26),(27),(28),(29),        
+--            (30),(31),(32),(33),(34),(35),(36),(37),(38),(39),        
+--            (40),(41),(42),(43),(44),(45),(46),(47),(48),(49),        
+--            (50),(51),(52),(53),(54),(55),(56),(57),(58),(59),        
+--            (60),(61),(62),(63),(64),(65),(66),(67),(68),(69),        
+--            (70),(71),(72),(73),(74),(75),(76),(77),(78),(79),        
+--            (80),(81),(82),(83),(84),(85),(86),(87),(88),(89),        
+--            (90),(91),(92),(93),(94),(95),(96),(97),(98),(99),(100)        
+--        ) AS Numbers(n)        
+--    ),        
+--    DateRange AS (        
+--        SELECT DATEADD(DAY, n, @FromDate) AS DateValue        
+--        FROM Numbers        
+--        WHERE DATEADD(DAY, n, @FromDate) <= @ToDate        
+--    ),        
+--    EmployeeList AS (        
+--        SELECT         
+--            e.EmployeeId,        
+--            e.ECode,        
+--            EmployeeName = CASE         
+--                WHEN e.FirstName IS NULL AND e.[FULL NAME] IS NULL THEN 'NA'        
+--                WHEN e.FirstName IS NULL THEN ISNULL(e.[FULL NAME], 'NA')        
+--                ELSE LTRIM(ISNULL(e.FirstName,'') + CASE WHEN e.LastName IS NOT NULL THEN ' ' + e.LastName ELSE '' END)        
+--            END,        
+--            dsg.DesignationName,        
+--            loc.LocationName, loc.STCode, dept.DepartmentName,        
+--            e.LocationId,        
+--            sm.ShiftID, sm.ShiftName,        
+--            COALESCE(CAST(sm.StartTime AS TIME(0)), CAST('08:00:00' AS TIME(0))) AS ShiftStartTime,        
+--            CAST(sm.EndTime AS TIME(0)) AS ShiftEndTime,        
+--            CASE WHEN sm.ShiftID IS NULL THEN 0 ELSE 1 END AS HasShift,        
+--            CASE WHEN sm.ShiftID = 19 OR sm.ShiftName = 'Flexible Shift' THEN 1 ELSE 0 END AS IsFlexibleShift        
+--        FROM tblEmployee e WITH (NOLOCK)       
+--        LEFT JOIN tblDesignation dsg WITH (NOLOCK) ON e.DesignationId = dsg.DesignationId        
+--        LEFT JOIN tblLocation loc WITH (NOLOCK) ON e.LocationId = loc.LocationId        
+--        LEFT JOIN tblDepartment dept WITH (NOLOCK) ON e.DepartmentId = dept.DepartmentId        
+--        LEFT JOIN tblShiftMaster sm WITH (NOLOCK) ON sm.ShiftID = e.ShiftId AND sm.IsActive = 1        
+--        WHERE (@ECode IS NULL OR e.ECode = @ECode)        
+--    ),        
+--    HolidayRaw AS (        
+--        SELECT hm.HolidayDate, hm.HolidayName, tl.STCode        
+--        FROM HolidayMaster hm  WITH (NOLOCK)       
+--        INNER JOIN LocationTypeMaster ltm WITH (NOLOCK) ON ltm.Id = hm.LocationType         
+--        INNER JOIN GroupMaster gm WITH (NOLOCK) ON gm.Id = hm.LocationValue        
+--        INNER JOIN GroupWiseStoreCodeMapping g WITH (NOLOCK) ON g.GroupId = gm.Id        
+--        INNER JOIN tblLocation tl WITH (NOLOCK) ON tl.STCode = g.ST_CD        
+--        WHERE hm.HolidayDate BETWEEN @FromDate AND @ToDate        
+--    ),        
+--    HolidayBase AS (        
+--        SELECT r.STCode, r.HolidayDate, MIN(r.HolidayName) AS HolidayName        
+--        FROM HolidayRaw r        
+--        GROUP BY r.STCode, r.HolidayDate        
+--    ),    
+--    EmployeeDateGrid AS (        
+--        SELECT         
+--            el.EmployeeId, el.ECode, el.EmployeeName, el.DesignationName, el.LocationName,        
+--            el.STCode, el.DepartmentName, el.LocationId,        
+--            el.ShiftID, el.ShiftName, el.ShiftStartTime, el.ShiftEndTime, el.HasShift, el.IsFlexibleShift,        
+--            CASE WHEN el.HasShift = 1 AND el.ShiftStartTime > el.ShiftEndTime THEN 1 ELSE 0 END AS IsCrossMidnight,        
+--            dr.DateValue AS PunchDate,        
+--     CASE WHEN DATEPART(WEEKDAY, dr.DateValue) IN (1, 7) THEN 1 ELSE 0 END AS IsWeekend,        
+--            CASE WHEN dr.DateValue > CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS IsFutureDate,        
+--            CASE WHEN hb.HolidayDate IS NOT NULL THEN 1 ELSE 0 END AS IsHoliday,        
+--            ISNULL(hb.HolidayName, '') AS HolidayName        
+--        FROM EmployeeList el        
+--        CROSS JOIN DateRange dr        
+--        LEFT JOIN HolidayBase hb ON hb.STCode = el.STCode AND hb.HolidayDate = dr.DateValue        
+--    ),        
+        
+--    /* --------------------------- Device punches (machine) --------------------------- */        
+--    PunchData AS (        
+--        SELECT         
+--            e.EmployeeId, e.ECode, p.PunchDate, p.Machine_Type,        
+--            p.Punch1, p.Punch2, p.Punch3, p.Punch4, p.Punch5, p.Punch6,        
+--            p.Punch7, p.Punch8, p.Punch9, p.Punch10, p.Punch11, p.Punch12,        
+--            p.RegularizePunchIn, p.RegularizePuncOut, p.IsRegularize,        
+--            EmployeeName = CASE         
+--                WHEN e.FirstName IS NULL AND e.[FULL NAME] IS NULL THEN 'NA'        
+--                WHEN e.FirstName IS NULL THEN ISNULL(e.[FULL NAME], 'NA')        
+--                ELSE LTRIM(ISNULL(e.FirstName,'') + CASE WHEN e.LastName IS NOT NULL THEN ' ' + e.LastName ELSE '' END)        
+--            END,        
+--            dsg.DesignationName, loc.LocationName, loc.STCode, dept.DepartmentName        
+--        FROM tblEmployee  e  WITH (NOLOCK)       
+--        LEFT JOIN tblDesignation dsg WITH (NOLOCK) ON e.DesignationId = dsg.DesignationId        
+--        LEFT JOIN tblLocation loc WITH (NOLOCK) ON e.LocationId = loc.LocationId        
+--        LEFT JOIN tblDepartment dept WITH (NOLOCK) ON e.DepartmentId = dept.DepartmentId        
+--        LEFT JOIN tblEmployeeMultiPunches p WITH (NOLOCK) ON e.ECode = p.UserID AND p.PunchDate BETWEEN @FromDate AND @ToDate        
+--        WHERE (@ECode IS NULL OR e.ECode = @ECode)        
+--    ),        
+--    AggregatedPunches AS (        
+--        SELECT        
+--            EmployeeId, ECode, PunchDate,        
+--            STRING_AGG(Machine_Type, ',') AS Machine_Type,        
+--            EmployeeName, DesignationName, LocationName, STCode,        
+--            RegularizePunchIn, RegularizePuncOut, CAST(IsRegularize AS BIT) AS IsRegularize,        
+--            DepartmentName,        
+--            ISNULL(Punch1, '00:00:00') AS Punch1, ISNULL(Punch2, '00:00:00') AS Punch2,        
+--            ISNULL(Punch3, '00:00:00') AS Punch3, ISNULL(Punch4, '00:00:00') AS Punch4,        
+--            ISNULL(Punch5, '00:00:00') AS Punch5, ISNULL(Punch6, '00:00:00') AS Punch6,        
+--            ISNULL(Punch7, '00:00:00') AS Punch7, ISNULL(Punch8, '00:00:00') AS Punch8,        
+--            ISNULL(Punch9, '00:00:00') AS Punch9, ISNULL(Punch10, '00:00:00') AS Punch10,        
+--            ISNULL(Punch11, '00:00:00') AS Punch11, ISNULL(Punch12, '00:00:00') AS Punch12,        
+--            (SELECT COUNT(p) FROM (VALUES        
+--                (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),        
+--                (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)        
+--             WHERE p IS NOT NULL AND p <> '00:00:00') AS PunchCount,        
+--            CASE WHEN IsRegularize = 1 AND ISNULL(RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--                 THEN RegularizePunchIn        
+--                 ELSE ISNULL((SELECT MIN(p) FROM (VALUES        
+--                        (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),        
+--                        (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)        
+--                     WHERE p IS NOT NULL AND p <> '00:00:00'), '00:00:00') END AS PunchIn,        
+--            CASE WHEN IsRegularize = 1 AND ISNULL(RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                 THEN RegularizePuncOut        
+--                 ELSE ISNULL((SELECT MAX(p) FROM (VALUES        
+--                        (Punch1),(Punch2),(Punch3),(Punch4),(Punch5),(Punch6),        
+--                        (Punch7),(Punch8),(Punch9),(Punch10),(Punch11),(Punch12)) v(p)        
+--                     WHERE p IS NOT NULL AND p <> '00:00:00'), '00:00:00') END AS PunchOut        
+--        FROM PunchData        
+--        GROUP BY EmployeeId, ECode, PunchDate, EmployeeName, DesignationName, LocationName, STCode, DepartmentName,        
+--                 RegularizePunchIn, RegularizePuncOut, IsRegularize,        
+--                 Punch1, Punch2, Punch3, Punch4, Punch5, Punch6, Punch7, Punch8, Punch9, Punch10, Punch11, Punch12        
+--    ),        
+--    AggregatedPunches_NextDay AS (        
+--        SELECT EmployeeId, ECode, PunchDate, RegularizePunchIn, RegularizePuncOut, PunchIn, PunchOut, IsRegularize        
+--        FROM AggregatedPunches        
+--    ),        
+        
+--    /* ----------------------- Minutes from machine pairs ----------------------- */        
+--    --DailyWorkingMinutes AS (        
+--    --    SELECT EmployeeId, PunchDate, PunchCount,        
+--    --           CASE        
+--    --             WHEN IsRegularize = 1        
+--    --              AND ISNULL(RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--    --              AND ISNULL(RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--    --              AND DATEDIFF(MINUTE, RegularizePunchIn, RegularizePuncOut) > 0        
+--    --             THEN DATEDIFF(MINUTE, RegularizePunchIn, RegularizePuncOut)        
+--    --             WHEN PunchCount % 2 = 0 THEN        
+--    --                  ISNULL(DATEDIFF(MINUTE, Punch1, Punch2), 0) + ISNULL(DATEDIFF(MINUTE, Punch3, Punch4), 0) +        
+--    --                  ISNULL(DATEDIFF(MINUTE, Punch5, Punch6), 0) + ISNULL(DATEDIFF(MINUTE, Punch7, Punch8), 0) +        
+--    --                  ISNULL(DATEDIFF(MINUTE, Punch9, Punch10), 0) + ISNULL(DATEDIFF(MINUTE, Punch11, Punch12), 0)        
+--    --             ELSE 0        
+--    --           END AS TotalDailyWorkingMinutes        
+--    --    FROM AggregatedPunches        
+--    --    WHERE (IsRegularize = 1 AND ISNULL(RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--    --           AND ISNULL(RegularizePuncOut, '00:00:00') <> '00:00:00')        
+--    --       OR (PunchCount % 2 = 0 AND (        
+--    --            (Punch1 IS NOT NULL AND Punch2 IS NOT NULL AND DATEDIFF(MINUTE, Punch1, Punch2) > 0) OR        
+--    --            (Punch3 IS NOT NULL AND Punch4 IS NOT NULL AND DATEDIFF(MINUTE, Punch3, Punch4) > 0) OR        
+--    --            (Punch5 IS NOT NULL AND Punch6 IS NOT NULL AND DATEDIFF(MINUTE, Punch5, Punch6) > 0) OR        
+--    --            (Punch7 IS NOT NULL AND Punch8 IS NOT NULL AND DATEDIFF(MINUTE, Punch7, Punch8) > 0) OR        
+--    --            (Punch9 IS NOT NULL AND Punch10 IS NOT NULL AND DATEDIFF(MINUTE, Punch9, Punch10) > 0) OR        
+--    --            (Punch11 IS NOT NULL AND Punch12 IS NOT NULL AND DATEDIFF(MINUTE, Punch11, Punch12) > 0)))        
+--    --),      
+--    DailyWorkingMinutes AS (    
+--    SELECT    
+--        ap.EmployeeId,    
+--        ap.PunchDate,    
+--        ap.PunchCount,    
+--        CASE    
+--            WHEN ap.IsRegularize = 1    
+--             AND NULLIF(ap.RegularizePunchIn,  '00:00:00') IS NOT NULL    
+--             AND NULLIF(ap.RegularizePuncOut, '00:00:00') IS NOT NULL    
+--             AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) > 0    
+--            THEN DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut)    
+    
+--            ELSE    
+--                -- Sum of pair-wise positive intervals: (1-2)+(3-4)+...+(11-12)    
+--(    
+--                  SELECT SUM(pair_diff)    
+--                  FROM (    
+--                    SELECT CASE    
+--                             WHEN NULLIF(ap.Punch1,  '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch2,  '00:00:00') IS NOT NULL    
+--                              AND ap.Punch2 > ap.Punch1    
+--                             THEN DATEDIFF(MINUTE, ap.Punch1,  ap.Punch2) ELSE 0 END AS pair_diff    
+--                    UNION ALL SELECT CASE    
+--                             WHEN NULLIF(ap.Punch3,  '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch4,  '00:00:00') IS NOT NULL    
+--                              AND ap.Punch4 > ap.Punch3    
+--                             THEN DATEDIFF(MINUTE, ap.Punch3,  ap.Punch4) ELSE 0 END    
+--                    UNION ALL SELECT CASE    
+--                             WHEN NULLIF(ap.Punch5,  '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch6,  '00:00:00') IS NOT NULL    
+--                              AND ap.Punch6 > ap.Punch5    
+--                             THEN DATEDIFF(MINUTE, ap.Punch5,  ap.Punch6) ELSE 0 END    
+--                    UNION ALL SELECT CASE    
+--                             WHEN NULLIF(ap.Punch7,  '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch8,  '00:00:00') IS NOT NULL    
+--                              AND ap.Punch8 > ap.Punch7    
+--                             THEN DATEDIFF(MINUTE, ap.Punch7,  ap.Punch8) ELSE 0 END    
+--                    UNION ALL SELECT CASE    
+--                             WHEN NULLIF(ap.Punch9,  '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch10, '00:00:00') IS NOT NULL    
+--                              AND ap.Punch10 > ap.Punch9    
+--                             THEN DATEDIFF(MINUTE, ap.Punch9,  ap.Punch10) ELSE 0 END    
+--                    UNION ALL SELECT CASE    
+--                             WHEN NULLIF(ap.Punch11, '00:00:00') IS NOT NULL    
+--                              AND NULLIF(ap.Punch12, '00:00:00') IS NOT NULL    
+--                              AND ap.Punch12 > ap.Punch11    
+--                             THEN DATEDIFF(MINUTE, ap.Punch11, ap.Punch12) ELSE 0 END    
+--                  ) s    
+--                )    
+--        END AS TotalDailyWorkingMinutes    
+--    FROM AggregatedPunches ap    
+--    WHERE    
+--        -- keep only days that have either a valid regularize range OR at least one valid pair    
+--        (    
+--            ap.IsRegularize = 1    
+--            AND NULLIF(ap.RegularizePunchIn,  '00:00:00') IS NOT NULL    
+--            AND NULLIF(ap.RegularizePuncOut, '00:00:00') IS NOT NULL    
+--        )    
+--        OR (    
+--            (NULLIF(ap.Punch1,  '00:00:00') IS NOT NULL AND NULLIF(ap.Punch2,  '00:00:00') IS NOT NULL AND ap.Punch2  > ap.Punch1 ) OR    
+--            (NULLIF(ap.Punch3,  '00:00:00') IS NOT NULL AND NULLIF(ap.Punch4,  '00:00:00') IS NOT NULL AND ap.Punch4  > ap.Punch3 ) OR    
+--            (NULLIF(ap.Punch5,  '00:00:00') IS NOT NULL AND NULLIF(ap.Punch6,  '00:00:00') IS NOT NULL AND ap.Punch6  > ap.Punch5 ) OR    
+--            (NULLIF(ap.Punch7,  '00:00:00') IS NOT NULL AND NULLIF(ap.Punch8,  '00:00:00') IS NOT NULL AND ap.Punch8  > ap.Punch7 ) OR    
+--            (NULLIF(ap.Punch9,  '00:00:00') IS NOT NULL AND NULLIF(ap.Punch10, '00:00:00') IS NOT NULL AND ap.Punch10 > ap.Punch9 ) OR    
+--            (NULLIF(ap.Punch11, '00:00:00') IS NOT NULL AND NULLIF(ap.Punch12, '00:00:00') IS NOT NULL AND ap.Punch12 > ap.Punch11)    
+--        )    
+--),    
+    
+        
+--    /* -------------------- Build effective IN/OUT (night shift too) -------------------- */        
+--    EffectiveIO AS (        
+--        SELECT         
+--            edg.EmployeeId,        
+--            edg.PunchDate,        
+--            edg.LocationId,        
+--            edg.IsFlexibleShift,        
+--            edg.ShiftStartTime, edg.ShiftEndTime,        
+--            edg.IsCrossMidnight,        
+--            DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', edg.ShiftStartTime), CAST(edg.PunchDate AS DATETIME)) AS ShiftStartDT,        
+--            CASE         
+--                WHEN edg.IsCrossMidnight = 1 THEN        
+--                    CASE         
+--                        WHEN ap.IsRegularize = 1 AND ISNULL(ap.RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--                             AND CAST(ap.RegularizePunchIn AS TIME) >= DATEADD(HOUR, -3, edg.ShiftStartTime)        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.RegularizePunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        WHEN ap.PunchIn IS NOT NULL AND ap.PunchIn <> '00:00:00'        
+--                             AND CAST(ap.PunchIn AS TIME) >= DATEADD(HOUR, -3, edg.ShiftStartTime)        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.PunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        WHEN ap.PunchOut IS NOT NULL AND ap.PunchOut <> '00:00:00'        
+--                             AND CAST(ap.PunchOut AS TIME) >= DATEADD(HOUR, -3, edg.ShiftStartTime)        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.PunchOut AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        ELSE NULL        
+--                    END        
+--                ELSE        
+--                    CASE         
+--                        WHEN ap.IsRegularize = 1 AND ISNULL(ap.RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.RegularizePunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        WHEN ap.PunchIn IS NOT NULL AND ap.PunchIn <> '00:00:00'        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.PunchIn AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        ELSE NULL        
+--                    END        
+--            END AS EffectiveInDT,        
+--    CASE         
+--                WHEN edg.IsCrossMidnight = 1 THEN        
+--                    CASE         
+--                        WHEN apn.IsRegularize = 1 AND ISNULL(apn.RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--                             AND CAST(apn.RegularizePunchIn AS TIME) <= CAST('14:00:00' AS TIME)        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(apn.RegularizePunchIn AS TIME)), DATEADD(DAY, 1, CAST(edg.PunchDate AS DATETIME)))        
+--                        WHEN apn.PunchIn IS NOT NULL AND apn.PunchIn <> '00:00:00'        
+--                             AND CAST(apn.PunchIn AS TIME) <= CAST('14:00:00' AS TIME)        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(apn.PunchIn AS TIME)), DATEADD(DAY, 1, CAST(edg.PunchDate AS DATETIME)))        
+--                        WHEN ap.PunchOut IS NOT NULL AND ap.PunchOut <> '00:00:00'        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.PunchOut AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        ELSE NULL        
+--                    END        
+--                ELSE        
+--                    NULL        
+--            END AS NextMorningDT,        
+--            CASE         
+--                WHEN edg.IsCrossMidnight = 0 THEN        
+--                    CASE         
+--                        WHEN ap.IsRegularize = 1 AND ISNULL(ap.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.RegularizePuncOut AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        WHEN ap.PunchOut IS NOT NULL AND ap.PunchOut <> '00:00:00'        
+--                        THEN DATEADD(SECOND, DATEDIFF(SECOND, '00:00:00', CAST(ap.PunchOut AS TIME)), CAST(edg.PunchDate AS DATETIME))        
+--                        ELSE NULL        
+--                    END        
+--                ELSE NULL        
+--            END AS OutTodayDT        
+--        FROM EmployeeDateGrid edg        
+--        LEFT JOIN AggregatedPunches ap ON ap.EmployeeId = edg.EmployeeId AND ap.PunchDate = edg.PunchDate        
+--        LEFT JOIN AggregatedPunches_NextDay apn ON apn.EmployeeId = edg.EmployeeId AND apn.PunchDate = DATEADD(DAY, 1, edg.PunchDate)        
+--    ),        
+--    EffectiveIO2 AS (        
+--        SELECT         
+--            e.EmployeeId, e.PunchDate, e.LocationId, e.IsFlexibleShift,        
+--            e.ShiftStartTime, e.ShiftEndTime, e.IsCrossMidnight,        
+--            e.ShiftStartDT, e.EffectiveInDT,        
+--            CASE WHEN e.IsCrossMidnight = 1 THEN e.NextMorningDT ELSE e.OutTodayDT END AS EffectiveOutDT,        
+--            CAST(CASE WHEN e.EffectiveInDT IS NULL THEN NULL ELSE CAST(e.EffectiveInDT AS TIME(0)) END AS TIME(0)) AS EffectivePunchInTime,        
+--            CAST(CASE WHEN (CASE WHEN e.IsCrossMidnight = 1 THEN e.NextMorningDT ELSE e.OutTodayDT END) IS NULL        
+--                      THEN NULL ELSE CAST((CASE WHEN e.IsCrossMidnight = 1 THEN e.NextMorningDT ELSE e.OutTodayDT END) AS TIME(0)) END AS TIME(0)) AS EffectivePunchOutTime        
+--        FROM EffectiveIO e        
+--    ),        
+        
+--    /* ---------------- Combine machine & effective for minutes ---------------- */        
+--    --DailyWorkingMinutes_Final AS (        
+--    --    SELECT         
+--    --        edg.EmployeeId, edg.PunchDate,        
+--    --        CASE         
+--    --            WHEN eio.EffectiveInDT IS NOT NULL AND eio.EffectiveOutDT IS NOT NULL        
+--    --            THEN DATEDIFF(MINUTE, eio.EffectiveInDT, eio.EffectiveOutDT)        
+--    --            ELSE ISNULL(dwm.TotalDailyWorkingMinutes, 0)        
+--    --        END AS TotalDailyWorkingMinutes,        
+--    --        CASE WHEN eio.EffectiveInDT IS NOT NULL AND eio.EffectiveOutDT IS NOT NULL THEN 1 ELSE 0 END AS HasEffectivePair        
+--    --    FROM EmployeeDateGrid edg        
+--    --    LEFT JOIN EffectiveIO2 eio ON eio.EmployeeId = edg.EmployeeId AND eio.PunchDate = edg.PunchDate        
+--    --    LEFT JOIN DailyWorkingMinutes dwm ON dwm.EmployeeId = edg.EmployeeId AND dwm.PunchDate = edg.PunchDate        
+--    --)    
+        
+--     DailyWorkingMinutes_Final AS (    
+--    SELECT    
+--        edg.EmployeeId,    
+--        edg.PunchDate,    
+--        CASE    
+--            -- 1) If pair minutes were computed for the day, use them    
+--            WHEN dwm.TotalDailyWorkingMinutes IS NOT NULL    
+--                THEN dwm.TotalDailyWorkingMinutes    
+--            -- 2) Else if we have an Effective in/out pair, use its span    
+--            WHEN eio.EffectiveInDT IS NOT NULL AND eio.EffectiveOutDT IS NOT NULL    
+--                THEN DATEDIFF(MINUTE, eio.EffectiveInDT, eio.EffectiveOutDT)    
+--            -- 3) Else 0    
+--            ELSE 0    
+--        END AS TotalDailyWorkingMinutes,    
+--        CASE    
+--            WHEN dwm.TotalDailyWorkingMinutes IS NOT NULL THEN 1    
+--            WHEN eio.EffectiveInDT IS NOT NULL AND eio.EffectiveOutDT IS NOT NULL THEN 1    
+--            ELSE 0    
+--        END AS HasEffectivePair    
+--    FROM EmployeeDateGrid edg    
+--    LEFT JOIN DailyWorkingMinutes dwm    
+--      ON dwm.EmployeeId = edg.EmployeeId AND dwm.PunchDate = edg.PunchDate    
+--    LEFT JOIN EffectiveIO2 eio    
+--      ON eio.EmployeeId = edg.EmployeeId AND eio.PunchDate = edg.PunchDate    
+--)    
+--,        
+        
+--    /* --------------------------- Geofence overlay --------------------------- */        
+--    ApprovedPunches AS (        
+--        SELECT         
+--            ar.EmployeeId,        
+--            CONVERT(date, ar.PunchTimeUtc) AS PunchDate,        
+--       ar.PunchTimeUtc,        
+--            ar.PunchType,        
+--            ROW_NUMBER() OVER (        
+--                PARTITION BY ar.EmployeeId, CONVERT(date, ar.PunchTimeUtc)        
+--                ORDER BY ar.PunchTimeUtc        
+--            ) AS rn        
+--        FROM dbo.AttendanceRecord ar        
+--        WHERE ar.StatusId = 1        
+--          AND CONVERT(date, ar.PunchTimeUtc) BETWEEN @FromDate AND @ToDate        
+--    ),        
+--    PairedPunches AS (        
+--        SELECT        
+--    a.EmployeeId,        
+--            a.PunchDate,        
+--            a.PunchTimeUtc AS InTime,        
+--            b.PunchTimeUtc AS OutTime,        
+--            DATEDIFF(MINUTE, a.PunchTimeUtc, b.PunchTimeUtc) AS WorkedMinutes        
+--        FROM ApprovedPunches a        
+--        INNER JOIN ApprovedPunches b        
+--            ON a.EmployeeId = b.EmployeeId        
+--           AND a.PunchDate  = b.PunchDate        
+--           AND b.rn = a.rn + 1        
+--        WHERE a.rn % 2 = 1        
+--    ),        
+--    PunchCounts AS (        
+--        SELECT EmployeeId, PunchDate, COUNT(*) AS TotalPunches        
+--        FROM ApprovedPunches        
+--        GROUP BY EmployeeId, PunchDate        
+--    ),        
+--    GeoDaily AS (        
+--        SELECT         
+--            p.EmployeeId,        
+--            p.PunchDate,        
+--            MIN(p.InTime)  AS GeoFirstInUtc,        
+--            MAX(p.OutTime) AS GeoLastOutUtc,        
+--            SUM(p.WorkedMinutes) AS GeoWorkedMinutes,        
+--            COUNT(*) * 2   AS GeoValidPunches,        
+--            pc.TotalPunches AS GeoTotalPunches,        
+--            CASE WHEN pc.TotalPunches % 2 <> 0 THEN 'MP' ELSE 'GF' END AS GeoStatus        
+--        FROM PairedPunches p        
+--        JOIN PunchCounts pc        
+--          ON p.EmployeeId = pc.EmployeeId         
+--         AND p.PunchDate  = pc.PunchDate        
+--        GROUP BY p.EmployeeId, p.PunchDate, pc.TotalPunches        
+--    ),        
+--    GeoEffectiveIO AS (        
+--        SELECT         
+--            edg.EmployeeId,        
+--            edg.PunchDate,        
+--            CAST(CASE WHEN gd.GeoFirstInUtc  IS NULL THEN NULL ELSE CAST(gd.GeoFirstInUtc  AS TIME(0)) END AS TIME(0)) AS GeoPunchInTime,        
+--            CAST(CASE WHEN gd.GeoLastOutUtc IS NULL THEN NULL ELSE CAST(gd.GeoLastOutUtc AS TIME(0)) END AS TIME(0)) AS GeoPunchOutTime,        
+--            gd.GeoWorkedMinutes,        
+--            gd.GeoStatus,        
+--            gd.GeoValidPunches,        
+--            gd.GeoTotalPunches        
+--        FROM EmployeeDateGrid edg        
+--        LEFT JOIN GeoDaily gd        
+--          ON gd.EmployeeId = edg.EmployeeId        
+--         AND gd.PunchDate  = edg.PunchDate        
+--    )    
+--    , DailyWorkingMinutes_WithGeo AS (    
+--    SELECT    
+--        edg.EmployeeId,    
+--        edg.PunchDate,    
+--        CASE    
+--            -- a) Clean geofence day: use GF worked minutes    
+--            WHEN ge.GeoStatus = 'GF' AND ge.GeoWorkedMinutes IS NOT NULL    
+--                THEN ge.GeoWorkedMinutes    
+--            -- b) Otherwise use the pair-first result we set in _Final    
+--            WHEN dwmf.TotalDailyWorkingMinutes IS NOT NULL    
+--                THEN dwmf.TotalDailyWorkingMinutes    
+--            -- c) Otherwise, if GF produced some minutes but not clean status, use them    
+--            WHEN ge.GeoWorkedMinutes IS NOT NULL    
+--                THEN ge.GeoWorkedMinutes    
+--            -- d) Else 0    
+--            ELSE 0    
+--        END AS TotalDailyWorkingMinutes,    
+--        CASE    
+--            WHEN ge.GeoStatus = 'GF' AND ge.GeoWorkedMinutes IS NOT NULL THEN 1    
+--            WHEN dwmf.TotalDailyWorkingMinutes IS NOT NULL THEN 1    
+--            WHEN ge.GeoWorkedMinutes IS NOT NULL THEN 1    
+--            ELSE 0    
+--        END AS HasEffectivePair,    
+--        ge.GeoStatus    
+--    FROM EmployeeDateGrid edg    
+--    LEFT JOIN DailyWorkingMinutes_Final dwmf    
+--      ON dwmf.EmployeeId = edg.EmployeeId AND dwmf.PunchDate = edg.PunchDate    
+--    LEFT JOIN GeoEffectiveIO ge    
+--      ON ge.EmployeeId = edg.EmployeeId AND ge.PunchDate = edg.PunchDate    
+--)    
+    
+--    ,        
+        
+--    /* ----------------- Choose IN/OUT used for Late/Early & Grace ----------------- */        
+--    EffectiveChosen AS (        
+--        SELECT         
+--            edg.EmployeeId,        
+--            edg.PunchDate,        
+--            eio.ShiftStartDT,        
+--            CASE         
+--                WHEN ge.GeoStatus = 'GF' AND ge.GeoPunchInTime IS NOT NULL        
+--                    THEN DATEADD(SECOND, DATEDIFF(SECOND,'00:00:00', ge.GeoPunchInTime), CAST(edg.PunchDate AS DATETIME))        
+--                ELSE eio.EffectiveInDT        
+--            END AS UsedInDT,        
+--            CASE         
+--                WHEN ge.GeoStatus = 'GF' AND ge.GeoPunchOutTime IS NOT NULL        
+--                    THEN DATEADD(SECOND, DATEDIFF(SECOND,'00:00:00', ge.GeoPunchOutTime), CAST(edg.PunchDate AS DATETIME))        
+--                ELSE eio.EffectiveOutDT        
+--            END AS UsedOutDT        
+--        FROM EmployeeDateGrid edg        
+--        LEFT JOIN EffectiveIO2  eio ON eio.EmployeeId = edg.EmployeeId AND eio.PunchDate = edg.PunchDate        
+--        LEFT JOIN GeoEffectiveIO ge  ON ge.EmployeeId  = edg.EmployeeId AND ge.PunchDate  = edg.PunchDate        
+--    ),        
+        
+--    /* ------------------------- Monthly totals (geo-first) ------------------------- */        
+--    MonthlyWorkingHours_Geo AS (        
+--        SELECT EmployeeId,        
+--               CAST(SUM(TotalDailyWorkingMinutes) / 60 AS VARCHAR) + ' hours and ' +        
+--               RIGHT('0' + CAST(SUM(TotalDailyWorkingMinutes) % 60 AS VARCHAR), 2) + ' minutes' AS TotalMonthlyWorkingHours        
+--        FROM DailyWorkingMinutes_WithGeo        
+--        GROUP BY EmployeeId        
+--    ),        
+        
+--    /* ================= GRACE (Location 313, non-flex, Mon–Fri) — MINUTE GRANULARITY ================= */        
+--    GraceDaysTracking AS (      
+--    SELECT      
+--        edg.EmployeeId,      
+--        edg.PunchDate,      
+--        edg.LocationId,      
+--        edg.IsFlexibleShift,      
+--        DATEADD(DAY, -((DATEPART(WEEKDAY, edg.PunchDate) + 5) % 7), edg.PunchDate) AS WeekStartMonday,      
+--        ec.ShiftStartDT,      
+--        ec.UsedInDT,      
+--        m.TotalDailyWorkingMinutes,  -- ← add minutes      
+--        CASE      
+--            WHEN edg.IsHoliday = 1 THEN 0      
+--            WHEN ec.UsedInDT IS NULL THEN 0      
+--            -- count a late only on full-day work (≥ 510 min)      
+--            WHEN ISNULL(m.TotalDailyWorkingMinutes,0) < 510 THEN 0      
+--            WHEN DATEDIFF(MINUTE, ec.ShiftStartDT, ec.UsedInDT) > 4 THEN 1      
+--            ELSE 0      
+--        END AS IsLate      
+--    FROM EmployeeDateGrid edg      
+--    LEFT JOIN EffectiveChosen ec      
+--      ON ec.EmployeeId = edg.EmployeeId AND ec.PunchDate = edg.PunchDate      
+--    LEFT JOIN DailyWorkingMinutes_WithGeo m      
+--      ON m.EmployeeId = edg.EmployeeId AND m.PunchDate = edg.PunchDate      
+--),        
+--    GraceCounter AS (      
+--    SELECT      
+--        g.EmployeeId, g.PunchDate, g.LocationId, g.IsFlexibleShift,      
+--        g.IsLate, g.WeekStartMonday,      
+--        (      
+--          SELECT COUNT(*)      
+--          FROM GraceDaysTracking x      
+--          JOIN DailyWorkingMinutes_WithGeo m2      
+--            ON m2.EmployeeId = x.EmployeeId AND m2.PunchDate = x.PunchDate      
+--          WHERE x.EmployeeId = g.EmployeeId      
+--            AND x.WeekStartMonday = g.WeekStartMonday      
+--            AND x.PunchDate < g.PunchDate      
+--            AND x.LocationId = 313      
+--            AND x.IsFlexibleShift = 0      
+--            AND x.IsLate = 1      
+--            AND ISNULL(m2.TotalDailyWorkingMinutes,0) >= 510   -- ← only full-day      
+--            AND DATEPART(WEEKDAY, x.PunchDate) BETWEEN 2 AND 6      
+--        ) AS PriorLates      
+--    FROM GraceDaysTracking g      
+--),        
+--   ForcedHalfDay AS (      
+--    SELECT      
+--        gc.EmployeeId, gc.PunchDate,      
+--        CASE      
+--          WHEN gc.LocationId = 313      
+--           AND gc.IsFlexibleShift = 0      
+--           AND gc.PunchDate >= '2025-09-16'      
+--           AND DATEPART(WEEKDAY, gc.PunchDate) BETWEEN 2 AND 6      
+--           AND gc.IsLate = 1      
+--           AND gc.PriorLates >= 2      
+--           AND EXISTS (   -- ← ensure today is full-day      
+--               SELECT 1 FROM DailyWorkingMinutes_WithGeo mt      
+--               WHERE mt.EmployeeId = gc.EmployeeId      
+--                 AND mt.PunchDate  = gc.PunchDate      
+--                 AND ISNULL(mt.TotalDailyWorkingMinutes,0) >= 510      
+--           )      
+--     THEN 1 ELSE 0      
+--        END AS IsForcedHalfDay      
+--    FROM GraceCounter gc      
+--)        
+        
+--    /* ================================= Final Output ================================= */        
+--    SELECT        
+--        EmpAttendanceId = CAST(0 AS INT),        
+--        edg.EmployeeId, edg.EmployeeName, edg.ECode,        
+--        edg.PunchDate AS AttendanceDate,        
+--        ISNULL(ap.Machine_Type, '') AS Machine_Type,        
+--        DesignationName = ISNULL(edg.DesignationName, 'N/A'),        
+--        LocationName = ISNULL(edg.LocationName, 'N/A'),        
+--        STCode = ISNULL(edg.STCode, 'N/A'),        
+--        DepartmentName = ISNULL(edg.DepartmentName, 'N/A'),        
+--        ShiftName = ISNULL(edg.ShiftName, ''),        
+--        ShiftStartTime = edg.ShiftStartTime,        
+--        ShiftEndTime = edg.ShiftEndTime,        
+--        IsHoliday = edg.IsHoliday,        
+--        HolidayName = edg.HolidayName,        
+        
+--        -- If GF is good, show GF punches; else effective device/regularize        
+--        PunchIn  = CASE         
+--                     WHEN ISNULL(dwm_geo.GeoStatus,'') = 'GF' AND ge.GeoPunchInTime  IS NOT NULL         
+--                       THEN ge.GeoPunchInTime        
+--                     ELSE ISNULL(eio.EffectivePunchInTime,  ISNULL(ge.GeoPunchInTime,  '00:00:00'))        
+--                   END,        
+--        PunchOut = CASE         
+--                     WHEN ISNULL(dwm_geo.GeoStatus,'') = 'GF' AND ge.GeoPunchOutTime IS NOT NULL         
+--                       THEN ge.GeoPunchOutTime        
+--                     ELSE ISNULL(eio.EffectivePunchOutTime, ISNULL(ge.GeoPunchOutTime, '00:00:00'))        
+--                   END,        
+        
+--        Punch1 = ISNULL(ap.Punch1, '00:00:00'),        
+--        Punch2 = ISNULL(ap.Punch2, '00:00:00'),        
+--        Punch3 = ISNULL(ap.Punch3, '00:00:00'),        
+--        Punch4 = ISNULL(ap.Punch4, '00:00:00'),        
+--        Punch5 = ISNULL(ap.Punch5, '00:00:00'),        
+--        Punch6 = ISNULL(ap.Punch6, '00:00:00'),        
+--        Punch7 = ISNULL(ap.Punch7, '00:00:00'),        
+--        Punch8 = ISNULL(ap.Punch8, '00:00:00'),        
+--        Punch9 = ISNULL(ap.Punch9, '00:00:00'),        
+--        Punch10 = ISNULL(ap.Punch10, '00:00:00'),        
+--        Punch11 = ISNULL(ap.Punch11, '00:00:00'),        
+--        Punch12 = ISNULL(ap.Punch12, '00:00:00'),        
+        
+--        ValidPunchCount =        
+--            CASE        
+--                WHEN ISNULL(dwm_geo.GeoStatus,'') = 'GF'        
+--                     AND ge.GeoValidPunches IS NOT NULL        
+--                THEN ge.GeoValidPunches        
+--                ELSE ISNULL(ap.PunchCount, 0)        
+--            END,        
+        
+--        RegularizePunchIn = ISNULL(ap.RegularizePunchIn, '00:00:00'),        
+--        RegularizePuncOut = ISNULL(ap.RegularizePuncOut, '00:00:00'),        
+--        IsRegularize      = ISNULL(ap.IsRegularize, 0),        
+        
+--        IsOnLeave = CASE         
+--            WHEN EXISTS (        
+--                SELECT 1         
+--                FROM dbo.tblLeaveRequest l        
+--                WHERE l.EmployeeId = edg.EmployeeId         
+--                  AND l.IsRevoked = 0         
+--                  AND l.StatusId IN (1)        
+--                  AND edg.PunchDate BETWEEN l.StartDate AND l.EndDate        
+--            ) THEN 1 ELSE 0 END,        
+        
+--        -- TotalWorkingMinutes (HH:mm) with precedence: Regularize > GF > Effective > device pairs (1..3)        
+--        TotalWorkingMinutes =        
+--            CAST(        
+--                RIGHT('0' + CAST((        
+--                    CASE        
+--                      WHEN ap.IsRegularize = 1        
+--                           AND ISNULL(ap.RegularizePunchIn,'00:00:00') <> '00:00:00'        
+--                           AND ISNULL(ap.RegularizePuncOut,'00:00:00') <> '00:00:00'        
+--                           AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) > 0        
+--                      THEN DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut)        
+--                      WHEN ISNULL(dwm_geo.GeoStatus,'') = 'GF'        
+--    AND dwm_geo.TotalDailyWorkingMinutes IS NOT NULL        
+--                      THEN dwm_geo.TotalDailyWorkingMinutes        
+--                      WHEN dwmf.TotalDailyWorkingMinutes IS NOT NULL    
+--THEN dwmf.TotalDailyWorkingMinutes      
+--                      ELSE (        
+--                          ISNULL(DATEDIFF(MINUTE, ap.Punch1, ap.Punch2), 0) +        
+--                          ISNULL(DATEDIFF(MINUTE, ap.Punch3, ap.Punch4), 0) +        
+--                          ISNULL(DATEDIFF(MINUTE, ap.Punch5, ap.Punch6), 0)        
+--                      )        
+--                    END        
+--                ) / 60 AS VARCHAR), 2)        
+--                + ':' +        
+--                RIGHT('0' + CAST((        
+--                    CASE        
+--                      WHEN ap.IsRegularize = 1        
+--                           AND ISNULL(ap.RegularizePunchIn,'00:00:00') <> '00:00:00'        
+--                           AND ISNULL(ap.RegularizePuncOut,'00:00:00') <> '00:00:00'        
+--                           AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) > 0        
+--                      THEN DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut)        
+--                      WHEN ISNULL(dwm_geo.GeoStatus,'') = 'GF'        
+--                           AND dwm_geo.TotalDailyWorkingMinutes IS NOT NULL        
+--                      THEN dwm_geo.TotalDailyWorkingMinutes        
+--                      WHEN dwmf.TotalDailyWorkingMinutes IS NOT NULL    
+--THEN dwmf.TotalDailyWorkingMinutes        
+--                      ELSE (        
+--                          ISNULL(DATEDIFF(MINUTE, ap.Punch1, ap.Punch2), 0) +        
+--                  ISNULL(DATEDIFF(MINUTE, ap.Punch3, ap.Punch4), 0) +        
+--                          ISNULL(DATEDIFF(MINUTE, ap.Punch5, ap.Punch6), 0)        
+--                      )        
+--                    END        
+--                ) % 60 AS VARCHAR), 2)        
+--                AS NVARCHAR(10)        
+--            ),        
+        
+--        -- Late/Early based on EffectiveChosen (GF-first)        
+--        LateMinutes = CASE        
+--            WHEN edg.IsFutureDate = 1 OR edg.IsHoliday = 1 OR (ap.EmployeeId IS NULL AND ISNULL(dwm_geo.GeoStatus,'') <> 'GF') THEN 0        
+--            WHEN ec.UsedInDT IS NULL THEN 0        
+--            WHEN ec.UsedInDT > eio.ShiftStartDT THEN DATEDIFF(MINUTE, eio.ShiftStartDT, ec.UsedInDT)        
+--            ELSE 0        
+--        END,        
+--        EarlyMinutes = CASE        
+--            WHEN edg.IsFutureDate = 1 OR edg.IsHoliday = 1 OR (ap.EmployeeId IS NULL AND ISNULL(dwm_geo.GeoStatus,'') <> 'GF') THEN 0        
+--            WHEN ec.UsedInDT IS NULL THEN 0        
+--            WHEN ec.UsedInDT < eio.ShiftStartDT THEN DATEDIFF(MINUTE, ec.UsedInDT, eio.ShiftStartDT)        
+--            ELSE 0        
+--        END,        
+        
+--        -- Final Status        
+--        Status = CASE    
+--            WHEN edg.PunchDate = '2025-10-18'    
+--                 AND (edg.ShiftName = 'General Shift' OR edg.ShiftName = 'Flexible Shift')    
+--                 AND edg.LocationId = 313    
+--                 AND ISNULL(ap.IsRegularize, 0) = 0    
+--                 AND (    
+--                      (    
+--                        (ISNULL(dwm_geo.GeoStatus,'') = 'GF' AND    
+--                         ge.GeoPunchInTime IS NOT NULL AND    
+--                         ge.GeoPunchInTime < '09:00:00' AND    
+--                         ge.GeoPunchOutTime IS NOT NULL AND    
+--                         ge.GeoPunchOutTime >= '15:30:00' AND    
+--                         dwm_geo.TotalDailyWorkingMinutes >= 360    
+--                        )    
+--                      )    
+--                      OR    
+--                      (    
+--                        (ISNULL(dwm_geo.GeoStatus,'') <> 'GF' AND    
+--                         eio.EffectivePunchInTime IS NOT NULL AND    
+--                         eio.EffectivePunchInTime < '09:00:00' AND    
+--                         eio.EffectivePunchOutTime IS NOT NULL AND    
+--                         eio.EffectivePunchOutTime >= '15:30:00' AND    
+--                         dwmf.TotalDailyWorkingMinutes >= 360    
+--                        )    
+--                      )    
+--                   )    
+--            THEN 'Present'    
+--            WHEN edg.IsFutureDate = 1 THEN ''        
+--            WHEN edg.IsHoliday = 1 THEN 'Holiday'        
+--            WHEN EXISTS (        
+--                SELECT 1         
+--                FROM dbo.tblLeaveRequest l        
+--                WHERE l.EmployeeId = edg.EmployeeId         
+--                  AND l.IsRevoked = 0         
+--                  AND l.StatusId IN (1)        
+--                  AND edg.PunchDate BETWEEN l.StartDate AND l.EndDate        
+--            ) THEN 'On Leave'      
+--         -- Weekend worked => POW (full day) / POW Half Day (partial)    
+--     --WHEN edg.IsWeekend = 1    
+--     --            AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) >= 510    
+--     --       THEN 'POW'    
+    
+--     --       WHEN edg.IsWeekend = 1    
+--     --            AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) BETWEEN 240 AND 509    
+--     --       THEN 'POW Half Day'    
+    
+--            -- Night-shift previous day consumed morning punch: avoid false MIS        
+--            --WHEN eio_prev.IsCrossMidnight = 1        
+--            --     AND eio_prev.EffectiveOutDT IS NOT NULL        
+--            --     AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) = 0        
+--            --THEN CASE WHEN edg.IsWeekend = 1 THEN 'Weekly Off' ELSE 'Absent' END        
+--    WHEN eio_prev.IsCrossMidnight = 1    
+--     AND eio_prev.EffectiveOutDT IS NOT NULL    
+--     AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) = 0    
+--THEN 'Present'    
+--            -- Weekly Off only when truly no data        
+--            WHEN edg.IsWeekend = 1        
+--                 AND ap.EmployeeId IS NULL        
+--                 AND NOT (        
+--        ap.IsRegularize = 1        
+--                     AND ISNULL(ap.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                     AND ISNULL(ap.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                 )        
+--                 AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) = 0        
+--            THEN 'Weekly Off'        
+        
+--            -- ODD punches => MIS / MP / MPHD        
+--            WHEN (        
+--                   (ap.PunchCount IS NOT NULL AND ap.PunchCount % 2 = 1)        
+--                   OR (ge.GeoTotalPunches IS NOT NULL AND ge.GeoTotalPunches % 2 = 1)        
+--                 )        
+--                 AND NOT (edg.IsCrossMidnight = 1 AND dwmf.HasEffectivePair = 1)        
+--            THEN        
+--                CASE         
+--                    WHEN ap.IsRegularize = 1        
+--                         AND ISNULL(ap.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                         AND ISNULL(ap.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                         AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) >= 510        
+--                    THEN 'Manual Present'        
+--                    WHEN ap.IsRegularize = 1        
+--                         AND ISNULL(ap.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                         AND ISNULL(ap.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                         AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) BETWEEN 240 AND 509        
+--                    THEN 'Manual Present Half Day'        
+--                    ELSE 'Mispunch'        
+--                END        
+        
+--            -- 3rd+ late of week at 313 (non-flex, Mon–Fri) => HD        
+--            WHEN EXISTS (        
+--                SELECT 1         
+--                FROM ForcedHalfDay fh2        
+--                WHERE fh2.EmployeeId = edg.EmployeeId         
+--                  AND fh2.PunchDate = edg.PunchDate         
+--                  AND fh2.IsForcedHalfDay = 1        
+--            ) THEN 'Half Day Absent'        
+        
+--            -- Manual full-day regularize (>= 510)        
+--  WHEN ap.IsRegularize = 1        
+--              AND ISNULL(ap.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--              AND ISNULL(ap.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--              AND DATEDIFF(MINUTE, ap.RegularizePunchIn, ap.RegularizePuncOut) >= 510        
+--            THEN 'Manual Present'        
+        
+--            -- Geofence good but no device pair        
+--            WHEN dwmf.HasEffectivePair = 0 AND ISNULL(dwm_geo.GeoStatus,'') = 'GF' THEN 'GF'        
+        
+--            -- Minutes-based fallback        
+--            WHEN ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) >= 510 THEN 'Present'        
+--            WHEN ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) BETWEEN 240 AND 509 THEN 'Half Day Absent'        
+--            WHEN ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) > 0 AND ISNULL(dwm_geo.TotalDailyWorkingMinutes, 0) < 240 THEN 'Absent'        
+--            ELSE 'Absent'        
+--        END,        
+        
+--        -- Working days (0 / 0.5 / 1) mirror        
+--        TotalWorkingDays = (        
+--            SELECT SUM(WorkDayValue)        
+--            FROM (        
+--                SELECT         
+--                    CASE     
+         
+--                        WHEN edg2.IsFutureDate = 1 THEN 0.0        
+--                        WHEN edg2.IsHoliday = 1 THEN 0.0        
+--                        WHEN EXISTS (        
+--                            SELECT 1         
+--                            FROM dbo.tblLeaveRequest l2        
+--                            WHERE l2.EmployeeId = edg2.EmployeeId         
+--                              AND l2.IsRevoked = 0         
+--                              AND l2.StatusId IN (1)        
+--                              AND edg2.PunchDate BETWEEN l2.StartDate AND l2.EndDate        
+--                        ) THEN 0.0        
+--    WHEN edg2.PunchDate = '2025-10-18'    
+--                             AND (edg2.ShiftName = 'General Shift' OR edg2.ShiftName = 'Flexible Shift')    
+--                             AND edg2.LocationId = 313    
+--      AND ISNULL(ap2.IsRegularize, 0) = 0    
+--                             AND (    
+--                                  (    
+--                                    ISNULL(dwm_geo2.GeoStatus,'') = 'GF'    
+--                                    AND ge2.GeoPunchInTime  IS NOT NULL    
+--                                    AND ge2.GeoPunchInTime  < '09:00:00'    
+--                                    AND ge2.GeoPunchOutTime IS NOT NULL    
+--                                    AND ge2.GeoPunchOutTime >= '15:30:00'    
+--                                    AND ISNULL(dwm_geo2.TotalDailyWorkingMinutes, 0) >= 360    
+--                                  )    
+--                                  OR    
+--                                  (    
+--                                    ISNULL(dwm_geo2.GeoStatus,'') <> 'GF'    
+--                                    AND eio2.EffectivePunchInTime  IS NOT NULL    
+--                                    AND eio2.EffectivePunchInTime  < '09:00:00'    
+--                                    AND eio2.EffectivePunchOutTime IS NOT NULL    
+--                                    AND eio2.EffectivePunchOutTime >= '15:30:00'    
+--                                    AND ISNULL(dwmf2.TotalDailyWorkingMinutes, 0) >= 360    
+--                                  )    
+--                             )    
+--                        THEN 1.0    
+--                        WHEN edg2.IsWeekend = 1        
+--                             AND ap2.EmployeeId IS NULL        
+--                             AND NOT (        
+--                                 ap2.IsRegularize = 1        
+--                                 AND ISNULL(ap2.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                                 AND ISNULL(ap2.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                             )        
+--                             AND ISNULL(dwm_geo2.TotalDailyWorkingMinutes, 0) = 0        
+--                        THEN 0.0        
+        
+--                        WHEN EXISTS (        
+--                            SELECT 1        
+--                            FROM ForcedHalfDay fh3        
+--                            WHERE fh3.EmployeeId = edg2.EmployeeId         
+--                              AND fh3.PunchDate = edg2.PunchDate         
+--                              AND fh3.IsForcedHalfDay = 1        
+--                        ) THEN 0.5        
+        
+--                        WHEN ap2.IsRegularize = 1         
+--                             AND ISNULL(ap2.RegularizePunchIn, '00:00:00') <> '00:00:00'        
+--                             AND ISNULL(ap2.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                             AND DATEDIFF(MINUTE, ap2.RegularizePunchIn, ap2.RegularizePuncOut) >= 510        
+--                        THEN 1.0        
+        
+--                        WHEN (        
+--                               (ap2.PunchCount IS NOT NULL AND ap2.PunchCount % 2 = 1)        
+--                               OR (ge2.GeoTotalPunches IS NOT NULL AND ge2.GeoTotalPunches % 2 = 1)        
+--                             )        
+--                             AND NOT (edg2.IsCrossMidnight = 1 AND dwmf2.HasEffectivePair = 1)        
+--                        THEN        
+--                            CASE        
+--                                WHEN ap2.IsRegularize = 1        
+--                                     AND ISNULL(ap2.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                                     AND ISNULL(ap2.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                                     AND DATEDIFF(MINUTE, ap2.RegularizePunchIn, ap2.RegularizePuncOut) >= 510        
+--                                THEN 1.0        
+--                                WHEN ap2.IsRegularize = 1        
+--                                     AND ISNULL(ap2.RegularizePunchIn,  '00:00:00') <> '00:00:00'        
+--                                     AND ISNULL(ap2.RegularizePuncOut, '00:00:00') <> '00:00:00'        
+--                                     AND DATEDIFF(MINUTE, ap2.RegularizePunchIn, ap2.RegularizePuncOut) BETWEEN 240 AND 509        
+--                                THEN 0.5        
+--                                ELSE 0.0        
+--                            END        
+       
+--                        WHEN ISNULL(dwm_geo2.TotalDailyWorkingMinutes, 0) >= 510 THEN 1.0        
+--                        WHEN ISNULL(dwm_geo2.TotalDailyWorkingMinutes, 0) >= 240 THEN 0.5        
+--                        ELSE 0.0        
+--                    END AS WorkDayValue        
+--                FROM EmployeeDateGrid edg2        
+--                LEFT JOIN AggregatedPunches ap2         
+--                  ON ap2.EmployeeId = edg2.EmployeeId AND ap2.PunchDate = edg2.PunchDate        
+--                LEFT JOIN DailyWorkingMinutes_Final dwmf2         
+--                  ON dwmf2.EmployeeId = edg2.EmployeeId AND dwmf2.PunchDate = edg2.PunchDate        
+--                LEFT JOIN DailyWorkingMinutes_WithGeo dwm_geo2        
+--                  ON dwm_geo2.EmployeeId = edg2.EmployeeId AND dwm_geo2.PunchDate = edg2.PunchDate        
+--                LEFT JOIN GeoEffectiveIO ge2        
+--                  ON ge2.EmployeeId = edg2.EmployeeId AND ge2.PunchDate = edg2.PunchDate       
+--      LEFT JOIN EffectiveIO2 eio2    
+--                  ON eio2.EmployeeId = edg2.EmployeeId AND eio2.PunchDate = edg2.PunchDate    
+--            ) AS WorkDayValues        
+--        ),        
+--      TotalMonthlyWorkingHours = ISNULL(mwh_geo.TotalMonthlyWorkingHours, '0 hours and 00 minutes')       
+--     FROM EmployeeDateGrid edg        
+--    LEFT JOIN AggregatedPunches ap         
+--      ON ap.EmployeeId = edg.EmployeeId AND ap.PunchDate = edg.PunchDate        
+--    LEFT JOIN DailyWorkingMinutes_Final dwmf         
+--      ON dwmf.EmployeeId = edg.EmployeeId AND dwmf.PunchDate = edg.PunchDate        
+--    LEFT JOIN EffectiveIO2 eio         
+--      ON eio.EmployeeId = edg.EmployeeId AND eio.PunchDate = edg.PunchDate        
+--    LEFT JOIN EffectiveIO2 eio_prev        
+--      ON eio_prev.EmployeeId = edg.EmployeeId AND eio_prev.PunchDate = DATEADD(DAY, -1, edg.PunchDate)        
+--    LEFT JOIN GeoEffectiveIO ge        
+--      ON ge.EmployeeId = edg.EmployeeId AND ge.PunchDate = edg.PunchDate        
+--    LEFT JOIN DailyWorkingMinutes_WithGeo dwm_geo        
+--      ON dwm_geo.EmployeeId = edg.EmployeeId AND dwm_geo.PunchDate = edg.PunchDate        
+--    LEFT JOIN MonthlyWorkingHours_Geo mwh_geo        
+--      ON mwh_geo.EmployeeId = edg.EmployeeId        
+--    LEFT JOIN EffectiveChosen ec        
+--      ON ec.EmployeeId = edg.EmployeeId AND ec.PunchDate = edg.PunchDate        
+);   

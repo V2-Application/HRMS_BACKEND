@@ -133,6 +133,59 @@ namespace HRMSAPI.Implementation
             return (Get(id1), Get(id2), Get(id3));
         }
 
+        // Loads the active sub-department hierarchy keyed
+        // "{DeptId}|{ParentId(0=root)}|{DepthLevel}|{lowercase name}" -> (Id, canonical Name).
+        // Used by the bulk uploaders to resolve a sub-dept name chain to ids.
+        private async Task<Dictionary<string, (int Id, string Name)>> LoadSubDeptHierarchyAsync()
+        {
+            var map = new Dictionary<string, (int Id, string Name)>(StringComparer.OrdinalIgnoreCase);
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"SELECT SubDepartmentId, SubDepartmentName, DepartmentId, ISNULL(ParentSubDepartmentId,0) AS ParentId, DepthLevel
+                                FROM dbo.tblSubDepartment WHERE ISNULL(isDeleted,0)=0 AND ISNULL(isActive,1)=1";
+            await using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var sid = Convert.ToInt32(rdr["SubDepartmentId"]);
+                var snm = (rdr["SubDepartmentName"] as string ?? "").Trim();
+                var sdept = Convert.ToInt32(rdr["DepartmentId"]);
+                var sparent = Convert.ToInt32(rdr["ParentId"]);
+                var slvl = Convert.ToInt32(rdr["DepthLevel"]);
+                map[$"{sdept}|{sparent}|{slvl}|{snm.ToLowerInvariant()}"] = (sid, snm);
+            }
+            return map;
+        }
+
+        // Resolves a sub-department name chain (sub1 -> sub2 -> sub3) under a department to ids.
+        // Blank chain => all null. A non-blank name that doesn't match the hierarchy adds an error
+        // and leaves that level (and below) null. Mirrors the Bgt Seat Master uploader rules.
+        private static (int? id1, int? id2, int? id3) ResolveSubDeptChain(
+            Dictionary<string, (int Id, string Name)> map, int deptId,
+            string sub1, string sub2, string sub3, int rowNum, string deptName, List<string> errors)
+        {
+            sub1 = (sub1 ?? "").Trim(); sub2 = (sub2 ?? "").Trim(); sub3 = (sub3 ?? "").Trim();
+            if (sub1.Length == 0 && sub2.Length == 0 && sub3.Length == 0) return (null, null, null);
+            if (sub1.Length == 0) { errors.Add($"Row {rowNum}: Sub Department 1 is required when Sub Department 2/3 are provided."); return (null, null, null); }
+            if (sub3.Length > 0 && sub2.Length == 0) { errors.Add($"Row {rowNum}: Sub Department 2 is required when Sub Department 3 is provided."); return (null, null, null); }
+            if (map == null || !map.TryGetValue($"{deptId}|0|1|{sub1.ToLowerInvariant()}", out var n1))
+            { errors.Add($"Row {rowNum}: Sub Department 1 '{sub1}' not found under department '{deptName}'."); return (null, null, null); }
+            int? id1 = n1.Id, id2 = null, id3 = null;
+            if (sub2.Length > 0)
+            {
+                if (!map.TryGetValue($"{deptId}|{n1.Id}|2|{sub2.ToLowerInvariant()}", out var n2))
+                { errors.Add($"Row {rowNum}: Sub Department 2 '{sub2}' not found under '{sub1}'."); return (id1, null, null); }
+                id2 = n2.Id;
+                if (sub3.Length > 0)
+                {
+                    if (!map.TryGetValue($"{deptId}|{n2.Id}|3|{sub3.ToLowerInvariant()}", out var n3))
+                    { errors.Add($"Row {rowNum}: Sub Department 3 '{sub3}' not found under '{sub2}'."); return (id1, id2, null); }
+                    id3 = n3.Id;
+                }
+            }
+            return (id1, id2, id3);
+        }
+
         public async Task<FetchAndResponse> GetEmployeeOrCandidateById(int Id,bool isCandidate = true)
         {
             try {
@@ -1201,11 +1254,14 @@ namespace HRMSAPI.Implementation
                         "Reference", "Store Code",
                         "Reimbersment", "Fuel_and_Maintainence", "Books_and_Periodicals", "Professional Attire", "Driver Wages", "Meal Voucher", "Mobile Bill","IsExtraDayApplicable","AO Code"
                     };
+                    // Sub-department columns are OPTIONAL and appended after the base columns.
+                    string[] subDeptHeaders = new[] { "Sub-Department 1", "Sub-Department 2", "Sub-Department 3" };
                     var headerRow = worksheet.Row(1);
                     int cellCount = headerRow.CellsUsed().Count();
-                    if (expectedHeaders.Length != cellCount)
+                    bool hasSubDept = cellCount == expectedHeaders.Length + subDeptHeaders.Length;
+                    if (cellCount != expectedHeaders.Length && !hasSubDept)
                     {
-                        return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
+                        return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns (or {expectedHeaders.Length + subDeptHeaders.Length} with sub-departments), found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
                     }
                     for (int i = 0; i < expectedHeaders.Length; i++)
                     {
@@ -1215,6 +1271,18 @@ namespace HRMSAPI.Implementation
                             return BuildExecuteErrorResponse($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'", HttpStatusCode.BadRequest);
                         }
                     }
+                    if (hasSubDept)
+                    {
+                        for (int i = 0; i < subDeptHeaders.Length; i++)
+                        {
+                            var cv = headerRow.Cell(expectedHeaders.Length + i + 1).GetValue<string>().Trim();
+                            if (!string.Equals(cv, subDeptHeaders[i], StringComparison.OrdinalIgnoreCase))
+                                return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
+                        }
+                    }
+                    var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
+                    var subDeptErrors = new List<string>();
+                    int excelRowNo = 1; // header is row 1; first data row = 2
                     var rows = worksheet.RowsUsed().Skip(1); // Skip header row
 
                     // Duplicate ECODE check
@@ -1239,6 +1307,7 @@ namespace HRMSAPI.Implementation
 
                     foreach (var row in rows)
                     {
+                        excelRowNo++;
                         // Column 1: Employee Code (Ecode)
                         var empCode = row.Cell(1).GetValue<string>();
                         if (string.IsNullOrWhiteSpace(empCode)) continue;
@@ -1492,6 +1561,27 @@ namespace HRMSAPI.Implementation
                             employee.IsExtraDayApplicable = extradaysApplicable.Trim().ToLower() == "yes";
                         var aoCode = row.Cell(59).GetValue<string>();
                         if (!string.IsNullOrWhiteSpace(aoCode)) employee.AOCode = aoCode;
+
+                        // Columns 60-62: Sub-Department 1/2/3 (optional). Resolve names under the
+                        // employee's (possibly just-updated) department and set the matching ids.
+                        // Blank cells leave the existing value unchanged (consistent with the rest
+                        // of the update) — only rows that provide a value are updated.
+                        if (hasSubDept && employee.DepartmentId.HasValue)
+                        {
+                            var sv1 = row.Cell(60).GetValue<string>();
+                            var sv2 = row.Cell(61).GetValue<string>();
+                            var sv3 = row.Cell(62).GetValue<string>();
+                            if (!string.IsNullOrWhiteSpace(sv1) || !string.IsNullOrWhiteSpace(sv2) || !string.IsNullOrWhiteSpace(sv3))
+                            {
+                                var (sd1, sd2, sd3) = ResolveSubDeptChain(
+                                    subDeptMap, employee.DepartmentId.Value, sv1, sv2, sv3,
+                                    excelRowNo, deptName, subDeptErrors);
+                                employee.SubDepartmentId1 = sd1;
+                                employee.SubDepartmentId2 = sd2;
+                                employee.SubDepartmentId3 = sd3;
+                            }
+                        }
+
                         // Update audit fields
                         employee.UpdatedBy = updatedBy;
                         employee.UpdatedOn = DateTime.UtcNow;
@@ -1499,7 +1589,10 @@ namespace HRMSAPI.Implementation
 
                     int ra = await _context.SaveChangesAsync();
                     if (ra < 1) return BuildExecuteErrorResponse("Unable to update data.", HttpStatusCode.BadRequest);
-                    return BuildExecuteSuccessResponse("Employee records updated successfully");
+                    var updMsg = "Employee records updated successfully";
+                    if (subDeptErrors.Count > 0)
+                        updMsg += $". Note: {subDeptErrors.Count} sub-department value(s) could not be applied: {string.Join(" | ", subDeptErrors.Take(20))}";
+                    return BuildExecuteSuccessResponse(updMsg);
                 }
             }
             catch (Exception ex)
@@ -1543,10 +1636,13 @@ namespace HRMSAPI.Implementation
                     "Reimbersment", "Fuel_and_Maintainence", "Books_and_Periodicals", "Professional Attire", "Driver Wages", "Meal Voucher", "Mobile Bill", "IsExtraDayApplicable", "AO Code"
                 };
 
+                // Sub-department columns are OPTIONAL and appended after the base columns.
+                string[] subDeptHeaders = new[] { "Sub-Department 1", "Sub-Department 2", "Sub-Department 3" };
                 var headerRow = worksheet.Row(1);
                 int cellCount = headerRow.CellsUsed().Count();
-                if (expectedHeaders.Length != cellCount)
-                    return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
+                bool hasSubDept = cellCount == expectedHeaders.Length + subDeptHeaders.Length;
+                if (cellCount != expectedHeaders.Length && !hasSubDept)
+                    return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns (or {expectedHeaders.Length + subDeptHeaders.Length} with sub-departments), found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
 
                 for (int i = 0; i < expectedHeaders.Length; i++)
                 {
@@ -1554,6 +1650,16 @@ namespace HRMSAPI.Implementation
                     if (!string.Equals(cellValue, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
                         return BuildExecuteErrorResponse($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'", HttpStatusCode.BadRequest);
                 }
+                if (hasSubDept)
+                {
+                    for (int i = 0; i < subDeptHeaders.Length; i++)
+                    {
+                        var cv = headerRow.Cell(expectedHeaders.Length + i + 1).GetValue<string>().Trim();
+                        if (!string.Equals(cv, subDeptHeaders[i], StringComparison.OrdinalIgnoreCase))
+                            return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
+                    }
+                }
+                var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
 
                 var rows = worksheet.RowsUsed().Skip(1).ToList();
                 if (!rows.Any())
@@ -1759,6 +1865,19 @@ namespace HRMSAPI.Implementation
                         {
                             var desg = await _context.tblDesignations.FirstOrDefaultAsync(d => d.DesignationName == desgName);
                             if (desg != null) emp.DesignationId = desg.DesignationId;
+                        }
+
+                        // Columns 60-62: Sub-Department 1/2/3 (optional). Resolve names under the
+                        // department and set the matching ids; mismatches are reported per row.
+                        if (hasSubDept && emp.DepartmentId.HasValue)
+                        {
+                            var (sd1, sd2, sd3) = ResolveSubDeptChain(
+                                subDeptMap, emp.DepartmentId.Value,
+                                row.Cell(60).GetValue<string>(), row.Cell(61).GetValue<string>(), row.Cell(62).GetValue<string>(),
+                                rowNum, deptName, errors);
+                            emp.SubDepartmentId1 = sd1;
+                            emp.SubDepartmentId2 = sd2;
+                            emp.SubDepartmentId3 = sd3;
                         }
 
                         await _context.tblEmployees.AddAsync(emp);

@@ -286,21 +286,21 @@ namespace HRMSAPI.Implementation
                 worksheet.Cell(1, 1).Value = "STCode";
                 worksheet.Cell(1, 2).Value = "DepartmentId";
                 worksheet.Cell(1, 3).Value = "DepartmentName";
-                worksheet.Cell(1, 4).Value = "DesignationId";
-                worksheet.Cell(1, 5).Value = "DesignationName";
-                worksheet.Cell(1, 6).Value = "SeatOrStatus";
-                worksheet.Cell(1, 7).Value = "SALARY_BGT";
-                worksheet.Cell(1, 8).Value = "ActualSalary";
-                worksheet.Cell(1, 9).Value = "Ecode";
-                worksheet.Cell(1, 10).Value = "FullName";
-                worksheet.Cell(1, 11).Value = "ReportEcode";
-                worksheet.Cell(1, 12).Value = "ReportFullName";
-                worksheet.Cell(1, 13).Value = "BGTReportingDesig";
-                worksheet.Cell(1, 14).Value = "ActualReportingDesig";
-                worksheet.Cell(1, 15).Value = "ACTIVE";
-                worksheet.Cell(1, 16).Value = "SubDepartment1";
-                worksheet.Cell(1, 17).Value = "SubDepartment2";
-                worksheet.Cell(1, 18).Value = "SubDepartment3";
+                worksheet.Cell(1, 4).Value = "SubDepartment1";
+                worksheet.Cell(1, 5).Value = "SubDepartment2";
+                worksheet.Cell(1, 6).Value = "SubDepartment3";
+                worksheet.Cell(1, 7).Value = "DesignationId";
+                worksheet.Cell(1, 8).Value = "DesignationName";
+                worksheet.Cell(1, 9).Value = "SeatOrStatus";
+                worksheet.Cell(1, 10).Value = "SALARY_BGT";
+                worksheet.Cell(1, 11).Value = "ActualSalary";
+                worksheet.Cell(1, 12).Value = "Ecode";
+                worksheet.Cell(1, 13).Value = "FullName";
+                worksheet.Cell(1, 14).Value = "ReportEcode";
+                worksheet.Cell(1, 15).Value = "ReportFullName";
+                worksheet.Cell(1, 16).Value = "BGTReportingDesig";
+                worksheet.Cell(1, 17).Value = "ActualReportingDesig";
+                worksheet.Cell(1, 18).Value = "ACTIVE";
 
                 for (int i = 0; i < data.Count; i++)
                 {
@@ -308,21 +308,21 @@ namespace HRMSAPI.Implementation
                     worksheet.Cell(i + 2, 1).Value = r.STCode;
                     worksheet.Cell(i + 2, 2).Value = r.DepartmentId;
                     worksheet.Cell(i + 2, 3).Value = r.DepartmentName;
-                    worksheet.Cell(i + 2, 4).Value = r.DesignationId;
-                    worksheet.Cell(i + 2, 5).Value = r.DesignationName;
-                    worksheet.Cell(i + 2, 6).Value = r.SeatOrStatus;
-                    worksheet.Cell(i + 2, 7).Value = r.SALARY_BGT;
-                    worksheet.Cell(i + 2, 8).Value = r.ActualSalary;
-                    worksheet.Cell(i + 2, 9).Value = r.Ecode;
-                    worksheet.Cell(i + 2, 10).Value = r.FullName;
-                    worksheet.Cell(i + 2, 11).Value = r.ReportEcode;
-                    worksheet.Cell(i + 2, 12).Value = r.ReportFullName;
-                    worksheet.Cell(i + 2, 13).Value = r.BGTReportingDesig;
-                    worksheet.Cell(i + 2, 14).Value = r.ActualReportingDesig;
-                    worksheet.Cell(i + 2, 15).Value = r.ACTIVE==true?"Active":"Inactive";
-                    worksheet.Cell(i + 2, 16).Value = r.SubDepartment1;
-                    worksheet.Cell(i + 2, 17).Value = r.SubDepartment2;
-                    worksheet.Cell(i + 2, 18).Value = r.SubDepartment3;
+                    worksheet.Cell(i + 2, 4).Value = r.SubDepartment1;
+                    worksheet.Cell(i + 2, 5).Value = r.SubDepartment2;
+                    worksheet.Cell(i + 2, 6).Value = r.SubDepartment3;
+                    worksheet.Cell(i + 2, 7).Value = r.DesignationId;
+                    worksheet.Cell(i + 2, 8).Value = r.DesignationName;
+                    worksheet.Cell(i + 2, 9).Value = r.SeatOrStatus;
+                    worksheet.Cell(i + 2, 10).Value = r.SALARY_BGT;
+                    worksheet.Cell(i + 2, 11).Value = r.ActualSalary;
+                    worksheet.Cell(i + 2, 12).Value = r.Ecode;
+                    worksheet.Cell(i + 2, 13).Value = r.FullName;
+                    worksheet.Cell(i + 2, 14).Value = r.ReportEcode;
+                    worksheet.Cell(i + 2, 15).Value = r.ReportFullName;
+                    worksheet.Cell(i + 2, 16).Value = r.BGTReportingDesig;
+                    worksheet.Cell(i + 2, 17).Value = r.ActualReportingDesig;
+                    worksheet.Cell(i + 2, 18).Value = r.ACTIVE==true?"Active":"Inactive";
                 }
 
                 worksheet.Columns().AdjustToContents();
