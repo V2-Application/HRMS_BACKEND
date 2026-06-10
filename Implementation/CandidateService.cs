@@ -1204,6 +1204,16 @@ namespace HRMSAPI.Implementation
                         Message = $"No Candidate Approval Found for Id: {obj.CandidateId}"
                     };
 
+                // Active-only enforcement: don't progress approval or generate an ecode for a
+                // candidate whose department or designation is inactive.
+                int.TryParse(candidate.DEPARTMENT, out var apprDeptId);
+                int.TryParse(candidate.DESIGNATION, out var apprDesigId);
+                var (apprDeptDesigOk, apprDeptDesigErr) = await ValidateDeptDesigActiveAsync(
+                    apprDeptId > 0 ? apprDeptId : (int?)null,
+                    apprDesigId > 0 ? apprDesigId : (int?)null);
+                if (!apprDeptDesigOk)
+                    return new Response { Status = false, StatusCode = HttpStatusCode.BadRequest, Message = apprDeptDesigErr };
+
                 const int approvedStatusId = 1; // Assuming StatusId 1 = "Approved"
 
                 int? hrApprovalStatusId = null;
@@ -1681,6 +1691,31 @@ namespace HRMSAPI.Implementation
             }
             string Get(int? id) => id.HasValue && map.TryGetValue(id.Value, out var v) ? v : "";
             return (Get(id1), Get(id2), Get(id3));
+        }
+
+        // Returns (false, error) when the selected department or designation is inactive/deleted.
+        // Active = isActive is NOT 0 (1 or NULL) AND isDeleted is not 1 — matches the dropdown filter.
+        private async Task<(bool ok, string error)> ValidateDeptDesigActiveAsync(int? departmentId, int? designationId)
+        {
+            if (departmentId.HasValue && departmentId.Value > 0)
+            {
+                var dept = await _context.tblDepartments.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId.Value);
+                if (dept == null)
+                    return (false, "Selected department was not found.");
+                if (dept.isActive == false || dept.isDeleted == true)
+                    return (false, $"Department '{dept.DepartmentName}' is inactive. Please select an active department.");
+            }
+            if (designationId.HasValue && designationId.Value > 0)
+            {
+                var desg = await _context.tblDesignations.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DesignationId == designationId.Value);
+                if (desg == null)
+                    return (false, "Selected designation was not found.");
+                if (desg.isActive == false || desg.isDeleted == true)
+                    return (false, $"Designation '{desg.DesignationName}' is inactive. Please select an active designation.");
+            }
+            return (true, null);
         }
 
         public async Task<Response> GetCandidateInfo(int candidateID)
@@ -3602,6 +3637,18 @@ namespace HRMSAPI.Implementation
                         Status = false,
                         StatusCode = System.Net.HttpStatusCode.BadRequest,
                         Message = "Invalid input parameters"
+                    };
+                }
+
+                // Active-only enforcement: reject inactive department/designation.
+                var (deptDesigOk, deptDesigErr) = await ValidateDeptDesigActiveAsync((int)department, (int)designation);
+                if (!deptDesigOk)
+                {
+                    return new Response
+                    {
+                        Status = false,
+                        StatusCode = System.Net.HttpStatusCode.BadRequest,
+                        Message = deptDesigErr
                     };
                 }
 

@@ -15,5 +15,9 @@ public partial class tblDepartment
 
     public string DepartmentCode { get; set; }
 
+    public bool? isActive { get; set; }
+
+    public bool? isDeleted { get; set; }
+
     public virtual ICollection<AssignLocationHistory> AssignLocationHistories { get; set; } = new List<AssignLocationHistory>();
 }

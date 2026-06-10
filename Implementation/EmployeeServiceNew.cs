@@ -937,6 +937,12 @@ namespace HRMSAPI.Implementation
                 employeeData.ShiftID = employee.candidateInfo.ShiftID ?? 1;
                 employeeData.IsUANRegistered = employee.candidateInfo.isUanRegistered ?? false;
                 employeeData.AOCode = employee.candidateInfo.AoCode ?? "";
+
+                // Active-only enforcement: do not save if the selected department/designation is inactive.
+                var (deptDesigOk, deptDesigErr) = await ValidateDeptDesigActiveAsync(employeeData.DepartmentId, employeeData.DesignationId);
+                if (!deptDesigOk)
+                    return BuildExecuteErrorResponse(deptDesigErr, HttpStatusCode.BadRequest);
+
                 int ra = await _context.SaveChangesAsync();
 
                 //if (ra < 1)
@@ -1878,6 +1884,14 @@ namespace HRMSAPI.Implementation
                             emp.SubDepartmentId1 = sd1;
                             emp.SubDepartmentId2 = sd2;
                             emp.SubDepartmentId3 = sd3;
+                        }
+
+                        // Active-only enforcement: skip (no ecode/insert) if dept/designation is inactive.
+                        var (rowDeptDesigOk, rowDeptDesigErr) = await ValidateDeptDesigActiveAsync(emp.DepartmentId, emp.DesignationId);
+                        if (!rowDeptDesigOk)
+                        {
+                            errors.Add($"Row {rowNum}: {rowDeptDesigErr}");
+                            continue;
                         }
 
                         await _context.tblEmployees.AddAsync(emp);

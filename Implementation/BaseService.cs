@@ -41,6 +41,32 @@ namespace HRMSAPI.Implementation
             Code = code
         };
 
+        // Returns (false, error) when the selected department or designation is inactive/deleted.
+        // Active = isActive is NOT 0 (1 or NULL) AND isDeleted is not 1 — matches the dropdown filter.
+        // Used to block employee create/update + ecode generation for inactive dept/designation.
+        protected async Task<(bool ok, string error)> ValidateDeptDesigActiveAsync(int? departmentId, int? designationId)
+        {
+            if (departmentId.HasValue && departmentId.Value > 0)
+            {
+                var dept = await _context.tblDepartments.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DepartmentId == departmentId.Value);
+                if (dept == null)
+                    return (false, "Selected department was not found.");
+                if (dept.isActive == false || dept.isDeleted == true)
+                    return (false, $"Department '{dept.DepartmentName}' is inactive. Please select an active department.");
+            }
+            if (designationId.HasValue && designationId.Value > 0)
+            {
+                var desg = await _context.tblDesignations.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DesignationId == designationId.Value);
+                if (desg == null)
+                    return (false, "Selected designation was not found.");
+                if (desg.isActive == false || desg.isDeleted == true)
+                    return (false, $"Designation '{desg.DesignationName}' is inactive. Please select an active designation.");
+            }
+            return (true, null);
+        }
+
         public async Task<string> HashPassword(string plainText) => BCrypt.Net.BCrypt.HashPassword(plainText);
 
         public async Task<bool> VerifyPassword(string plainText, string hashedText) => BCrypt.Net.BCrypt.Verify(plainText, hashedText);

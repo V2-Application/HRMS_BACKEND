@@ -28,6 +28,7 @@ namespace HRMSAPI.Implementation
         public async Task<IEnumerable<DesignationDto>> GetDesignation()
         {
             return await _context.tblDesignations
+                .Where(l => (l.isActive == null || l.isActive == true) && (l.isDeleted == null || l.isDeleted == false))
                 .Select(l => new DesignationDto
                 {
                     DesignationId = l.DesignationId,
@@ -98,6 +99,7 @@ namespace HRMSAPI.Implementation
         public async Task<IEnumerable<DepartmentDto>> GetDepartments()
         {
             return await _context.tblDepartments
+                .Where(d => (d.isActive == null || d.isActive == true) && (d.isDeleted == null || d.isDeleted == false))
                 .Select(d => new DepartmentDto
                 {
                     DepartmentId = d.DepartmentId,

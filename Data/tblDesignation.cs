@@ -15,6 +15,10 @@ public partial class tblDesignation
 
     public string DesignationCode { get; set; }
 
+    public bool? isActive { get; set; }
+
+    public bool? isDeleted { get; set; }
+
     public virtual ICollection<AssignLocationHistory> AssignLocationHistories { get; set; } = new List<AssignLocationHistory>();
 
     public virtual JD JD { get; set; }
