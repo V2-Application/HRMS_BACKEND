@@ -30,6 +30,10 @@ namespace HRMSAPI.Controllers
                 ["employee"] = ("dbo.usp_EmployeeWiseAbscondingReport", "EMP_Absconding_Report_", false),
                 ["mispunch"] = ("dbo.usp_MispunchGapReport", "MISPUNCH_Gap_Report_", false),
                 ["mispunch-loc"] = ("dbo.usp_LocationWiseMispunchReport", "LOC_Mispunch_Gap_Report_", false),
+                ["geofence-loc"] = ("dbo.usp_LocationWiseGeofenceReport", "LOC_Geofence_Gap_Report_", false),
+                ["geofence-emp"] = ("dbo.usp_EmployeeWiseGeofenceReport", "EMP_Geofence_Gap_Report_", false),
+                ["regularization-loc"] = ("dbo.usp_LocationWiseRegularizationReport", "LOC_Regularization_Gap_Report_", false),
+                ["regularization-emp"] = ("dbo.usp_EmployeeWiseRegularizationReport", "EMP_Regularization_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -42,6 +46,10 @@ namespace HRMSAPI.Controllers
                 new { key = "employee", name = "Employee-wise Absconding Report" },
                 new { key = "mispunch", name = "TD/MTD Mis-Punch Gap Report (Employee-wise)" },
                 new { key = "mispunch-loc", name = "TD/MTD Mis-Punch Gap Report (Location-wise)" },
+                new { key = "geofence-loc", name = "TD/MTD Geo-Fencing Gap Report (Location-wise)" },
+                new { key = "geofence-emp", name = "TD/MTD Geo-Fencing Gap Report (Employee-wise)" },
+                new { key = "regularization-loc", name = "TD/MTD Regularization Gap Report (Location-wise)" },
+                new { key = "regularization-emp", name = "TD/MTD Regularization Gap Report (Employee-wise)" },
             };
             return Ok(list);
         }

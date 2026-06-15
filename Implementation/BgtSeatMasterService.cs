@@ -29,7 +29,7 @@ namespace HRMSAPI.Implementation
 
         public async Task<FetchAndResponse> UploadBgtSeatMasterExcelAsync(IFormFile file)
 {
-    var expectedHeaders = new[] { "LOC CODE", "DEPARTMENT", "DESIGNATION", "SALARY BGT", "ORG CHART", "REPORTING MANAGER DESG", "ACTIVE" };
+    var expectedHeaders = new[] { "LOC CODE", "DEPARTMENT", "DESIGNATION", "SALARY BGT", "ORG CHART", "REPORTING MANAGER DESG", "ACTIVE", "SUB DEPARTMENT 1", "SUB DEPARTMENT 2", "SUB DEPARTMENT 3" };
     if (file == null || file.Length == 0)
         return BuildFetchErrorResponse("No file uploaded", HttpStatusCode.BadRequest);
 
@@ -240,19 +240,40 @@ namespace HRMSAPI.Implementation
                         Value = xRows.ToString(SaveOptions.DisableFormatting)
                     });
 
-                    // (Optional) collect generated numbers
+                    // The proc returns ONE of two shapes, both with idx as nvarchar:
+                    //   success -> columns (idx, SEAT_MASTER_NO)
+                    //   errors  -> columns (idx, err)
+                    // Read by column NAME and be type-tolerant so we never blindly cast a string to int.
                     var created = new List<(int idx, string seatNo)>();
+                    var rowErrors = new List<string>();
                     using (var reader = await cmd.ExecuteReaderAsync())
                     {
+                        bool hasErr = false, hasSeat = false;
+                        for (int c = 0; c < reader.FieldCount; c++)
+                        {
+                            var n = reader.GetName(c);
+                            if (string.Equals(n, "err", StringComparison.OrdinalIgnoreCase)) hasErr = true;
+                            if (string.Equals(n, "SEAT_MASTER_NO", StringComparison.OrdinalIgnoreCase)) hasSeat = true;
+                        }
                         while (await reader.ReadAsync())
                         {
-                            string seatNo = reader.GetString(0);   // inserted.SEAT_MASTER_NO from OUTPUT
-                            int idx = reader.GetInt32(1);          // ir.idx from OUTPUT
-                            created.Add((idx, seatNo));
+                            if (hasErr)
+                            {
+                                rowErrors.Add(reader["err"]?.ToString());
+                            }
+                            else if (hasSeat)
+                            {
+                                int.TryParse(reader["idx"]?.ToString(), out var idx);
+                                created.Add((idx, reader["SEAT_MASTER_NO"]?.ToString()));
+                            }
                         }
                     }
 
-                    // You can return `created` in your FetchAndResponse if you want
+                    if (rowErrors.Count > 0)
+                        return BuildFetchErrorResponse(
+                            "BGTSEATMaster upload rejected:\n" + string.Join("\n", rowErrors),
+                            HttpStatusCode.BadRequest);
+
                     return BuildFetchSuccessResponse("BGTSEATMaster uploaded successfully", created);
                 }
                 catch (Exception ex)

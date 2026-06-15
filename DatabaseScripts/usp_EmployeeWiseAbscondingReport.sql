@@ -8,10 +8,9 @@ BEGIN
       EMP-WISE ABSCONDING REPORT  (read-only; marks/changes nothing)
       One row per employee whose CURRENT STATUS is absconded:
         tblEmployeeSepration.ResignationTypeId = 10 'Absconding', not revoked, AND the
-        employee is currently inactive (tblEmployee.IsActive = 0).
-      The IsActive = 0 guard excludes employees who were marked absconding earlier but have
-        since returned / been reactivated and are punching again, yet whose old absconding
-        separation row was never revoked (these would otherwise show a recent LAST PUNCHING DT).
+        employee is STILL ACTIVE (tblEmployee.IsActive = 1).
+      The IsActive = 1 guard keeps only ACTIVE employees flagged absconding -- deactivated
+        absconders are excluded per requirement (consider active-employee data only).
       Columns:
         LOC CD            = tblLocation.STCode
         LOC NM            = tblLocation.LocationName
@@ -72,7 +71,7 @@ BEGIN
     LEFT JOIN dbo.tblSubDepartment sd1 WITH (NOLOCK) ON sd1.SubDepartmentId = e.SubDepartmentId1
     LEFT JOIN dbo.tblSubDepartment sd2 WITH (NOLOCK) ON sd2.SubDepartmentId = e.SubDepartmentId2
     LEFT JOIN dbo.tblSubDepartment sd3 WITH (NOLOCK) ON sd3.SubDepartmentId = e.SubDepartmentId3
-    WHERE e.IsActive = 0
+    WHERE e.IsActive = 1
     ORDER BY l.STCode, e.ECode;
 
     SET NOCOUNT OFF;
