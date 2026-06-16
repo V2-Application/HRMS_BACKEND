@@ -575,8 +575,54 @@ namespace HRMSAPI.Implementation
 
             try
             {
+                // Replace-on-reupload: for every (Location + Designation + Month-Year) combo present
+                // in the uploaded sheet, archive the existing ACTIVE bands to history and deactivate
+                // them (IsActive=0). The new bands from the sheet are then inserted fresh. This makes
+                // re-upload REPLACE the month's bands (per requirement) instead of failing on overlap.
+                // Existing rows are NOT deleted - they are kept as inactive and archived in history.
+                var combos = policies
+                    .Select(p => new { p.LocationCategoryId, p.DesignationId, p.MonthYear })
+                    .Distinct()
+                    .ToList();
+
+                foreach (var k in combos)
+                {
+                    using var deact = connection.CreateCommand();
+                    deact.Transaction = transaction;
+                    deact.CommandText = @"
+                        INSERT INTO tblLocationDesignationPolicyHistory
+                            (LocationDesignationPolicyId, LocationCategoryId, LocationCategoryName,
+                             DesignationId, DesignationName, TotalAttendanceFrom, TotalAttendanceTo,
+                             WeeklyOff, ForWhichWeeks, [Month-Year], IsActive, IsDeleted,
+                             ActionType, ActionBy, ActionOn)
+                        SELECT LocationDesignationPolicyId, LocationCategoryId, LocationCategoryName,
+                             DesignationId, DesignationName, TotalAttendanceFrom,
+                             TRY_CAST(TotalAttendance AS DECIMAL(5,2)), WeeklyOff, ForWhichWeeks,
+                             [Month-Year], IsActive, IsDeleted, 'REUPLOAD-REPLACE', @By, GETDATE()
+                        FROM tblLocationDesignationPolicy
+                        WHERE IsActive = 1
+                          AND LocationCategoryId = @Loc
+                          AND ISNULL(DesignationId, -1) = ISNULL(@Desg, -1)
+                          AND [Month-Year] = @MY;
+
+                        UPDATE tblLocationDesignationPolicy
+                        SET IsActive = 0, UpdatedBy = @By, UpdatedOn = GETDATE()
+                        WHERE IsActive = 1
+                          AND LocationCategoryId = @Loc
+                          AND ISNULL(DesignationId, -1) = ISNULL(@Desg, -1)
+                          AND [Month-Year] = @MY;";
+                    deact.Parameters.Add(new SqlParameter("@Loc", k.LocationCategoryId));
+                    deact.Parameters.Add(new SqlParameter("@Desg", k.DesignationId ?? (object)DBNull.Value));
+                    deact.Parameters.Add(new SqlParameter("@MY", k.MonthYear));
+                    deact.Parameters.Add(new SqlParameter("@By", createdBy.EmployeeId));
+                    await deact.ExecuteNonQueryAsync();
+                }
+
                 foreach (var item in policies)
                 {
+                    // always insert fresh (existing bands for this combo are now inactive)
+                    item.LocationDesignationPolicyId = null;
+
                     using var command = connection.CreateCommand();
                     command.Transaction = transaction;
                     command.CommandText = "usp_UpsertLocationDesignationPolicy";
@@ -885,6 +931,16 @@ namespace HRMSAPI.Implementation
                     x => x.DesignationName.Trim().ToLower(),
                     x => x.DesignationId);
 
+            // Load the valid location-category codes once. The "Location Code" column in the sheet
+            // must be one of these category codes (NOT a store/STCode) - the proc validates against
+            // LocationDesignationPolicyCategory. Pre-validate here so the error names the row + value.
+            var validCategoryCodes = await _context.LocationDesignationPolicyCategories
+                .Where(x => x.IsActive && !x.IsDeleted && x.CategoryCode != null)
+                .Select(x => x.CategoryCode.Trim())
+                .ToListAsync();
+            var validCategorySet = new HashSet<string>(validCategoryCodes, StringComparer.OrdinalIgnoreCase);
+            var validCategoryList = string.Join(", ", validCategoryCodes.OrderBy(x => x));
+
             using (var workbook = new XLWorkbook(file.OpenReadStream()))
             {
                 var sheet = workbook.Worksheet(1);
@@ -900,7 +956,11 @@ namespace HRMSAPI.Implementation
                     {
                         var locationCategoryId = row.Cell(1).GetString()?.Trim();
                         if (string.IsNullOrWhiteSpace(locationCategoryId))
-                            throw new Exception("LocationCategoryId is required");
+                            throw new Exception("Location Code is required");
+
+                        if (!validCategorySet.Contains(locationCategoryId))
+                            throw new Exception(
+                                $"Invalid Location Code '{locationCategoryId}'. It must be a policy category code. Valid codes: {validCategoryList}");
 
                         var designationName = row.Cell(2).GetString()?.Trim();
                         int? designationId = null;
@@ -972,9 +1032,24 @@ namespace HRMSAPI.Implementation
                 return cell.GetDateTime().ToString("MMM-yy", CultureInfo.InvariantCulture);
             }
 
+            // Date stored as a plain number (Excel serial date, e.g. 46138) when the cell lost its
+            // date formatting. Treat numeric values as an OLE Automation date.
+            if (cell.DataType == XLDataType.Number)
+            {
+                if (cell.TryGetValue<double>(out var serial) && serial > 59 && serial < 60000)
+                    return DateTime.FromOADate(serial).ToString("MMM-yy", CultureInfo.InvariantCulture);
+            }
+
             var value = cell.GetString()?.Trim();
             if (string.IsNullOrWhiteSpace(value))
                 throw new Exception("MonthYear is required");
+
+            // String that is actually a numeric serial date (e.g. "46138").
+            if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var serialFromText)
+                && serialFromText > 59 && serialFromText < 60000)
+            {
+                return DateTime.FromOADate(serialFromText).ToString("MMM-yy", CultureInfo.InvariantCulture);
+            }
 
             // Already MMM-yy
             if (DateTime.TryParseExact(

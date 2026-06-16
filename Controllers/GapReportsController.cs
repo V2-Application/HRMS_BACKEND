@@ -34,6 +34,10 @@ namespace HRMSAPI.Controllers
                 ["geofence-emp"] = ("dbo.usp_EmployeeWiseGeofenceReport", "EMP_Geofence_Gap_Report_", false),
                 ["regularization-loc"] = ("dbo.usp_LocationWiseRegularizationReport", "LOC_Regularization_Gap_Report_", false),
                 ["regularization-emp"] = ("dbo.usp_EmployeeWiseRegularizationReport", "EMP_Regularization_Gap_Report_", false),
+                ["lastpunch-sep"] = ("dbo.usp_LastPunchVsSeparationGapReport", "LastPunch_vs_Separation_HighAgeing_Gap_Report_", false),
+                ["lastpunch-after-sep"] = ("dbo.usp_LastPunchAfterSeparationGapReport", "LastPunch_After_Separation_Gap_Report_", false),
+                ["sep-fnf-pending"] = ("dbo.usp_SeparatedFnFPendingGapReport", "Separated_But_FnF_Pending_Gap_Report_", false),
+                ["sep-lastpunch-missing"] = ("dbo.usp_SeparatedLastPunchMissingGapReport", "Separated_But_LastPunch_Missing_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -50,6 +54,10 @@ namespace HRMSAPI.Controllers
                 new { key = "geofence-emp", name = "TD/MTD Geo-Fencing Gap Report (Employee-wise)" },
                 new { key = "regularization-loc", name = "TD/MTD Regularization Gap Report (Location-wise)" },
                 new { key = "regularization-emp", name = "TD/MTD Regularization Gap Report (Employee-wise)" },
+                new { key = "lastpunch-sep", name = "Last Punch vs Separation High Ageing Gap Report" },
+                new { key = "lastpunch-after-sep", name = "Last Punching Shows After Separation Gap Report" },
+                new { key = "sep-fnf-pending", name = "Separated But F&F Pending Gap Report" },
+                new { key = "sep-lastpunch-missing", name = "Separated But Last Punch Date Missing Gap Report" },
             };
             return Ok(list);
         }

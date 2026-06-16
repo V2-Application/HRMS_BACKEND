@@ -350,10 +350,12 @@ namespace HRMSAPI.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during ImportPolicyDesignation");
-                return StatusCode(500, new
+                // Surface the actual reason (e.g. "Invalid data at Excel row 3: Invalid MonthYear '46138'")
+                // so the user can fix the sheet, instead of a blind "Internal server error".
+                return BadRequest(new
                 {
                     Status = false,
-                    Message = "Internal server error"
+                    Message = ex.Message
                 });
             }
         }
