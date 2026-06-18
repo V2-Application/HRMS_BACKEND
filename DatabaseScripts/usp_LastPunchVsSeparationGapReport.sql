@@ -60,10 +60,13 @@ BEGIN
     FROM sep sp
     JOIN dbo.tblEmployee e WITH (NOLOCK) ON e.EmployeeId = sp.EmployeeId
     OUTER APPLY (
-        SELECT MAX(d2) AS LastPunchDt FROM (VALUES
-            ( (SELECT MAX(p.PunchDate) FROM dbo.tblEmployeeMultiPunches p WITH (NOLOCK) WHERE p.UserID = e.ECode) ),
-            ( (SELECT MAX(CONVERT(date, ar.PunchTimeUtc)) FROM dbo.AttendanceRecord ar WITH (NOLOCK) WHERE ar.EmployeeId = e.EmployeeId AND ar.StatusId = 1) )
-        ) v(d2)
+        -- L.PUNCH DATE sourced exactly like the Employee Master export (GetEmployeeDetailsforexcel_Ishu):
+        -- MAX valid working-punch day from the materialized monthly-punches table.
+        SELECT MAX(x.AttendanceDate) AS LastPunchDt
+        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test x WITH (NOLOCK)
+        WHERE x.ECode = e.ECode
+          AND TRY_CAST(x.TotalWorkingMinutes AS time) >= '04:30'
+          AND x.ValidPunchCount >= 1
     ) lp
     LEFT JOIN dbo.tblLocation l        WITH (NOLOCK) ON l.LocationId     = e.LocationId
     LEFT JOIN dbo.tblDepartment d      WITH (NOLOCK) ON d.DepartmentId   = e.DepartmentId

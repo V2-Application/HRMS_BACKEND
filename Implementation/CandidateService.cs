@@ -1428,6 +1428,24 @@ namespace HRMSAPI.Implementation
                     candidateApproval.AuditApprovalStatus == approvedStatusId &&
                     candidateApproval.HRApprovalStatus == approvedStatusId)
                 {
+                    // Before generating a NEW ecode: block if an ACTIVE employee already holds this candidate's
+                    // Aadhaar or PAN. A returning INACTIVE (left) employee may still be onboarded with a new ecode.
+                    if (!string.IsNullOrWhiteSpace(candidate.AADHAR_NO))
+                    {
+                        var aadharActiveEmp = await _context.tblEmployees
+                            .AnyAsync(e => e.AADHAR_NO == candidate.AADHAR_NO && e.IsActive == true && e.IsDeleted != true);
+                        if (aadharActiveEmp)
+                            throw new InvalidOperationException("Aadhaar number already exists for an active employee. Cannot generate a new ecode.");
+                    }
+                    if (!string.IsNullOrWhiteSpace(candidate.PAN_NO))
+                    {
+                        var panU = candidate.PAN_NO.Trim().ToUpper();
+                        var panActiveEmp = await _context.tblEmployees
+                            .AnyAsync(e => e.PAN_NO != null && e.PAN_NO.ToUpper() == panU && e.IsActive == true && e.IsDeleted != true);
+                        if (panActiveEmp)
+                            throw new InvalidOperationException("PAN number already exists for an active employee. Cannot generate a new ecode.");
+                    }
+
                     string defaultPassword = "V2@123";
                     string hashedPassword = BCrypt.Net.BCrypt.HashPassword(defaultPassword);
 
@@ -3721,15 +3739,30 @@ namespace HRMSAPI.Implementation
                         CreatedOn = DateTime.UtcNow,
                         StatusId = 4
                     };
-                    // Check if Aadhaar number is provided and validate if it already exists
+                    // Aadhaar uniqueness: block ONLY when an ACTIVE employee already holds this Aadhaar.
+                    // A person whose previous employment is INACTIVE (left) may rejoin with a new ecode -
+                    // their old inactive employee record (and stale-but-active candidate record) must NOT block.
                     if (!string.IsNullOrWhiteSpace(candidateUpdate.aadharNo) && candidateUpdate.aadharNo != data.AADHAR_NO)
                     {
-                        var existingAadhaar = await _context.Candidates
-                            .AnyAsync(c => c.AADHAR_NO == candidateUpdate.aadharNo && c.IsActive == true && c.IsDeleted == false);
+                        var activeEmployeeHasAadhaar = await _context.tblEmployees
+                            .AnyAsync(e => e.AADHAR_NO == candidateUpdate.aadharNo && e.IsActive == true && e.IsDeleted != true);
 
-                        if (existingAadhaar)
+                        if (activeEmployeeHasAadhaar)
                         {
-                            throw new InvalidOperationException("Aadhaar number already exists for another candidate.");
+                            throw new InvalidOperationException("Aadhaar number already exists for an active employee.");
+                        }
+                    }
+
+                    // PAN uniqueness: block ONLY when an ACTIVE employee already holds this PAN
+                    // (inactive/left employees may still rejoin with a new ecode).
+                    if (!string.IsNullOrWhiteSpace(candidateUpdate.panNo) && candidateUpdate.panNo != data.PAN_NO)
+                    {
+                        var panUpper = candidateUpdate.panNo.Trim().ToUpper();
+                        var activeEmployeeHasPan = await _context.tblEmployees
+                            .AnyAsync(e => e.PAN_NO != null && e.PAN_NO.ToUpper() == panUpper && e.IsActive == true && e.IsDeleted != true);
+                        if (activeEmployeeHasPan)
+                        {
+                            throw new InvalidOperationException("PAN number already exists for an active employee.");
                         }
                     }
                     _context.Candidates.Add(data);
@@ -3740,6 +3773,30 @@ namespace HRMSAPI.Implementation
                     data = await _context.Candidates
                         .FirstOrDefaultAsync(row => row.Id == candidateUpdate.id)
                         ?? throw new KeyNotFoundException($"No Candidate Found for Id: {candidateUpdate.id}");
+
+                    // Aadhaar uniqueness on UPDATE too: block ONLY when an ACTIVE employee already holds this
+                    // Aadhaar (inactive/left employees may still rejoin). Only fires when the value actually changes.
+                    if (!string.IsNullOrWhiteSpace(candidateUpdate.aadharNo) && candidateUpdate.aadharNo != data.AADHAR_NO)
+                    {
+                        var activeEmployeeHasAadhaar = await _context.tblEmployees
+                            .AnyAsync(e => e.AADHAR_NO == candidateUpdate.aadharNo && e.IsActive == true && e.IsDeleted != true);
+                        if (activeEmployeeHasAadhaar)
+                        {
+                            throw new InvalidOperationException("Aadhaar number already exists for an active employee.");
+                        }
+                    }
+
+                    // PAN uniqueness on UPDATE too: block ONLY when an ACTIVE employee already holds this PAN.
+                    if (!string.IsNullOrWhiteSpace(candidateUpdate.panNo) && candidateUpdate.panNo != data.PAN_NO)
+                    {
+                        var panUpper = candidateUpdate.panNo.Trim().ToUpper();
+                        var activeEmployeeHasPan = await _context.tblEmployees
+                            .AnyAsync(e => e.PAN_NO != null && e.PAN_NO.ToUpper() == panUpper && e.IsActive == true && e.IsDeleted != true);
+                        if (activeEmployeeHasPan)
+                        {
+                            throw new InvalidOperationException("PAN number already exists for an active employee.");
+                        }
+                    }
 
                     // ===============================
                     // SEAT CHECK FOR UPDATE (ONLY IF COMBO CHANGES)

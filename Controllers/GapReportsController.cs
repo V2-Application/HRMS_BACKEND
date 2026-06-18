@@ -38,6 +38,10 @@ namespace HRMSAPI.Controllers
                 ["lastpunch-after-sep"] = ("dbo.usp_LastPunchAfterSeparationGapReport", "LastPunch_After_Separation_Gap_Report_", false),
                 ["sep-fnf-pending"] = ("dbo.usp_SeparatedFnFPendingGapReport", "Separated_But_FnF_Pending_Gap_Report_", false),
                 ["sep-lastpunch-missing"] = ("dbo.usp_SeparatedLastPunchMissingGapReport", "Separated_But_LastPunch_Missing_Gap_Report_", false),
+                ["sep-resignation-missing"] = ("dbo.usp_SeparatedResignationMissingGapReport", "Separated_But_Resignation_Missing_Gap_Report_", false),
+                ["rm-geofence-pending"] = ("dbo.usp_RMGeofenceApprovalPendingGapReport", "LOC_RM_Geofence_Approval_Pending_Gap_Report_", false),
+                ["rm-regularization-pending"] = ("dbo.usp_RMRegularizationApprovalPendingGapReport", "LOC_RM_Regularization_Approval_Pending_Gap_Report_", false),
+                ["audit-regularization-pending"] = ("dbo.usp_AuditRegularizationApprovalPendingGapReport", "LOC_Audit_Regularization_Approval_Pending_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -58,6 +62,10 @@ namespace HRMSAPI.Controllers
                 new { key = "lastpunch-after-sep", name = "Last Punching Shows After Separation Gap Report" },
                 new { key = "sep-fnf-pending", name = "Separated But F&F Pending Gap Report" },
                 new { key = "sep-lastpunch-missing", name = "Separated But Last Punch Date Missing Gap Report" },
+                new { key = "sep-resignation-missing", name = "Separated But Resignation Missing Gap Report" },
+                new { key = "rm-geofence-pending", name = "TD/MTD RM Geo-Fencing Approval Pending Gap Report" },
+                new { key = "rm-regularization-pending", name = "TD/MTD RM Regularization Approval Pending Gap Report" },
+                new { key = "audit-regularization-pending", name = "TD/MTD Audit Regularization Approval Pending Gap Report" },
             };
             return Ok(list);
         }
