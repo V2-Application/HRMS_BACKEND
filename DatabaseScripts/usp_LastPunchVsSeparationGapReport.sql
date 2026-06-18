@@ -21,12 +21,15 @@ BEGIN
 
     ;WITH sep AS (
         SELECT s.EmployeeId,
-               COALESCE(s.LastDay, CAST(s.ResignationDate AS date)) AS SeparationDate,
+               -- SEPERATION DATE taken from Employee Master (tblEmployee.DateOfLeft);
+               -- falls back to the separation record only when the master value is null.
+               COALESCE(em.DateOfLeft, s.LastDay, CAST(s.ResignationDate AS date)) AS SeparationDate,
                ROW_NUMBER() OVER (
                    PARTITION BY s.EmployeeId
                    ORDER BY COALESCE(s.LastDay, CAST(s.ResignationDate AS date)) DESC,
                             s.EmployeeSeprationId DESC) AS rn
         FROM dbo.tblEmployeeSepration s WITH (NOLOCK)
+        JOIN dbo.tblEmployee em WITH (NOLOCK) ON em.EmployeeId = s.EmployeeId
         WHERE ISNULL(s.IsRevoked, 0) = 0
     )
     SELECT

@@ -252,12 +252,23 @@ namespace HRMSAPI.Implementation
                 throw new InvalidOperationException($"Failed to execute MergeMonthlyPunchesRange: {ex.Message}", ex);
             }
         }
-        public async Task<List<AttendanceFetchDto>> FetchAttendance(int month, int year, string ecode)
+        public async Task<List<AttendanceFetchDto>> FetchAttendance(int month, int year, string ecode, bool useCycle = false)
         {
             List<AttendanceFetchDto> attendances = new();
             //List<tbl_fn_GetMonthlyPunchesRange_productionnewnick_test> attendances = new();
-            DateTime fromDate = new(year, month, 1);
-            DateTime toDate = fromDate.AddMonths(1).AddDays(-1);
+            DateTime fromDate, toDate;
+            if (useCycle)
+            {
+                // Pay cycle: 26th of previous month -> 25th of the selected month.
+                var firstOfMonth = new DateTime(year, month, 1);
+                toDate   = firstOfMonth.AddDays(24);              // 25th of selected month
+                fromDate = firstOfMonth.AddMonths(-1).AddDays(25); // 26th of previous month
+            }
+            else
+            {
+                fromDate = new(year, month, 1);
+                toDate = fromDate.AddMonths(1).AddDays(-1);
+            }
 
 
             await using var connection = _context.Database.GetDbConnection();

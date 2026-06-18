@@ -580,11 +580,11 @@ namespace HRMSAPI.Controllers
                     return BadRequest("Authentication Fails");
                 }
 
-                // Validate mode parameter
-                if (!new[] { "active", "inactive", "all" }.Contains(mode.ToLower()))
+                // Validate mode parameter ('mainview' = active+absconded only, for the Employee Master active view)
+                if (!new[] { "active", "inactive", "all", "mainview" }.Contains(mode.ToLower()))
                 {
                     _logger.LogWarning("Invalid mode parameter: {Mode}", mode);
-                    return BadRequest("Invalid mode. Use 'active', 'inactive', or 'all'.");
+                    return BadRequest("Invalid mode. Use 'active', 'inactive', 'all', or 'mainview'.");
                 }
 
                 var (employees, totalCount, currentPageNumber, activeCount, inactiveCount, abscondCnt, locCountt) = await _uow.EmployeeListWithCards_Test(managerId,pageNumber, pageSize, searchTerm, mode );

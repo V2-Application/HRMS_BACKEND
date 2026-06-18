@@ -8,6 +8,10 @@ namespace HRMSAPI.DTO
         public int Year { get; set; }
         public int Month { get; set; }
         public string? ECode { get; set; } // Optional
+        // When true, return the pay-cycle window (26th of previous month -> 25th of the
+        // given month) instead of the calendar month (1st -> last). Opt-in; defaults to false
+        // so existing callers (e.g. the calendar view) are unchanged.
+        public bool UseCycle { get; set; } = false;
     }
     public class AttendanceFetchDto
     {

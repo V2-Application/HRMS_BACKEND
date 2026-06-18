@@ -104,7 +104,21 @@ namespace HRMSAPI.Controllers
                 for (int c = 0; c < data.Columns.Count; c++)
                 {
                     var val = data.Rows[r][c];
-                    ws.Cell(r + 2, c + 1).Value = XLCellValue.FromObject(val == DBNull.Value ? null : val);
+                    var cell = ws.Cell(r + 2, c + 1);
+                    if (val == DBNull.Value || val == null)
+                    {
+                        // leave blank
+                    }
+                    else if (val is DateTime dt)
+                    {
+                        // standard display date format DD-MMM-YY (e.g. 17-Jun-26)
+                        cell.Value = dt;
+                        cell.Style.DateFormat.Format = "dd-mmm-yy";
+                    }
+                    else
+                    {
+                        cell.Value = XLCellValue.FromObject(val);
+                    }
                 }
             }
             ws.Columns().AdjustToContents();

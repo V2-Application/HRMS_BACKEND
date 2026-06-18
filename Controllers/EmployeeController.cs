@@ -246,7 +246,7 @@ WHERE l.rn = 1";
                             {
                                 var worksheet = workbook.Worksheets.Add("EmployeeDetails");
                                 // Set the entire column F to short date format
-                                worksheet.Column(6).Style.DateFormat.Format = "dd-mm-yyyy"; // F is column 6
+                                worksheet.Column(6).Style.DateFormat.Format = "dd-mmm-yy"; // F is column 6
                                                                                             // Add headers with formatting
                                 for (int i = 0; i < dataTable.Columns.Count; i++)
                                 {
@@ -270,7 +270,7 @@ WHERE l.rn = 1";
                                         {
                                             if (DateTime.TryParse(cellValue, out _))
                                             {
-                                                worksheet.Cell(i + 2, j + 1).Style.DateFormat.Format = "dd-mm-yyyy";
+                                                worksheet.Cell(i + 2, j + 1).Style.DateFormat.Format = "dd-mmm-yy";
                                             }
                                         }
                                         // Apply number formatting for salary columns

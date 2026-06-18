@@ -138,8 +138,8 @@ namespace HRMSAPI.Controllers
                 var toDateParam = new SqlParameter("@ToDate", toDate);
                 var ecodeParam = new SqlParameter("@ECode", (object?)request.ECode ?? DBNull.Value);
 
-                // Fetch data from service
-                var result = await _service.FetchAttendance(request.Month, request.Year, request.ECode);
+                // Fetch data from service (UseCycle => 26th prev month .. 25th selected month)
+                var result = await _service.FetchAttendance(request.Month, request.Year, request.ECode, request.UseCycle);
 
                 // Cache the result for 1 hour
                 //var cacheOptions = new MemoryCacheEntryOptions

@@ -1,5 +1,6 @@
 ﻿using ClosedXML.Excel;
 using HRMSAPI.Data;
+using HRMSAPI.DTO;
 using HRMSAPI.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -410,6 +411,59 @@ namespace HRMSAPI.Implementation
 			}
 		}
 
+		// Precise delete of specific seat entries (single row or bulk) by
+		// LOC_CODE + DEPT_SNO + DESG_SNO + SEAT_MASTER_NO. Runs in one transaction.
+		public async Task<ExecuteAndReponse> DeleteSeatsAsync(List<BgtSeatDeleteItem> items)
+		{
+			var toDelete = (items ?? new List<BgtSeatDeleteItem>())
+				.Where(i => i != null && !string.IsNullOrWhiteSpace(i.StCode) && !string.IsNullOrWhiteSpace(i.SeatNo))
+				.ToList();
+
+			if (toDelete.Count == 0)
+				return BuildExecuteErrorResponse("No seat entries provided to delete.", HttpStatusCode.BadRequest);
+
+			using (var conn = _context.Database.GetDbConnection())
+			{
+				await conn.OpenAsync();
+				using var tx = conn.BeginTransaction();
+				try
+				{
+					int total = 0;
+					foreach (var it in toDelete)
+					{
+						using var cmd = conn.CreateCommand();
+						cmd.Transaction = tx;
+						cmd.CommandText = @"DELETE FROM dbo.BGTSEATMaster
+							WHERE LOC_CODE = @loc
+							  AND ISNULL(DEPT_SNO, '') = @dept
+							  AND ISNULL(DESG_SNO, '') = @desg
+							  AND SEAT_MASTER_NO = @seat";
+						cmd.Parameters.Add(new SqlParameter("@loc", SqlDbType.VarChar, 50) { Value = it.StCode });
+						cmd.Parameters.Add(new SqlParameter("@dept", SqlDbType.VarChar, 50) { Value = (object)(it.DeptSno ?? "") });
+						cmd.Parameters.Add(new SqlParameter("@desg", SqlDbType.VarChar, 50) { Value = (object)(it.DesgSno ?? "") });
+						cmd.Parameters.Add(new SqlParameter("@seat", SqlDbType.VarChar, 50) { Value = it.SeatNo });
+						total += await cmd.ExecuteNonQueryAsync();
+					}
+					tx.Commit();
+					return BuildExecuteSuccessResponse($"Deleted {total} seat entr{(total == 1 ? "y" : "ies")} successfully.");
+				}
+				catch (SqlException ex)
+				{
+					tx.Rollback();
+					return BuildExecuteErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+				}
+				catch (System.Exception ex)
+				{
+					tx.Rollback();
+					return BuildExecuteErrorResponse($"Error deleting seats: {ex.Message}", HttpStatusCode.InternalServerError);
+				}
+				finally
+				{
+					if (conn.State == ConnectionState.Open)
+						await conn.CloseAsync();
+				}
+			}
+		}
 
     }
 }

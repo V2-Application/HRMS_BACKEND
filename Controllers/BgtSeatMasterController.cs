@@ -90,6 +90,18 @@ namespace HRMSAPI.Controllers
 				Message = result.Message
 			});
 		}
-    
+
+		// Precise delete of specific seat entries - one (single row) or many (bulk).
+		[HttpPost("DeleteSeats")]
+		public async Task<IActionResult> DeleteSeats([FromBody] System.Collections.Generic.List<HRMSAPI.DTO.BgtSeatDeleteItem> seats)
+		{
+			var result = await _service.DeleteSeatsAsync(seats);
+			return StatusCode((int)result.Code, new ApiExecuteAndReponse
+			{
+				Status = result.Status,
+				Message = result.Message
+			});
+		}
+
     }
 } 

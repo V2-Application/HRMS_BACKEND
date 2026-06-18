@@ -14,7 +14,7 @@ namespace HRMSAPI.Interfaces
         Task FetchAndSaveAttendanceAsync();
         Task FetchAndSavePunchesAsync(CancellationToken cancellationToken = default);
         Task FetchAndSavePunchesRangeAsync(DateTime fromDate, DateTime toDate, CancellationToken cancellationToken = default);
-        Task<List<AttendanceFetchDto>> FetchAttendance(int month, int year, string? ecode);
+        Task<List<AttendanceFetchDto>> FetchAttendance(int month, int year, string? ecode, bool useCycle = false);
         Task<List<GetAttendanceProcResult>> FetchAttendance_Ishu(int month, int year, string ecode);
 
         Task<int> CreateAttendanceRequestAsync(AttendanceRegularizationRequestDto requestDto, JwtLoginDetailDto loginDetail, string? fileUrl);
