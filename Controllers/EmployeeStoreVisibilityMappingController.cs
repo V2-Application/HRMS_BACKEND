@@ -25,6 +25,42 @@ namespace HRMSAPI.Controllers
         }
 
         /// <summary>
+        /// PUBLIC (no auth) - full list of stores assigned to every employee, grouped by ECode
+        /// with comma-separated StCodes. Intended for the AI integration.
+        /// SECURITY NOTE: [AllowAnonymous] - this exposes the employee -> store mapping without
+        /// authentication. Keep the data minimal (ECode + StCodes only).
+        /// </summary>
+        [AllowAnonymous]
+        [HttpGet("GetAllEmployeeStoresPublic")]
+        public async Task<IActionResult> GetAllEmployeeStoresPublic()
+        {
+            var result = await _service.GetAllMappingsAsync();
+            return StatusCode((int)result.Code, new ApiFetchAndResponse
+            {
+                Status = result.Status,
+                Message = result.Message,
+                Data = result.Data
+            });
+        }
+
+        /// <summary>
+        /// AUTHENTICATED - full list of stores assigned to every employee, grouped by ECode
+        /// with comma-separated StCodes. Same data as the public endpoint but requires a valid
+        /// JWT (inherits the class-level [Authorize]).
+        /// </summary>
+        [HttpGet("GetAllEmployeeStores")]
+        public async Task<IActionResult> GetAllEmployeeStores()
+        {
+            var result = await _service.GetAllMappingsAsync();
+            return StatusCode((int)result.Code, new ApiFetchAndResponse
+            {
+                Status = result.Status,
+                Message = result.Message,
+                Data = result.Data
+            });
+        }
+
+        /// <summary>
         /// Get all employee store visibility mappings grouped by ECode with comma-separated StCodes
         /// </summary>
         /// <returns>List of EmployeeStoreMappingResponseDto</returns>

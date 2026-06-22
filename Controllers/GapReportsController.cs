@@ -42,6 +42,9 @@ namespace HRMSAPI.Controllers
                 ["rm-geofence-pending"] = ("dbo.usp_RMGeofenceApprovalPendingGapReport", "LOC_RM_Geofence_Approval_Pending_Gap_Report_", false),
                 ["rm-regularization-pending"] = ("dbo.usp_RMRegularizationApprovalPendingGapReport", "LOC_RM_Regularization_Approval_Pending_Gap_Report_", false),
                 ["audit-regularization-pending"] = ("dbo.usp_AuditRegularizationApprovalPendingGapReport", "LOC_Audit_Regularization_Approval_Pending_Gap_Report_", false),
+                ["absent-loc"] = ("dbo.usp_LocationWiseAbsentReport", "LOC_Absent_TD_MTD_Gap_Report_", false),
+                ["actemp-vs-attend-loc"] = ("dbo.usp_LocationWiseActEmpVsAttendanceReport", "LOC_ActEmp_vs_ActAttend_Gap_Report_", false),
+                ["bgtemp-vs-attend-loc"] = ("dbo.usp_LocationWiseBgtEmpVsAttendanceReport", "LOC_BgtEmp_vs_ActEmp_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -66,6 +69,9 @@ namespace HRMSAPI.Controllers
                 new { key = "rm-geofence-pending", name = "TD/MTD RM Geo-Fencing Approval Pending Gap Report" },
                 new { key = "rm-regularization-pending", name = "TD/MTD RM Regularization Approval Pending Gap Report" },
                 new { key = "audit-regularization-pending", name = "TD/MTD Audit Regularization Approval Pending Gap Report" },
+                new { key = "absent-loc", name = "Location-wise Absent TD/MTD Gap Report" },
+                new { key = "actemp-vs-attend-loc", name = "Location-wise Act Emp vs Act Attendance Gap Report" },
+                new { key = "bgtemp-vs-attend-loc", name = "Location-wise Bgt Emp vs Act Emp Gap Report" },
             };
             return Ok(list);
         }

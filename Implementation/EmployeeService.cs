@@ -122,8 +122,11 @@ namespace HRMSAPI.Implementation
 
                         // Add input parameters
 
-                        command.Parameters.Add(new SqlParameter("@PageNumber", SqlDbType.Int) { Value = 0 });
-                        command.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = 0 });
+                        // Typeahead search: cap to the first 50 matches instead of returning ALL
+                        // (a 2-char term matched ~26k rows -> huge enriched payload + slow dropdown).
+                        // Paginating to 50 returns in ~90ms; consumers only need top suggestions.
+                        command.Parameters.Add(new SqlParameter("@PageNumber", SqlDbType.Int) { Value = 1 });
+                        command.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = 50 });
                         command.Parameters.Add(new SqlParameter("@SearchTerm", SqlDbType.NVarChar, 100) { Value = searchTerm ?? string.Empty });
                         command.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 150) { Value = string.IsNullOrWhiteSpace(email) ? DBNull.Value : email });
                         command.Parameters.Add(new SqlParameter("@DesignationName", SqlDbType.NVarChar, 100) { Value = string.IsNullOrWhiteSpace(designationName) ? DBNull.Value : designationName });

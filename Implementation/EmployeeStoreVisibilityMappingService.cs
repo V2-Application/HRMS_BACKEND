@@ -21,16 +21,45 @@ namespace HRMSAPI.Implementation
         {
             try
             {
-                var mappings = await _context.tblEmployeeStroreVisibilityMappings
-                    .Where(x => x.IsDeleted != true)
-                    .GroupBy(x => x.ECode)
-                    .Select(g => new EmployeeStoreMappingResponseDto
+                // Full list of stores assigned to each employee, grouped by ECode with comma-separated
+                // (distinct, ordered) StCodes. Done in SQL via STRING_AGG (the table has ~4.8M mapping
+                // rows; EF's string.Join-in-GroupBy cannot translate and grouping in memory is wasteful).
+                // CAST to NVARCHAR(MAX) so the aggregate isn't capped at 8000 bytes for broad-visibility users.
+                var mappings = new List<EmployeeStoreMappingResponseDto>();
+
+                var connection = _context.Database.GetDbConnection();
+                if (connection.State != ConnectionState.Open)
+                    await connection.OpenAsync();
+
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = @"
+SELECT d.ECode,
+       STRING_AGG(CAST(d.StCode AS NVARCHAR(MAX)), ',') WITHIN GROUP (ORDER BY d.StCode) AS StCodes
+FROM (
+    SELECT DISTINCT ECode, StCode
+    FROM dbo.tblEmployeeStroreVisibilityMapping WITH (NOLOCK)
+    WHERE ISNULL(IsDeleted, 0) <> 1
+      AND ECode IS NOT NULL
+      AND StCode IS NOT NULL
+) d
+GROUP BY d.ECode
+ORDER BY d.ECode;";
+                    command.CommandType = CommandType.Text;
+                    command.CommandTimeout = 180;
+
+                    using (var reader = await command.ExecuteReaderAsync())
                     {
-                        ECode = g.Key,
-                        StCodes = string.Join(",", g.Select(x => x.StCode).OrderBy(x => x))
-                    })
-                    .OrderBy(x => x.ECode)
-                    .ToListAsync();
+                        while (await reader.ReadAsync())
+                        {
+                            mappings.Add(new EmployeeStoreMappingResponseDto
+                            {
+                                ECode = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                                StCodes = reader.IsDBNull(1) ? string.Empty : reader.GetString(1)
+                            });
+                        }
+                    }
+                }
 
                 return BuildFetchSuccessResponse("Employee store visibility mappings retrieved successfully", mappings);
             }
