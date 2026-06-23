@@ -45,6 +45,10 @@ namespace HRMSAPI.Controllers
                 ["absent-loc"] = ("dbo.usp_LocationWiseAbsentReport", "LOC_Absent_TD_MTD_Gap_Report_", false),
                 ["actemp-vs-attend-loc"] = ("dbo.usp_LocationWiseActEmpVsAttendanceReport", "LOC_ActEmp_vs_ActAttend_Gap_Report_", false),
                 ["bgtemp-vs-attend-loc"] = ("dbo.usp_LocationWiseBgtEmpVsAttendanceReport", "LOC_BgtEmp_vs_ActEmp_Gap_Report_", false),
+                ["bgtemp-vs-actattend-loc"] = ("dbo.usp_LocationWiseBgtEmpVsActAttendanceReport", "LOC_BgtEmp_vs_ActAttend_Gap_Report_", false),
+                ["deptbgt-vs-actemp-loc"] = ("dbo.usp_LocationDeptWiseBgtEmpVsActEmpReport", "LOC_Dept_BgtEmp_vs_ActEmp_Gap_Report_", false),
+                ["absent-emp"] = ("dbo.usp_EmployeeWiseAbsentReport", "LOC_EMP_Absent_TD_MTD_Gap_Report_", false),
+                ["subdeptbgt-vs-actemp-loc"] = ("dbo.usp_LocationSubDeptWiseBgtEmpVsActEmpReport", "LOC_SubDept_BgtEmp_vs_ActEmp_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -72,6 +76,10 @@ namespace HRMSAPI.Controllers
                 new { key = "absent-loc", name = "Location-wise Absent TD/MTD Gap Report" },
                 new { key = "actemp-vs-attend-loc", name = "Location-wise Act Emp vs Act Attendance Gap Report" },
                 new { key = "bgtemp-vs-attend-loc", name = "Location-wise Bgt Emp vs Act Emp Gap Report" },
+                new { key = "bgtemp-vs-actattend-loc", name = "Location-wise Bgt Emp vs Act Attendance Gap Report" },
+                new { key = "deptbgt-vs-actemp-loc", name = "Location-Dept-wise Bgt Emp vs Act Emp Gap Report" },
+                new { key = "absent-emp", name = "Employee-wise Absent TD/MTD Gap Report" },
+                new { key = "subdeptbgt-vs-actemp-loc", name = "Location-SubDept-wise Bgt Emp vs Act Emp Gap Report" },
             };
             return Ok(list);
         }

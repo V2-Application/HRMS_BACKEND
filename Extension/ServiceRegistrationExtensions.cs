@@ -117,6 +117,7 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IViewService, ViewsService>();
             services.AddScoped<ILocationService, LocationService>();
             services.AddScoped<IBgtSeatMasterService, BgtSeatMasterService>();
+            services.AddScoped<IPolicyMasterService, PolicyMasterService>();
             services.AddScoped<IBgtSeatAssignmentService, BgtSeatAssignmentService>();
             services.AddScoped<IUploaderService, UploaderService>();
             services.AddScoped<IAssignLocationService, AssignLocationService>();

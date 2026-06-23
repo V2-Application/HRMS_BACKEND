@@ -103,5 +103,36 @@ namespace HRMSAPI.Controllers
 			});
 		}
 
+		// Delete ALL budget seats for one or more stores (LOC_CODE list). Backs up the affected rows first.
+		[HttpPost("DeleteByStore")]
+		public async Task<IActionResult> DeleteByStore([FromBody] System.Collections.Generic.List<string> locCodes)
+		{
+			var result = await _service.DeleteSeatsByStoreAsync(locCodes);
+			return StatusCode((int)result.Code, new ApiExecuteAndReponse
+			{
+				Status = result.Status,
+				Message = result.Message
+			});
+		}
+
+		// Delete EVERY budget seat (whole table). Requires confirm=DELETEALL. Backs up the full table first.
+		[HttpPost("DeleteAll")]
+		public async Task<IActionResult> DeleteAll([FromQuery] string confirm)
+		{
+			if (!string.Equals(confirm?.Replace(" ", ""), "DELETEALL", System.StringComparison.OrdinalIgnoreCase))
+				return BadRequest(new ApiExecuteAndReponse
+				{
+					Status = false,
+					Message = "Confirmation required. Pass confirm=DELETEALL to delete every budget seat."
+				});
+
+			var result = await _service.DeleteAllSeatsAsync();
+			return StatusCode((int)result.Code, new ApiExecuteAndReponse
+			{
+				Status = result.Status,
+				Message = result.Message
+			});
+		}
+
     }
 } 

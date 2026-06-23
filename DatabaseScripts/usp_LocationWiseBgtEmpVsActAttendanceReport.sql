@@ -1,22 +1,23 @@
-CREATE OR ALTER PROCEDURE dbo.usp_LocationWiseActEmpVsAttendanceReport
+CREATE OR ALTER PROCEDURE dbo.usp_LocationWiseBgtEmpVsActAttendanceReport
     @AsOfDate DATE = NULL    -- the TD date; defaults to YESTERDAY (data through yesterday)
 AS
 BEGIN
     SET NOCOUNT ON;
 
     /*
-      LOC._ACT EMP. VS. ACT ATTEND. GAP REPORT  (read-only, TD / single day)
+      LOC._BGT EMP. VS. ACT ATTEND. GAP REPORT  (read-only, TD / single day)
       One row per location:
         LOC CD      = tblLocation.STCode
         LOC NM      = tblLocation.LocationName
         LOC TYPE    = name-based (HO new / Old HO / Central / DC(DW01,DH24) / Hub / Store)
         LOC STATUS  = 'Active' if tblLocation.IsActive=1 else 'Inactive'
-        ACT EMP.    = ALL active employees (tblEmployee.IsActive=1) mapped to that location
+        BGT EMP.    = budgeted head-count = count of ACTIVE budgeted seats (dbo.BGTSEATMaster,
+                      ACTIVE=1) whose LOC_CODE = the location's STCode
         ACT ATTEND. = active employees who ACTUALLY ATTENDED on @AsOfDate (punched / present-type
-                      status: Present, GF, Manual Present, MIS, Half/Quarter Day Absent)
-        DIFF.       = ACT EMP. - ACT ATTEND.  (active employees who did NOT attend that day)
+                      status: Present, GF, Manual Present, MIS, Half/Quarter Day Absent), counted
+                      at the employee's CURRENT location
+        DIFF.       = BGT EMP. - ACT ATTEND.  (positive => fewer attended than budget)
         RCA / ATR / HR REMARKS -> left blank (manual follow-up columns, per the template)
-      Attendance is counted per the employee's CURRENT location, so DIFF is always >= 0.
       "Today's" download uses data THROUGH YESTERDAY (@AsOfDate defaults to GETDATE()-1).
       Returns ALL locations. Marks/changes nothing.
     */
@@ -44,6 +45,15 @@ BEGIN
     WHERE e.LocationId IS NOT NULL
     GROUP BY e.LocationId;
 
+    -- budgeted head-count per location (active seats)
+    IF OBJECT_ID('tempdb..#Bgt') IS NOT NULL DROP TABLE #Bgt;
+    CREATE TABLE #Bgt(LOC_CODE NVARCHAR(50) NOT NULL PRIMARY KEY, BgtEmp INT NOT NULL);
+    INSERT INTO #Bgt(LOC_CODE, BgtEmp)
+    SELECT LOC_CODE, COUNT(*)
+    FROM dbo.BGTSEATMaster WITH (NOLOCK)
+    WHERE ISNULL(ACTIVE, 1) = 1 AND LOC_CODE IS NOT NULL
+    GROUP BY LOC_CODE;
+
     SELECT
         l.STCode       AS [LOC CD],
         l.LocationName AS [LOC NM],
@@ -56,15 +66,14 @@ BEGIN
             ELSE 'Store'
         END            AS [LOC TYPE],
         CASE WHEN l.IsActive = 1 THEN 'Active' ELSE 'Inactive' END AS [LOC STATUS],
-        ISNULL(ae.ActEmp, 0)        AS [ACT EMP.],
-        ISNULL(att.AttendCnt, 0)    AS [ACT ATTEND.],
-        ISNULL(ae.ActEmp, 0) - ISNULL(att.AttendCnt, 0) AS [DIFF.],
+        ISNULL(b.BgtEmp, 0)      AS [BGT EMP.],
+        ISNULL(att.AttendCnt, 0) AS [ACT ATTEND.],
+        ISNULL(b.BgtEmp, 0) - ISNULL(att.AttendCnt, 0) AS [DIFF.],
         CAST(NULL AS varchar(200)) AS [RCA],
         CAST(NULL AS varchar(200)) AS [ATR],
         CAST(NULL AS varchar(200)) AS [HR REMARKS]
     FROM dbo.tblLocation l WITH (NOLOCK)
-    LEFT JOIN (SELECT LocationId, COUNT(*) AS ActEmp FROM dbo.tblEmployee WITH (NOLOCK) WHERE IsActive = 1 GROUP BY LocationId) ae
-           ON ae.LocationId = l.LocationId
+    LEFT JOIN #Bgt b   ON b.LOC_CODE   = l.STCode
     LEFT JOIN #Att att ON att.LocationId = l.LocationId
     ORDER BY l.STCode;
 

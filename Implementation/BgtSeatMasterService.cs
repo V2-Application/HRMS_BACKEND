@@ -465,5 +465,146 @@ namespace HRMSAPI.Implementation
 			}
 		}
 
+		// Delete ALL budget seats for one or more stores (LOC_CODE). Backs up the affected rows to a
+		// timestamped table first (BGTSEATMaster is non-temporal, so a delete is otherwise
+		// unrecoverable), then deletes. Backup + delete run in one transaction (atomic).
+		public async Task<ExecuteAndReponse> DeleteSeatsByStoreAsync(List<string> locCodes)
+		{
+			var codes = (locCodes ?? new List<string>())
+				.Where(s => !string.IsNullOrWhiteSpace(s))
+				.Select(s => s.Trim())
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+			if (codes.Count == 0)
+				return BuildExecuteErrorResponse("At least one store (LOC_CODE) is required.", HttpStatusCode.BadRequest);
+
+			var bak = $"BGTSEATMaster_DelBak_{DateTime.Now:yyyyMMdd_HHmmss}_Stores{codes.Count}";
+			var paramNames = codes.Select((c, i) => "@p" + i).ToList();
+			var inClause = string.Join(",", paramNames);
+			void AddCodes(SqlCommand cmd)
+			{
+				for (int i = 0; i < codes.Count; i++)
+					cmd.Parameters.Add(new SqlParameter(paramNames[i], SqlDbType.VarChar, 50) { Value = codes[i] });
+			}
+
+			using (var conn = _context.Database.GetDbConnection())
+			{
+				await conn.OpenAsync();
+				using var tx = conn.BeginTransaction();
+				try
+				{
+					int cnt;
+					using (var c0 = (SqlCommand)conn.CreateCommand())
+					{
+						c0.Transaction = (SqlTransaction)tx;
+						c0.CommandText = $"SELECT COUNT(*) FROM dbo.BGTSEATMaster WHERE LOC_CODE IN ({inClause})";
+						AddCodes(c0);
+						cnt = Convert.ToInt32(await c0.ExecuteScalarAsync());
+					}
+					if (cnt == 0)
+					{
+						tx.Rollback();
+						return BuildExecuteErrorResponse($"No budget seats found for the selected store(s): {string.Join(", ", codes)}.", HttpStatusCode.NotFound);
+					}
+
+					using (var cb = (SqlCommand)conn.CreateCommand())
+					{
+						cb.Transaction = (SqlTransaction)tx;
+						cb.CommandText = $"SELECT * INTO dbo.[{bak}] FROM dbo.BGTSEATMaster WHERE LOC_CODE IN ({inClause})";
+						AddCodes(cb);
+						await cb.ExecuteNonQueryAsync();
+					}
+
+					int del;
+					using (var cd = (SqlCommand)conn.CreateCommand())
+					{
+						cd.Transaction = (SqlTransaction)tx;
+						cd.CommandText = $"DELETE FROM dbo.BGTSEATMaster WHERE LOC_CODE IN ({inClause})";
+						AddCodes(cd);
+						del = await cd.ExecuteNonQueryAsync();
+					}
+
+					tx.Commit();
+					return BuildExecuteSuccessResponse($"Deleted {del} budget seat(s) across {codes.Count} store(s): {string.Join(", ", codes)}. Backup saved as dbo.{bak}.");
+				}
+				catch (SqlException ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+				}
+				catch (Exception ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse($"Error deleting seats for selected store(s): {ex.Message}", HttpStatusCode.InternalServerError);
+				}
+				finally
+				{
+					if (conn.State == ConnectionState.Open)
+						await conn.CloseAsync();
+				}
+			}
+		}
+
+		// Delete EVERY budget seat (whole table). Backs up the FULL table to a timestamped table
+		// first, then deletes all rows. Backup + delete run in one transaction (atomic).
+		public async Task<ExecuteAndReponse> DeleteAllSeatsAsync()
+		{
+			var bak = $"BGTSEATMaster_DelBak_All_{DateTime.Now:yyyyMMdd_HHmmss}";
+
+			using (var conn = _context.Database.GetDbConnection())
+			{
+				await conn.OpenAsync();
+				using var tx = conn.BeginTransaction();
+				try
+				{
+					int cnt;
+					using (var c0 = conn.CreateCommand())
+					{
+						c0.Transaction = tx;
+						c0.CommandText = "SELECT COUNT(*) FROM dbo.BGTSEATMaster";
+						cnt = Convert.ToInt32(await c0.ExecuteScalarAsync());
+					}
+					if (cnt == 0)
+					{
+						tx.Rollback();
+						return BuildExecuteErrorResponse("BGTSEATMaster is already empty.", HttpStatusCode.NotFound);
+					}
+
+					using (var cb = conn.CreateCommand())
+					{
+						cb.Transaction = tx;
+						cb.CommandText = $"SELECT * INTO dbo.[{bak}] FROM dbo.BGTSEATMaster";
+						await cb.ExecuteNonQueryAsync();
+					}
+
+					int del;
+					using (var cd = conn.CreateCommand())
+					{
+						cd.Transaction = tx;
+						cd.CommandText = "DELETE FROM dbo.BGTSEATMaster";
+						del = await cd.ExecuteNonQueryAsync();
+					}
+
+					tx.Commit();
+					return BuildExecuteSuccessResponse($"Deleted ALL {del} budget seat(s). Full backup saved as dbo.{bak}.");
+				}
+				catch (SqlException ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+				}
+				catch (Exception ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse($"Error deleting all seats: {ex.Message}", HttpStatusCode.InternalServerError);
+				}
+				finally
+				{
+					if (conn.State == ConnectionState.Open)
+						await conn.CloseAsync();
+				}
+			}
+		}
+
     }
 }
