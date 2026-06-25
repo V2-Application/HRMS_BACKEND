@@ -74,6 +74,8 @@ public class MedicalCardService : IMedicalCardService
         var relativeUrl = $"MedicalCard/{ecode}/{fileName}";
         emp.MedicalCardUrl = relativeUrl;
         emp.LastUpdatedBy = updatedBy;
+        emp.UpdatedBy = updatedBy;   // keep both audit columns in sync
+        emp.UpdatedOn = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
         // Best-effort: re-parse so the cards table is populated for this ecode.

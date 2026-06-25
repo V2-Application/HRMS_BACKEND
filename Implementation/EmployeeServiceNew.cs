@@ -917,8 +917,9 @@ namespace HRMSAPI.Implementation
                 employeeData.WEEKLY_OFF = employee.candidateInfo.weeklyOff ?? "";
                 employeeData.POSITION_HELD_IN_PREVIOUS_COMPANY = employee.candidateInfo.positionHeldInPreviousCompany ?? "";
 
-                // Audit fields
+                // Audit fields - keep UpdatedBy and LastUpdatedBy in sync (same editor identity).
                 employeeData.UpdatedBy = updatedBy;
+                employeeData.LastUpdatedBy = updatedBy;
                 employeeData.UpdatedOn = DateTime.UtcNow;
 
                 // Newly added fields
@@ -1588,8 +1589,9 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
-                        // Update audit fields
+                        // Update audit fields - keep UpdatedBy and LastUpdatedBy in sync.
                         employee.UpdatedBy = updatedBy;
+                        employee.LastUpdatedBy = updatedBy;
                         employee.UpdatedOn = DateTime.UtcNow;
                     }
 
@@ -2081,6 +2083,27 @@ namespace HRMSAPI.Implementation
         //    }
         //}
         //nikhil new 19-09-2025
+        // When an employee is reactivated, any open "Absconding" (ResignationTypeId=10) separation must be
+        // revoked so the Employee Master grid / Abscond tab no longer flags them. The grid display keys off
+        // the latest non-revoked separation, so without this the reactivated employee keeps showing "Absconding".
+        private async Task RevokeOpenAbscondingSeparationsAsync(long employeeId, string updatedBy, string remarks)
+        {
+            var openAbscond = await _context.tblEmployeeSeprations
+                .Where(s => s.EmployeeId == employeeId
+                            && s.ResignationTypeId == 10
+                            && (s.IsRevoked == null || s.IsRevoked == false))
+                .ToListAsync();
+
+            foreach (var s in openAbscond)
+            {
+                s.IsRevoked = true;
+                s.LastUpdatedOn = DateTime.UtcNow;
+                s.LastUpdatedBy = string.IsNullOrWhiteSpace(updatedBy) ? "System" : updatedBy;
+                if (string.IsNullOrWhiteSpace(s.ManagerRemarks))
+                    s.ManagerRemarks = string.IsNullOrWhiteSpace(remarks) ? "Auto-revoked on reactivation" : remarks;
+            }
+        }
+
         public async Task<ExecuteAndReponse> UpdateEmployeeStatus(EmployeeStatusUpdateRequest request)
         {
             using (var trans = await _context.Database.BeginTransactionAsync())
@@ -2099,6 +2122,8 @@ namespace HRMSAPI.Implementation
                     emp.IsActive = request.isactive;
                     emp.IsDeleted = !request.isactive;
                     emp.LastUpdatedBy = string.IsNullOrWhiteSpace(request.lastUpdatedBy) ? "System" : request.lastUpdatedBy;
+                    emp.UpdatedBy = emp.LastUpdatedBy;   // keep both audit columns in sync
+                    emp.UpdatedOn = DateTime.UtcNow;
                     emp.DeletedOn = DateTime.UtcNow;
                     emp.ActiveInActiveRemarks = request.remarks;
 
@@ -2106,6 +2131,8 @@ namespace HRMSAPI.Implementation
                     if (request.isactive)
                     {
                         emp.DateOfLeft = null;
+                        // Reactivating revokes any open absconding separation so the grid/Abscond tab no longer flags them.
+                        await RevokeOpenAbscondingSeparationsAsync(request.id, request.lastUpdatedBy, request.remarks);
                     }
                     else
                     {
@@ -2471,6 +2498,8 @@ namespace HRMSAPI.Implementation
                     emp.IsActive = request.isactive;
                     emp.IsDeleted = !request.isactive;
                     emp.LastUpdatedBy = string.IsNullOrWhiteSpace(request.lastUpdatedBy) ? "System" : request.lastUpdatedBy;
+                    emp.UpdatedBy = emp.LastUpdatedBy;   // keep both audit columns in sync
+                    emp.UpdatedOn = DateTime.UtcNow;
                     emp.ActiveInActiveRemarks = request.remarks;
 
                     if (!request.isactive)
@@ -2497,6 +2526,8 @@ namespace HRMSAPI.Implementation
                         emp.DeletedOn = null;
                         emp.DateOfLeft = null;
                         emp.DOL_Reason = null;
+                        // Reactivating revokes any open absconding separation so the grid/Abscond tab no longer flags them.
+                        await RevokeOpenAbscondingSeparationsAsync(request.id, request.lastUpdatedBy, request.remarks);
                     }
 
                     int ra = await _context.SaveChangesAsync();
@@ -2705,6 +2736,8 @@ namespace HRMSAPI.Implementation
                     emp.IsActive = false;
                     emp.IsDeleted = true;
                     emp.LastUpdatedBy = updatedBy;
+                    emp.UpdatedBy = updatedBy;   // keep both audit columns in sync
+                    emp.UpdatedOn = now;
                     emp.ActiveInActiveRemarks = request.Remarks;
                     emp.DeletedOn = now;
                     emp.DOL_Reason = request.reasonid;
@@ -4960,6 +4993,7 @@ namespace HRMSAPI.Implementation
                         employeeDataOld.ISRELATIVEINCOMPANY = employeeDataNew.ISRELATIVEINCOMPANY;
 
                     employeeDataOld.UpdatedBy = Convert.ToString(updatedBy);
+                    employeeDataOld.LastUpdatedBy = Convert.ToString(updatedBy);
                     employeeDataOld.UpdatedOn = DateTime.Now;
 
                           ra = await _context.SaveChangesAsync();
