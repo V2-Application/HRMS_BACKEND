@@ -6,7 +6,7 @@ namespace HRMSAPI.Interfaces
 {
     public interface IEmpAttendanceViewSnapshotService
     {
-        Task<FetchAndResponse> GetEmpAttendanceViewSnapshotsAsync(string month = null, int? status = null, string ecode = null, string batch = null);
+        Task<FetchAndResponse> GetEmpAttendanceViewSnapshotsAsync(string month = null, int? status = null, string ecode = null, string batch = null, int? page = null, int? pageSize = null, string search = null);
         Task<ExecuteAndReponse> SalaryProcessToGivenToBankOrPaidByCash(long id, int status);
         Task<FetchAndResponse> GetSalaryStatusList(int status, string month = null);
         Task<ExecuteAndReponse> GivenToBankToPaidByBankOrReturnFromBank(long id, int statusId, string batchId);

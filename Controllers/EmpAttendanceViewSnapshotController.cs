@@ -23,7 +23,7 @@ namespace HRMSAPI.Controllers
         }
 
         [HttpGet("get-snapshots"), RequirePageAccess("/payroll-summary")]
-        public async Task<IActionResult> GetSnapshots([FromQuery] string month = null, [FromQuery] int? status = null, [FromQuery] string ecode = null, [FromQuery] string batch = null)
+        public async Task<IActionResult> GetSnapshots([FromQuery] string month = null, [FromQuery] int? status = null, [FromQuery] string ecode = null, [FromQuery] string batch = null, [FromQuery] int? page = null, [FromQuery] int? pageSize = null, [FromQuery] string search = null)
         {
             // Validate month format if provided
             if (!string.IsNullOrWhiteSpace(month) && !Regex.IsMatch(month, @"^[A-Z][a-z]{2}-\d{2}$", RegexOptions.IgnoreCase))
@@ -36,7 +36,7 @@ namespace HRMSAPI.Controllers
             }
 
             // Call the service
-            var result = await _service.GetEmpAttendanceViewSnapshotsAsync(month, status, ecode, batch);
+            var result = await _service.GetEmpAttendanceViewSnapshotsAsync(month, status, ecode, batch, page, pageSize, search);
 
             if (result.Status)
                 return Ok(result);

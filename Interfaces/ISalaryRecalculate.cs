@@ -1,5 +1,6 @@
 ﻿using HRMSAPI.DTO;
 using Roomsy.DTOS.GenericsResponses;
+using System.Threading;
 
 namespace HRMSAPI.Interfaces
 {
@@ -7,7 +8,7 @@ namespace HRMSAPI.Interfaces
     {
         Task<ExecuteAndReponse> SalaryRecalculate(SalaryRecalculateDto obj);
         Task<ExecuteAndReponse> SalaryRecalculateByMonth(SalaryRecalculateByMonthDto obj);
-        Task<ExecuteAndReponse> SalaryRecalculateNew(SalaryRecalculateDto obj);
-        Task<ExecuteAndReponse> SalaryRecalculateByMonthNew(SalaryRecalculateByMonthDto obj);
+        Task<ExecuteAndReponse> SalaryRecalculateNew(SalaryRecalculateDto obj, CancellationToken cancellationToken = default);
+        Task<ExecuteAndReponse> SalaryRecalculateByMonthNew(SalaryRecalculateByMonthDto obj, CancellationToken cancellationToken = default);
     }
 }

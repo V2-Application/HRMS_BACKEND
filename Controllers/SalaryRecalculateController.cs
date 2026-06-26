@@ -112,8 +112,8 @@ namespace HRMSAPI.Controllers
                 });
             }
 
-            // ✅ Call the service
-            var result = await _salaryRecalculateService.SalaryRecalculateNew(obj);
+            // ✅ Call the service. Pass RequestAborted so a "Stop" from the UI cancels the running proc.
+            var result = await _salaryRecalculateService.SalaryRecalculateNew(obj, HttpContext.RequestAborted);
 
             if (result.Status)
                 return Ok(result);
@@ -135,8 +135,9 @@ namespace HRMSAPI.Controllers
                 });
             }
 
-            // ✅ Call the service
-            var result = await _salaryRecalculateService.SalaryRecalculateByMonthNew(obj);
+            // ✅ Call the service. Pass RequestAborted so a "Stop" from the UI (which aborts this
+            // request) cancels the running stored procedure on SQL Server.
+            var result = await _salaryRecalculateService.SalaryRecalculateByMonthNew(obj, HttpContext.RequestAborted);
 
             if (result.Status)
                 return Ok(result);

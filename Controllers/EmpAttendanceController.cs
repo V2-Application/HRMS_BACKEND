@@ -14,6 +14,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Net;
 using System.Security.Claims;
+using System.Threading;
 
 
 namespace HRMSAPI.Controllers
@@ -392,14 +393,15 @@ namespace HRMSAPI.Controllers
             }
         }
         [HttpPost("DownloadMonthlyAttendanceExcel"), Authorize, RequirePageAccess("/attandance/track")]
-        public async Task<IActionResult> DownloadMonthlyPunchesExcel([FromBody] AttendanceRangeGetDto request)
+        public async Task<IActionResult> DownloadMonthlyPunchesExcel([FromBody] AttendanceRangeGetDto request, CancellationToken cancellationToken)
         {
             try
             {
                 if (request == null)
                     return BadRequest("Request cannot be null.");
 
-                var data = await _service.FetchPunchesRangeExcel(request.FromDate, request.ToDate, request.ECode);
+                // cancellationToken is bound to HttpContext.RequestAborted: a "Stop" from the UI aborts the query.
+                var data = await _service.FetchPunchesRangeExcel(request.FromDate, request.ToDate, request.ECode, cancellationToken);
 
                 using var workbook = new XLWorkbook();
                 var worksheet = workbook.Worksheets.Add("Punches");
@@ -530,6 +532,11 @@ namespace HRMSAPI.Controllers
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     fileName
                 );
+            }
+            catch (OperationCanceledException)
+            {
+                // User clicked "Stop" — the request was aborted and the query cancelled. Nothing to return.
+                return StatusCode(499, "Export was stopped.");
             }
             catch (Exception ex)
             {

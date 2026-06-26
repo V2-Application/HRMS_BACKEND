@@ -12,6 +12,7 @@ using System.Data;
 using System.Data.Common;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace HRMSAPI.Implementation
@@ -157,7 +158,7 @@ namespace HRMSAPI.Implementation
             }
         }
 
-        public async Task<ExecuteAndReponse> SalaryRecalculateNew(SalaryRecalculateDto obj)
+        public async Task<ExecuteAndReponse> SalaryRecalculateNew(SalaryRecalculateDto obj, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -231,7 +232,8 @@ namespace HRMSAPI.Implementation
                 _context.Database.SetCommandTimeout(600); // 10 min — heavy multi-ecode recalculation
                 try
                 {
-                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, obj.ECodes, skippedMessage);
+                    // Pass the cancellation token so a "Stop" from the UI (request aborted) aborts the proc.
+                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, obj.ECodes, skippedMessage, cancellationToken: cancellationToken);
                 }
                 finally
                 {
@@ -251,6 +253,15 @@ namespace HRMSAPI.Implementation
                     Message = $"Executed Successfully. {skippedMessage.Value}"
                 };
             }
+            catch (OperationCanceledException)
+            {
+                // User clicked "Stop" — the running proc is cancelled by SQL Server. Report as a stop.
+                return new ExecuteAndReponse
+                {
+                    Status = false,
+                    Message = "Salary recalculation was stopped."
+                };
+            }
             catch (Exception ex)
             {
                 return new ExecuteAndReponse
@@ -261,7 +272,7 @@ namespace HRMSAPI.Implementation
             }
         }
 
-        public async Task<ExecuteAndReponse> SalaryRecalculateByMonthNew(SalaryRecalculateByMonthDto obj)
+        public async Task<ExecuteAndReponse> SalaryRecalculateByMonthNew(SalaryRecalculateByMonthDto obj, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -289,7 +300,9 @@ namespace HRMSAPI.Implementation
                 _context.Database.SetCommandTimeout(600); // 10 min — full-tenant recalculation is heavy
                 try
                 {
-                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, null, skippedMessage);
+                    // Pass the cancellation token so a "Stop" from the UI (request aborted) sends an
+                    // attention to SQL Server and aborts the running proc.
+                    var result = await _context.GetProcedures().prc_runecode_iterate_New_DevAsync(obj.Month, null, skippedMessage, cancellationToken: cancellationToken);
                 }
                 finally
                 {
@@ -300,6 +313,16 @@ namespace HRMSAPI.Implementation
                 {
                     Status = true,
                     Message = $"Salary recalculation completed successfully for month {obj.Month}. {skippedMessage.Value}"
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                // Triggered when the user clicks "Stop" (the HTTP request is aborted). The running
+                // stored proc is cancelled by SQL Server; report it as a stop, not a failure.
+                return new ExecuteAndReponse
+                {
+                    Status = false,
+                    Message = $"Salary recalculation for month {obj.Month} was stopped."
                 };
             }
             catch (Exception ex)

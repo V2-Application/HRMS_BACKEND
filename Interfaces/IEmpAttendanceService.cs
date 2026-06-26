@@ -4,6 +4,7 @@ using HRMSAPI.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using System.Threading;
 using static HRMSAPI.Enum.Enums;
 using static HRMSAPI.Implementation.EmpAttendanceService;
 
@@ -101,7 +102,7 @@ namespace HRMSAPI.Interfaces
         // Employee Attendance Snapshot Method
         Task<List<EmpAttendanceSnapshotDto>> GetEmpAttendanceSnapshotAsync(string? ecode = null, string? month = null, int? batchNo = null);
         //by nikhil sharma for excel only
-        Task<List<PunchFetchDto>> FetchPunchesRangeExcel(DateTime fromDate, DateTime toDate, string? ecode);
+        Task<List<PunchFetchDto>> FetchPunchesRangeExcel(DateTime fromDate, DateTime toDate, string? ecode, CancellationToken cancellationToken = default);
 
         // Merge Monthly Punches Range
         Task<int> MergeMonthlyPunchesRangeAsync(DateTime fromDate, DateTime toDate, string ecode);

@@ -17,6 +17,7 @@ using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Threading;
 using static HRMSAPI.Enum.Enums;
 
 namespace HRMSAPI.Implementation
@@ -2821,7 +2822,7 @@ namespace HRMSAPI.Implementation
             return (employees, employees.Count, pageNumber, 0, 0, 0, 0);
             //return (employees, total, currentPage, active, inactive, abscond, loc);
         }
-        public async Task<List<PunchFetchDto>> FetchPunchesRangeExcel(DateTime fromDate, DateTime toDate, string? ecode)
+        public async Task<List<PunchFetchDto>> FetchPunchesRangeExcel(DateTime fromDate, DateTime toDate, string? ecode, CancellationToken cancellationToken = default)
         {
             var punches = new List<PunchFetchDto>();
 
@@ -2873,7 +2874,7 @@ namespace HRMSAPI.Implementation
 
             using (var connection = _context.Database.GetDbConnection())
             {
-                await connection.OpenAsync();
+                await connection.OpenAsync(cancellationToken);
 
                 using (var command = connection.CreateCommand())
                 {
@@ -2895,7 +2896,7 @@ namespace HRMSAPI.Implementation
                     ecodeParam.Value = string.IsNullOrWhiteSpace(ecode) ? DBNull.Value : (object)ecode;
                     command.Parameters.Add(ecodeParam);
 
-                    using (var reader = await command.ExecuteReaderAsync())
+                    using (var reader = await command.ExecuteReaderAsync(cancellationToken))
                     {
                         TimeSpan? ReadNullableTimeSpan(string columnName)
                         {
@@ -2926,7 +2927,7 @@ namespace HRMSAPI.Implementation
                             return string.IsNullOrEmpty(s) ? "00:00:00" : s;
                         }
 
-                        while (await reader.ReadAsync())
+                        while (await reader.ReadAsync(cancellationToken))
                         {
                             punches.Add(new PunchFetchDto
                             {

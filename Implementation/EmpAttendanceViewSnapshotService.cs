@@ -31,7 +31,7 @@ namespace HRMSAPI.Implementation
             _httpContextAccessor = httpContextAccessor;
         }
 
-        public async Task<FetchAndResponse> GetEmpAttendanceViewSnapshotsAsync(string month = null, int? status = null, string ecode = null, string batch = null)
+        public async Task<FetchAndResponse> GetEmpAttendanceViewSnapshotsAsync(string month = null, int? status = null, string ecode = null, string batch = null, int? page = null, int? pageSize = null, string search = null)
         {
             try
             {
@@ -171,7 +171,7 @@ namespace HRMSAPI.Implementation
                     };
                 }
 
-                // Query the database
+                // Query the database (filter on MONTH + SalaryStatus is index-backed: IX_Snapshot_Month_SalaryStatus_Ecode)
                 var query = _context.EmpAttendanceViewSnapshots.AsNoTracking().AsQueryable()
                     .Where(x => x.MONTH == month && x.SalaryStatus == status.Value);
 
@@ -180,7 +180,33 @@ namespace HRMSAPI.Implementation
                     query = query.Where(x => x.Ecode == ecode);
                 }
 
+                // Server-side search across the main text columns (keeps the grid's search working without
+                // shipping the whole month to the client).
+                if (!string.IsNullOrWhiteSpace(search))
+                {
+                    var s = search.Trim();
+                    query = query.Where(x =>
+                        (x.Ecode != null && x.Ecode.Contains(s)) ||
+                        (x.Employee_Name != null && x.Employee_Name.Contains(s)) ||
+                        (x.Location_Code != null && x.Location_Code.Contains(s)) ||
+                        (x.Location_Name != null && x.Location_Name.Contains(s)) ||
+                        (x.department != null && x.department.Contains(s)) ||
+                        (x.designation != null && x.designation.Contains(s)) ||
+                        (x.Month_Year != null && x.Month_Year.Contains(s)));
+                }
+
+                // Total matching rows (before paging) so the grid can render its pager.
+                var totalCount = await query.CountAsync();
+
                 query = query.OrderBy(x => x.Ecode);
+
+                // Apply paging only when a positive pageSize is requested; otherwise return everything
+                // (used by the Export action, which needs all rows).
+                if (pageSize.HasValue && pageSize.Value > 0)
+                {
+                    var pageNumber = (page.HasValue && page.Value > 0) ? page.Value : 1;
+                    query = query.Skip((pageNumber - 1) * pageSize.Value).Take(pageSize.Value);
+                }
 
                 var data = await query.ToListAsync();
 
@@ -277,8 +303,9 @@ namespace HRMSAPI.Implementation
                 return new FetchAndResponse()
                 {
                     Status = true,
-                    Message = $"Found {results.Count} records for month {month} with status {status}",
-                    Data = results
+                    Message = $"Found {totalCount} records for month {month} with status {status}",
+                    Data = results,
+                    TotalCount = totalCount
                 };
             }
             catch (Exception ex)
