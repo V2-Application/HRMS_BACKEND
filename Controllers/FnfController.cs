@@ -31,6 +31,20 @@ namespace HRMSAPI.Controllers
             }
         }
 
+        [HttpGet("locate-tab")]
+        public async Task<IActionResult> LocateTab([FromQuery] string ecode)
+        {
+            try
+            {
+                var tab = await _service.LocateTabByEcodeAsync(ecode);
+                return Ok(new { Status = true, Message = "Located", Data = new { Tab = tab } });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = false, Message = "Locate failed", Error = ex.Message });
+            }
+        }
+
         [HttpPost("save")]
         public async Task<IActionResult> SaveAll([FromBody] FnfSaveAllDto dto)
         {
@@ -149,14 +163,24 @@ namespace HRMSAPI.Controllers
                 var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
                 
                 var result = await _service.UploadCompletedFNFExcelAsync(file, userClaims?.EmployeeId ?? "System");
-                return Ok(new { 
-                    Status = result.Success, 
+                return Ok(new {
+                    Status = result.Success,
                     Message = result.Message,
+                    // Top-level fields consumed by the FNF uploader UI (show + download duplicates).
+                    ProcessedCount = result.ProcessedCount,
+                    UpdatedCount = result.UpdatedCount,
+                    TotalRecords = result.TotalRecords,
+                    DuplicateEcodes = result.DuplicateEcodes,
+                    AlreadyDoneEcodes = result.AlreadyDoneEcodes,
+                    DuplicateRows = result.DuplicateRows,
+                    ErrorMessages = result.ErrorMessages,
                     Data = new {
                         ProcessedCount = result.ProcessedCount,
+                        UpdatedCount = result.UpdatedCount,
                         TotalRecords = result.TotalRecords,
                         DuplicateEcodes = result.DuplicateEcodes,
-                        AlreadyDoneEcodes = result.AlreadyDoneEcodes
+                        AlreadyDoneEcodes = result.AlreadyDoneEcodes,
+                        DuplicateRows = result.DuplicateRows
                     }
                 });
             }
@@ -210,6 +234,24 @@ namespace HRMSAPI.Controllers
                 return StatusCode(500, new { Status = false, Message = "Export failed", Error = ex.Message });
             }
         }
+        [HttpGet("export-all-excel")]
+        public async Task<IActionResult> ExportAllFnf([FromQuery] string? search, [FromQuery] DateTime? from,
+                                                      [FromQuery] DateTime? to, [FromQuery] string? status)
+        {
+            try
+            {
+                var excelData = await _service.ExportAllFnfAsync(search, from, to, status);
+                var statusLabel = string.IsNullOrWhiteSpace(status) ? "All" : status;
+                var fileName = $"FNF_Report_{statusLabel}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+                Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}\"");
+                return File(excelData, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { Status = false, Message = "Export failed", Error = ex.Message });
+            }
+        }
+
         [HttpGet("export-pending-excel")]
         public async Task<IActionResult> ExportPendingExcel()
         {

@@ -1699,6 +1699,401 @@ namespace HRMSAPI.Implementation
                 };
             }
         }
+
+        // ===================== PAYROLL FORMAT EXPORT =====================
+        // Builds the "LOC-WISE EMP-WISE SALARY REPORT" in the 148-column PAYROLL FORMAT.xlsx
+        // layout (grouped merged header banners + clean column labels), one row per employee
+        // using the LATEST run for the selected month. Pulls employee-master fields from
+        // tblEmployee. Columns we don't store (Bonus/Gratuity/SL leave/Salary-Paid/etc.) are
+        // intentionally left blank. Read-only — does not modify any data/tables.
+        public async Task<(byte[] bytes, string fileName)> ExportPayrollFormatAsync(string month, int? status)
+        {
+            if (string.IsNullOrWhiteSpace(month))
+                month = DateTime.Now.ToString("MMM-yy");
+
+            // All snapshot rows for the month, then keep the latest run (max RunAt) per Ecode.
+            var monthRows = await _context.EmpAttendanceViewSnapshots.AsNoTracking()
+                .Where(x => x.MONTH == month)
+                .ToListAsync();
+
+            var latest = monthRows
+                .GroupBy(r => r.Ecode)
+                .Select(g => g.OrderByDescending(r => r.RunAt).ThenByDescending(r => r.ID).First())
+                .OrderBy(r => r.Location_Code).ThenBy(r => r.Ecode)
+                .ToList();
+
+            // Employee-master lookup for the fields not held on the snapshot.
+            var ecodes = latest.Select(r => r.Ecode).Where(e => !string.IsNullOrEmpty(e)).Distinct().ToList();
+            var emps = await _context.tblEmployees.AsNoTracking()
+                .Where(e => ecodes.Contains(e.Ecode))
+                .ToListAsync();
+            var empMap = emps
+                .GroupBy(e => e.Ecode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            // Location lookup (by STCode = snapshot Location_Code) → LocationType + StateId.
+            var stCodes = latest.Select(r => r.Location_Code).Where(s => !string.IsNullOrEmpty(s)).Distinct().ToList();
+            var locs = await _context.tblLocations.AsNoTracking()
+                .Where(l => stCodes.Contains(l.STCode))
+                .Select(l => new { l.STCode, l.LocationType, l.StateId })
+                .ToListAsync();
+            var locMap = locs
+                .GroupBy(l => l.STCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            // State lookup (StateId → StateName).
+            var stateIds = locs.Where(l => l.StateId.HasValue).Select(l => l.StateId.Value).Distinct().ToList();
+            var stateMap = (await _context.tblStates.AsNoTracking()
+                    .Where(s => stateIds.Contains(s.StateId))
+                    .Select(s => new { s.StateId, s.StateName })
+                    .ToListAsync())
+                .ToDictionary(s => s.StateId, s => s.StateName);
+
+            // Sub-department lookup (SubDepartmentId1 → name). No EF DbSet, so read raw.
+            var subDeptIds = emps.Where(e => e.SubDepartmentId1.HasValue).Select(e => e.SubDepartmentId1.Value).Distinct().ToList();
+            var subDeptMap = new Dictionary<int, string>();
+            if (subDeptIds.Count > 0)
+            {
+                var conn = _context.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+                using var sdCmd = conn.CreateCommand();
+                sdCmd.CommandText = "SELECT SubDepartmentId, SubDepartmentName FROM tblSubDepartment WHERE SubDepartmentId IN (" +
+                                    string.Join(",", subDeptIds) + ")";
+                using var sdReader = await sdCmd.ExecuteReaderAsync();
+                while (await sdReader.ReadAsync())
+                {
+                    if (!sdReader.IsDBNull(0))
+                        subDeptMap[sdReader.GetInt32(0)] = sdReader.IsDBNull(1) ? null : sdReader.GetString(1);
+                }
+            }
+
+            // Monthly bonus & gratuity (calculated in HRMS) from vw_Bonus_Gratuity, deduped per ECode.
+            // Bonus/Gratuity = budgeted "rate"; ActualBonus/ActualGratuity = actual earned.
+            var bonusGratMap = new Dictionary<string, (decimal bonus, decimal actBonus, decimal grat, decimal actGrat)>(StringComparer.OrdinalIgnoreCase);
+            {
+                var conn2 = _context.Database.GetDbConnection();
+                if (conn2.State != System.Data.ConnectionState.Open) await conn2.OpenAsync();
+                using var bgCmd = conn2.CreateCommand();
+                bgCmd.CommandText = @"SELECT ECode, MAX(Bonus) AS Bonus, MAX(ActualBonus) AS ActualBonus,
+                                             MAX(Gratuity) AS Gratuity, MAX(ActualGratuity) AS ActualGratuity
+                                      FROM vw_Bonus_Gratuity WHERE Month = @m AND ECode IS NOT NULL
+                                      GROUP BY ECode";
+                var mp = bgCmd.CreateParameter(); mp.ParameterName = "@m"; mp.Value = month; bgCmd.Parameters.Add(mp);
+                using var bgReader = await bgCmd.ExecuteReaderAsync();
+                while (await bgReader.ReadAsync())
+                {
+                    var ec = bgReader.GetString(0);
+                    decimal D(int i) => bgReader.IsDBNull(i) ? 0m : Convert.ToDecimal(bgReader.GetValue(i));
+                    bonusGratMap[ec] = (D(1), D(2), D(3), D(4));
+                }
+            }
+
+            // Column labels (148) in exact reference order.
+            string[] labels = PayrollFormatLabels();
+
+            // Grouped header banners: (startCol, endCol, text) — 1-based.
+            var banners = new (int s, int e, string t)[]
+            {
+                (1, 38, "PART-1 (LOC & EMP DETAIL)"),
+                (39, 50, "SALARY (BGT VS ACT)"),
+                (51, 58, "BONUS EARNED RATE VS ACT"),
+                (59, 70, "REIM-BREKUP DETAIL"),
+                (71, 76, "EXTRA-GROSS-DETAIL"),
+                (77, 85, "SALARY PAYABLE"),
+                (86, 101, "PART-8 DEDUCTION ( PF/ESIC/TDS/LOAN/BONUS)"),
+                (102, 122, "PART 4 ( LEAVE REPORT)"),
+                (123, 141, "PART-7 : PAYABLE DAYS WORKING"),
+                (142, 148, "SALARY PAID"),
+            };
+
+            using var wb = new XLWorkbook();
+            var ws = wb.AddWorksheet("SALARY WORKING-FINAL");
+
+            const int bannerRow = 1;
+            const int labelRow = 2;
+            const int firstDataRow = 3;
+            int totalCols = labels.Length; // 148
+
+            // Banner row (merged groups).
+            foreach (var b in banners)
+            {
+                var rng = ws.Range(bannerRow, b.s, bannerRow, b.e).Merge();
+                rng.Value = b.t;
+                rng.Style.Font.Bold = true;
+                rng.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                rng.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+                rng.Style.Fill.BackgroundColor = XLColor.FromArgb(0xD9, 0xE1, 0xF2);
+                rng.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            }
+
+            // Column-label row.
+            for (int c = 1; c <= totalCols; c++)
+            {
+                var cell = ws.Cell(labelRow, c);
+                cell.Value = labels[c - 1] ?? string.Empty;
+                cell.Style.Font.Bold = true;
+                cell.Style.Alignment.WrapText = true;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+                cell.Style.Fill.BackgroundColor = XLColor.FromArgb(0xF2, 0xF2, 0xF2);
+                cell.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            }
+
+            // Data rows.
+            int r = firstDataRow;
+            int sr = 1;
+            foreach (var snap in latest)
+            {
+                empMap.TryGetValue(snap.Ecode ?? string.Empty, out var emp);
+
+                // Resolve portal-sourced fields for this row.
+                string locType = null, stateName = null, subDeptName = null;
+                if (!string.IsNullOrEmpty(snap.Location_Code) && locMap.TryGetValue(snap.Location_Code, out var locInfo))
+                {
+                    locType = locInfo.LocationType;
+                    if (locInfo.StateId.HasValue) stateMap.TryGetValue(locInfo.StateId.Value, out stateName);
+                }
+                if (emp?.SubDepartmentId1 != null) subDeptMap.TryGetValue(emp.SubDepartmentId1.Value, out subDeptName);
+
+                decimal? bonusRate = null, bonusEarned = null, gratRate = null, gratEarned = null;
+                if (!string.IsNullOrEmpty(snap.Ecode) && bonusGratMap.TryGetValue(snap.Ecode, out var bg))
+                {
+                    bonusRate = bg.bonus; bonusEarned = bg.actBonus; gratRate = bg.grat; gratEarned = bg.actGrat;
+                }
+
+                var vals = BuildPayrollRow(sr, snap, emp, month, locType, stateName, subDeptName,
+                    bonusRate, bonusEarned, gratRate, gratEarned);
+                for (int c = 1; c <= totalCols; c++)
+                {
+                    var v = vals[c - 1];
+                    var cell = ws.Cell(r, c);
+                    switch (v)
+                    {
+                        case null:
+                            break;
+                        case DateTime dt:
+                            cell.Value = dt;
+                            cell.Style.DateFormat.Format = "dd-MMM-yyyy";
+                            break;
+                        case decimal dec:
+                            cell.Value = dec;
+                            break;
+                        case double dbl:
+                            cell.Value = dbl;
+                            break;
+                        case int iv:
+                            cell.Value = iv;
+                            break;
+                        default:
+                            cell.Value = v.ToString();
+                            break;
+                    }
+                }
+                r++;
+                sr++;
+            }
+
+            // Freeze the two header rows only; no columns are frozen (per requirement). Size columns.
+            ws.SheetView.FreezeRows(2);
+            ws.Columns().Width = 14;
+            ws.Column(3).Width = 26; // Location
+            ws.Column(7).Width = 24; // Name
+            ws.Row(labelRow).Height = 42;
+
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            var fileName = $"LOC_EMP_Salary_Report_{month}.xlsx";
+            return (ms.ToArray(), fileName);
+        }
+
+        private static string[] PayrollFormatLabels() => new string[]
+        {
+            "SR NO","LOC CD","LOCATION","LOC-TYPE","STATE","E.CODE","NAME","GENDER","D.O.B","JOINING DATE",
+            "MOBILE NO.","LEAVING DT","DEPARTMENT","SUB-DEPT.","DESIGNATION","STATUS","Name of Bank","IFSC Code","A/c No.","U.A.N NO",
+            "P.F.NO.","E.S.I NO","PAN NO","AADHAR NO","P.F. Applicable?","E.S.I. Applicable?","F.P.F. Applicable?","O.T. Applicable?","P.TAX. Applicable?","BONUS TYPE",
+            "BONUS Applicable?","WK-OFF PAY APPLICABLE?","AUTO REMARKS","LP REMARKS","DEPT. REMARKS","HR REMARKS","MTH","",
+            "Basic Salary Rate","BASIC SALARY","H.R.A. Rate","H.R.A.","D.A. RATE","D.A","C.C.A. Rate","C.C.A.","SPECIAL ALLOWANCE RATE","SPECIAL ALLOWANCE","REIMB RATE","REIMB",
+            "BONUS EARNED RATE","BONUS EARNED","GRATUITY EARNED RATE","GRATUITY EARNED","RETENTION GROSS SALARY","RET. BONUS %","RET. BONUS RATE","RET. BONUS EARNED",
+            "Fuel and Maintenance","Fuel and Maintenance (REIMB)","Books and Periodicals","Books and Periodicals (REIMB)","Professional Attire","Professional Attire (REIMB)","Driver Wages","Driver Wages (REIMB)","Mobile Bill","Mobile Bill (REIMB)","Meal Voucher","Meal Voucher (REIMB)",
+            "OVERTIME","INCENTIVE AMT","FOODING ALL","MOBILE BILL","ARRERS","EXTRA DAYS ALLOWANCE",
+            "CTC-MTH-AS-PER-OFFER-LETTER- SALARY RATE","MTH-AS-PER-ACTUAL- SALARY","CTC SALARY","GROSS SALARY","","TTL GROSS-EARNING","PAYABLE (WITH REIMBUS)","PAYABLE","",
+            "TOTAL DEDUCTION","PF","ESI","TDS","P-TAX","CASH SHORT","DIESEL","PENALTY","LOAN","MONTHLY ADVANCE","LWF","","PF (EMPLOYER)","ESIC (EMPLOYER)","LWF (EMPLOYER)","",
+            "TOTAL LEAVE","","","","EL LEAVE OP_BAL","EL LEAVE CLS_BAL","EL LEAVE EARN","EL LEAVE AVAILED","CL LEAVE OP_BAL","CL LEAVE CLS_BAL","CL LEAVE EARN","CL LEAVE AVAILED","CO LEAVE OP_BAL","CO LEAVE CLS_BAL","CO LEAVE EARN","CO LEAVE AVAILED","SL LEAVE OP_BAL","SL LEAVE CLS_BAL","SL LEAVE EARN","SL LEAVE AVAILED","",
+            "TTL PRESENT DAYS","MACHINE PRESENT DAYS","MANUAL PRESENT DAYS","GEO FENCE ATTEND-DAYS","BGT-PAYABLE DAYS","PAYABLE DAYS","TTL PAYABLE DAYS","ABSENT","EXTRA DAY CNT","BGT DAYS WKL-OF","ACT DAYS WK-OFF (WO LEAVE)","HLD","POW","TOTAL LEAVE AVAILED","EL","CL","CO","SL","",
+            "SALARY PAID-1","REIMB","INCENTIVE","SALARY PAID-2","SALARY PAID-TTL","DIFF","",
+        };
+
+        // Numeric-looking strings -> double so Excel treats them as numbers; otherwise raw string.
+        private static object NumOrStr(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            return double.TryParse(s.Trim(), out var d) ? (object)d : s.Trim();
+        }
+
+        private static string YesNo(bool? b) => b == true ? "Yes" : (b == false ? "No" : null);
+
+        private object[] BuildPayrollRow(int sr, EmpAttendanceViewSnapshot s, tblEmployee e, string month,
+            string locType = null, string stateName = null, string subDeptName = null,
+            decimal? bonusRate = null, decimal? bonusEarned = null, decimal? gratRate = null, decimal? gratEarned = null)
+        {
+            // Bonus applicable Yes/No derived from BonusApplicable (Stat/Ctc = Yes, No/blank = No).
+            var bonusApp = e?.BonusApplicable?.Trim();
+            string bonusApplicableYesNo = string.IsNullOrEmpty(bonusApp) ? null
+                : (bonusApp.Equals("No", StringComparison.OrdinalIgnoreCase) ? "No" : "Yes");
+
+            // 148 values in exact column order matching PayrollFormatLabels().
+            return new object[]
+            {
+                /*1  SR NO*/ sr,
+                /*2  LOC CD*/ s.Location_Code,
+                /*3  LOCATION*/ s.Location_Name,
+                /*4  LOC-TYPE*/ locType,
+                /*5  STATE*/ stateName,
+                /*6  E.CODE*/ s.Ecode,
+                /*7  NAME*/ s.Employee_Name,
+                /*8  GENDER*/ e?.GENDER,
+                /*9  D.O.B*/ e?.DOB,
+                /*10 JOINING DATE*/ e?.DOJ,
+                /*11 MOBILE NO.*/ e?.MOBILE,
+                /*12 LEAVING DT*/ e?.DateOfLeft,
+                /*13 DEPARTMENT*/ s.department,
+                /*14 SUB-DEPT.*/ subDeptName,
+                /*15 DESIGNATION*/ s.designation,
+                /*16 STATUS*/ s.Status,
+                /*17 Name of Bank*/ e?.BANK_NAME,
+                /*18 IFSC Code*/ e?.BANK_IFSC_CODE,
+                /*19 A/c No.*/ e?.A_C_NO,
+                /*20 U.A.N NO*/ e?.UAN_NO,
+                /*21 P.F.NO.*/ e?.UAN_NO,   // PF No. = UAN number
+                /*22 E.S.I NO*/ e?.ESICNO,
+                /*23 PAN NO*/ e?.PAN_NO,
+                /*24 AADHAR NO*/ e?.AADHAR_NO,
+                /*25 P.F. Applicable?*/ YesNo(e?.PFApplicable),
+                /*26 E.S.I. Applicable?*/ YesNo(e?.ESICApplicable),
+                /*27 F.P.F. Applicable?*/ null,
+                /*28 O.T. Applicable?*/ null,
+                /*29 P.TAX. Applicable?*/ null,
+                /*30 BONUS TYPE*/ e?.BonusApplicable,
+                /*31 BONUS Applicable?*/ bonusApplicableYesNo,
+                /*32 WK-OFF PAY APPLICABLE?*/ null,
+                /*33 AUTO REMARKS*/ null,
+                /*34 LP REMARKS*/ null,
+                /*35 DEPT. REMARKS*/ null,
+                /*36 HR REMARKS*/ null,
+                /*37 MTH*/ s.MONTH ?? month,
+                /*38 (blank)*/ null,
+                /*39 Basic Salary Rate*/ s.BasicSalary_Bud__,
+                /*40 BASIC SALARY*/ s.BasicSalary_Actual_,
+                /*41 H.R.A. Rate*/ s.HRA_Bud__,
+                /*42 H.R.A.*/ s.HRA_Actual_,
+                /*43 D.A. RATE*/ s.DA_Bud__,
+                /*44 D.A*/ s.DA_Actual_,
+                /*45 C.C.A. Rate*/ s.CCA_Bud__,
+                /*46 C.C.A.*/ s.CCA_Actual_,
+                /*47 SPECIAL ALLOWANCE RATE*/ s.SpecialAllowance_Bud__,
+                /*48 SPECIAL ALLOWANCE*/ s.SpecialAllowance_Actual_,
+                /*49 REIMB RATE*/ s.Reimbersment_Bud__,
+                /*50 REIMB*/ s.Reimbersment_Actual_,
+                /*51 BONUS EARNED RATE*/ bonusRate,
+                /*52 BONUS EARNED*/ bonusEarned,
+                /*53 GRATUITY EARNED RATE*/ gratRate,
+                /*54 GRATUITY EARNED*/ gratEarned,
+                /*55 RETENTION GROSS SALARY*/ null,
+                /*56 RET. BONUS %*/ null,
+                /*57 RET. BONUS RATE*/ null,
+                /*58 RET. BONUS EARNED*/ null,
+                /*59 Fuel and Maintenance*/ s.Fuel_and_Maintenance_Bud__,
+                /*60 Fuel (REIMB)*/ s.Fuel_and_Maintenance_Actual_,
+                /*61 Books and Periodicals*/ s.Books_and_Periodicals_Bud__,
+                /*62 Books (REIMB)*/ s.Books_and_Periodicals_Actual_,
+                /*63 Professional Attire*/ s.Professional_Attire_Bud__,
+                /*64 Professional Attire (REIMB)*/ s.Professional_Attire_Actual_,
+                /*65 Driver Wages*/ s.Driver_Wages_Bud__,
+                /*66 Driver Wages (REIMB)*/ s.Driver_Wages_Actual_,
+                /*67 Mobile Bill*/ s.Mobile_Bill_Bud__,
+                /*68 Mobile Bill (REIMB)*/ s.Mobile_Bill_Actual_,
+                /*69 Meal Voucher*/ s.Meal_Voucher_Bud__,
+                /*70 Meal Voucher (REIMB)*/ s.Meal_Voucher_Actual_,
+                /*71 OVERTIME*/ s.Overtime,
+                /*72 INCENTIVE AMT*/ NumOrStr(s.Incentive),
+                /*73 FOODING ALL*/ s.Fooding_Allowance,
+                /*74 MOBILE BILL*/ s.Mobile_Bill,
+                /*75 ARRERS*/ NumOrStr(s.ARREAR),
+                /*76 EXTRA DAYS ALLOWANCE*/ NumOrStr(s.ExtraDayAllowance),
+                /*77 CTC-OFFER RATE*/ s.Monthly_Gross_CTC_Bud__,
+                /*78 MTH-ACTUAL SALARY*/ s.Monthly_Gross_CTC_Actual_,
+                /*79 CTC SALARY*/ null,
+                /*80 GROSS SALARY*/ s.Monthly_Gross_CTC_Actual_,
+                /*81 (blank)*/ null,
+                /*82 TTL GROSS-EARNING*/ s.Monthly_Gross_CTC_Actual_,
+                /*83 PAYABLE (WITH REIMBUS)*/ s.Monthly_Gross_CTC_Actual_After_Deduction_AND_AddONS_,
+                /*84 PAYABLE*/ s.Monthly_Gross_CTC_Actual_After_Deduction_AND_AddONS_,
+                /*85 (blank)*/ null,
+                /*86 TOTAL DEDUCTION*/ s.TotalDeductions,
+                /*87 PF*/ s.PF_Employee_,
+                /*88 ESI*/ s.ESIC_Employee_,
+                /*89 TDS*/ NumOrStr(s.TDS),
+                /*90 P-TAX*/ NumOrStr(s.PTax),
+                /*91 CASH SHORT*/ NumOrStr(s.CashShort),
+                /*92 DIESEL*/ NumOrStr(s.DieselDeduction),
+                /*93 PENALTY*/ NumOrStr(s.Penality),
+                /*94 LOAN*/ NumOrStr(s.Loan),
+                /*95 MONTHLY ADVANCE*/ null,
+                /*96 LWF*/ NumOrStr(s.Lwf),
+                /*97 (blank)*/ null,
+                /*98 PF (EMPLOYER)*/ s.PF_Employeer_,
+                /*99 ESIC (EMPLOYER)*/ s.ESIC_Employeer_,
+                /*100 LWF (EMPLOYER)*/ null,
+                /*101 (blank)*/ null,
+                /*102 TOTAL LEAVE*/ s.Leave_Used,
+                /*103 (blank)*/ null,
+                /*104 (blank)*/ null,
+                /*105 (blank)*/ null,
+                /*106 EL OP_BAL*/ s.Opening_EL,
+                /*107 EL CLS_BAL*/ s.EarnedLeaveBalance,
+                /*108 EL EARN*/ s.EarnedLeaveAcquired,
+                /*109 EL AVAILED*/ s.EarnedLeaveUsed,
+                /*110 CL OP_BAL*/ s.Opening_CL,
+                /*111 CL CLS_BAL*/ s.CasualLeaveBalance,
+                /*112 CL EARN*/ s.CasualLeaveAcquired,
+                /*113 CL AVAILED*/ s.CasualLeaveUsed,
+                /*114 CO OP_BAL*/ s.Opening_CompoOff,
+                /*115 CO CLS_BAL*/ s.CompoOffBalance,
+                /*116 CO EARN*/ s.CompoOffAcquired,
+                /*117 CO AVAILED*/ s.CompoOffUsed,
+                /*118 SL OP_BAL*/ null,
+                /*119 SL CLS_BAL*/ null,
+                /*120 SL EARN*/ null,
+                /*121 SL AVAILED*/ null,
+                /*122 (blank)*/ null,
+                /*123 TTL PRESENT DAYS*/ s.actualttl_days,
+                /*124 MACHINE PRESENT DAYS*/ NumOrStr(s.Machine),
+                /*125 MANUAL PRESENT DAYS*/ NumOrStr(s.MANUAL),
+                /*126 GEO FENCE ATTEND-DAYS*/ s.GF,
+                /*127 BGT-PAYABLE DAYS*/ s.ttl_bgt_days,
+                /*128 PAYABLE DAYS*/ s.paybledays,
+                /*129 TTL PAYABLE DAYS*/ s.Payble_Days,
+                /*130 ABSENT*/ s.Absent,
+                /*131 EXTRA DAY CNT*/ s.extradays,
+                /*132 BGT DAYS WKL-OF*/ null,
+                /*133 ACT DAYS WK-OFF*/ s.actualweekly,
+                /*134 HLD*/ s.HolidayOff,
+                /*135 POW*/ s.presentweeklyoff,
+                /*136 TOTAL LEAVE AVAILED*/ s.Leave_Used,
+                /*137 EL*/ s.EarnedLeaveUsed,
+                /*138 CL*/ s.CasualLeaveUsed,
+                /*139 CO*/ s.CompoOffUsed,
+                /*140 SL*/ null,
+                /*141 (blank)*/ null,
+                /*142 SALARY PAID-1*/ null,
+                /*143 REIMB*/ null,
+                /*144 INCENTIVE*/ null,
+                /*145 SALARY PAID-2*/ null,
+                /*146 SALARY PAID-TTL*/ null,
+                /*147 DIFF*/ null,
+                /*148 (blank)*/ null,
+            };
+        }
     }
 }
 

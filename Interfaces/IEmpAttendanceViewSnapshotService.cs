@@ -16,6 +16,7 @@ namespace HRMSAPI.Interfaces
         Task<FetchAndResponse> GetEmployeesMissingOrReturnedAsync(string stCode = "RH01", string month = null);
         Task<FetchAndResponse> GetEligibleEmployeesFastAsync(string ecode = null, string month = null);
         Task<ExecuteAndReponse> UpdateStatusByIdAsync(long id, int status);
+        Task<(byte[] bytes, string fileName)> ExportPayrollFormatAsync(string month, int? status);
     }
 }
 

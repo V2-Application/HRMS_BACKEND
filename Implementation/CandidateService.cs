@@ -2627,6 +2627,71 @@ namespace HRMSAPI.Implementation
 
             var dt = new DataTable();
             dt.Load(reader);
+            reader.Close();
+
+            // ---- Enrich with the full applicant-form fields from the Candidate table ----
+            // The list SP returns only a subset; the export must show all applicant-form data
+            // (Department name, personal/contact/address, govt IDs, bank, previous employment,
+            // salary breakup, references, family, qualification). Read-only side query, matched by Id.
+            if (dt.Columns.Contains("ID") && dt.Rows.Count > 0)
+            {
+                var ids = dt.Rows.Cast<DataRow>()
+                    .Select(r => r["ID"]?.ToString())
+                    .Where(s => !string.IsNullOrWhiteSpace(s) && long.TryParse(s, out _))
+                    .Distinct()
+                    .ToList();
+
+                if (ids.Count > 0)
+                {
+                    await using var enrichCmd = connection.CreateCommand();
+                    // Only the fields captured on the applicant form (i.e. that actually hold data
+                    // for applicants). Onboarding-only fields (PAN/Bank/Gender/etc.) are excluded
+                    // because they are never populated at apply time.
+                    enrichCmd.CommandText = @"
+SELECT c.Id,
+    dept.DepartmentName                         AS [Department],
+    c.[MARITIAL STATUS]                         AS [Marital Status],
+    c.[HIGHEST QUALIFICATION]                   AS [Highest Qualification],
+    c.[PRESENT ADDRESS]                         AS [Present Address],
+    c.SalaryExpectation                         AS [Salary Expectation],
+    c.TotalExperience                           AS [Total Experience],
+    c.[Source]                                  AS [Source],
+    c.ReferenceEmployee                         AS [Reference Employee],
+    xp.[Name of Company]                        AS [Prev Company],
+    xp.[Position Held]                          AS [Prev Position],
+    xp.[From]                                   AS [Prev From],
+    xp.[To]                                     AS [Prev To],
+    xp.[Last CTC]                               AS [Prev Last CTC],
+    xp.[InHand]                                 AS [Prev In Hand],
+    xp.[Expected_CTC]                           AS [Expected CTC]
+FROM Candidate c
+LEFT JOIN tblDepartment dept ON TRY_CAST(c.DEPARTMENT AS INT) = dept.DepartmentId
+OUTER APPLY (
+    SELECT TOP 1 e.[Name of Company], e.[Position Held], e.[From], e.[To], e.[Last CTC], e.[InHand], e.[Expected_CTC]
+    FROM tblExperience e WHERE e.CID = c.Id AND ISNULL(e.IsDeleted,0)=0
+    ORDER BY e.ID DESC
+) xp
+WHERE c.Id IN (" + string.Join(",", ids) + ")";
+
+                    var extra = new DataTable();
+                    using (var er = await enrichCmd.ExecuteReaderAsync()) extra.Load(er);
+
+                    var extraMap = new Dictionary<string, DataRow>();
+                    foreach (DataRow ex in extra.Rows) extraMap[ex["Id"].ToString()] = ex;
+
+                    foreach (DataColumn ec in extra.Columns)
+                    {
+                        if (string.Equals(ec.ColumnName, "Id", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!dt.Columns.Contains(ec.ColumnName)) dt.Columns.Add(ec.ColumnName, typeof(string));
+                        foreach (DataRow dr in dt.Rows)
+                        {
+                            var key = dr["ID"]?.ToString();
+                            if (key != null && extraMap.TryGetValue(key, out var src) && src[ec.ColumnName] != DBNull.Value)
+                                dr[ec.ColumnName] = src[ec.ColumnName].ToString();
+                        }
+                    }
+                }
+            }
 
             using var workbook = new XLWorkbook();
             var worksheet = workbook.Worksheets.Add("Applicants");
@@ -2634,7 +2699,21 @@ namespace HRMSAPI.Implementation
             var exportColumns = dt.Columns
                 .Cast<DataColumn>()
                 .Where(c => !IsPrimaryKeyColumn(c.ColumnName))
+                // Hide the raw Designation ID column (the resolved DesignationName is shown instead).
+                .Where(c => !string.Equals(c.ColumnName, "Designation", StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            // Show Department right beside Designation (name) — side by side.
+            {
+                var deptCol = exportColumns.FirstOrDefault(c => string.Equals(c.ColumnName, "Department", StringComparison.OrdinalIgnoreCase));
+                if (deptCol != null)
+                {
+                    exportColumns.Remove(deptCol);
+                    var desigIdx = exportColumns.FindIndex(c => string.Equals(c.ColumnName, "DesignationName", StringComparison.OrdinalIgnoreCase));
+                    if (desigIdx >= 0) exportColumns.Insert(desigIdx + 1, deptCol);
+                    else exportColumns.Add(deptCol);
+                }
+            }
 
             // Identify document-link columns by NAME — column positions shift after
             // IsPrimaryKeyColumn filtering, so a hard-coded index lands on the wrong

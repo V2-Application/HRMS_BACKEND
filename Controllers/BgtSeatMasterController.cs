@@ -23,6 +23,13 @@ namespace HRMSAPI.Controllers
             _service = service;
         }
 
+        // Ecode of the logged-in user (from JWT) — captured for upload/delete auditing.
+        private string CurrentEcode()
+        {
+            var identity = HttpContext.User.Identity as System.Security.Claims.ClaimsIdentity;
+            return AuthenticUserDetails.GetCurrentUserDetails(identity)?.EmployeeId ?? "System";
+        }
+
         [HttpGet("DownloadTemplate")]
         public IActionResult DownloadTemplate()
         {
@@ -56,7 +63,7 @@ namespace HRMSAPI.Controllers
         [HttpPost("UploadExcel")]
         public async Task<IActionResult> UploadExcel([FromForm] IFormFile file)
         {
-            var result = await _service.UploadBgtSeatMasterExcelAsync(file);
+            var result = await _service.UploadBgtSeatMasterExcelAsync(file, CurrentEcode());
             return StatusCode((int)result.Code, new ApiExecuteAndReponse
             {
                 Status = result.Status,
@@ -83,7 +90,7 @@ namespace HRMSAPI.Controllers
 		[HttpPost("DeleteBySeries")]
 		public async Task<IActionResult> DeleteBySeries([FromQuery] string locCode, [FromQuery] int deptSno, [FromQuery] int desgSno, [FromQuery] int deleteCount = 1)
 		{
-			var result = await _service.DeleteSeatsBySeriesAsync(locCode, deptSno, desgSno, deleteCount);
+			var result = await _service.DeleteSeatsBySeriesAsync(locCode, deptSno, desgSno, deleteCount, CurrentEcode());
 			return StatusCode((int)result.Code, new ApiExecuteAndReponse
 			{
 				Status = result.Status,
@@ -95,7 +102,7 @@ namespace HRMSAPI.Controllers
 		[HttpPost("DeleteSeats")]
 		public async Task<IActionResult> DeleteSeats([FromBody] System.Collections.Generic.List<HRMSAPI.DTO.BgtSeatDeleteItem> seats)
 		{
-			var result = await _service.DeleteSeatsAsync(seats);
+			var result = await _service.DeleteSeatsAsync(seats, CurrentEcode());
 			return StatusCode((int)result.Code, new ApiExecuteAndReponse
 			{
 				Status = result.Status,
@@ -107,7 +114,7 @@ namespace HRMSAPI.Controllers
 		[HttpPost("DeleteByStore")]
 		public async Task<IActionResult> DeleteByStore([FromBody] System.Collections.Generic.List<string> locCodes)
 		{
-			var result = await _service.DeleteSeatsByStoreAsync(locCodes);
+			var result = await _service.DeleteSeatsByStoreAsync(locCodes, CurrentEcode());
 			return StatusCode((int)result.Code, new ApiExecuteAndReponse
 			{
 				Status = result.Status,
@@ -126,7 +133,7 @@ namespace HRMSAPI.Controllers
 					Message = "Confirmation required. Pass confirm=DELETEALL to delete every budget seat."
 				});
 
-			var result = await _service.DeleteAllSeatsAsync();
+			var result = await _service.DeleteAllSeatsAsync(CurrentEcode());
 			return StatusCode((int)result.Code, new ApiExecuteAndReponse
 			{
 				Status = result.Status,

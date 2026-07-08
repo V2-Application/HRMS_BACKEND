@@ -177,6 +177,23 @@ WHERE l.rn = 1";
                             var dataTable = new DataTable();
                             dataTable.Load(reader);
 
+                            // Always show Bank Name / IFSC Code / PAN No. in UPPERCASE in the export.
+                            foreach (var colName in new[] { "Name of Bank", "IFSC Code", "PAN No." })
+                            {
+                                var col = dataTable.Columns.Cast<DataColumn>()
+                                    .FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+                                if (col == null || col.DataType != typeof(string)) continue;
+                                // Columns loaded from a stored proc via DataTable.Load can be marked
+                                // ReadOnly, which makes in-place assignment throw. Clear it first.
+                                col.ReadOnly = false;
+                                foreach (DataRow row in dataTable.Rows)
+                                {
+                                    var v = row[col]?.ToString();
+                                    if (!string.IsNullOrWhiteSpace(v))
+                                        row[col] = v.Trim().ToUpperInvariant();
+                                }
+                            }
+
                             // Enrich with resignation approver columns (read-only side query).
                             // Adds: "Resignation Approved By Ecode" + "Resignation Approved By Name".
                             // Existing "Resignation Date" column (returned by the SP) is left untouched.
@@ -241,65 +258,15 @@ WHERE l.rn = 1";
                                 }
                             }
 
-                            // Create Excel workbook and worksheet
-                            using (var workbook = new XLWorkbook())
-                            {
-                                var worksheet = workbook.Worksheets.Add("EmployeeDetails");
-                                // Set the entire column F to short date format
-                                worksheet.Column(6).Style.DateFormat.Format = "dd-mmm-yy"; // F is column 6
-                                                                                            // Add headers with formatting
-                                for (int i = 0; i < dataTable.Columns.Count; i++)
-                                {
-                                    worksheet.Cell(1, i + 1).Value = dataTable.Columns[i].ColumnName;
-                                    worksheet.Cell(1, i + 1).Style.Font.Bold = true;
-                                    worksheet.Cell(1, i + 1).Style.Fill.BackgroundColor = XLColor.LightGray;
-                                    worksheet.Cell(1, i + 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                                }
-
-                                // Add data
-                                for (int i = 0; i < dataTable.Rows.Count; i++)
-                                {
-                                    for (int j = 0; j < dataTable.Columns.Count; j++)
-                                    {
-                                        var cellValue = dataTable.Rows[i][j]?.ToString();
-                                        worksheet.Cell(i + 2, j + 1).Value = cellValue;
-
-                                        // Apply specific formatting for date columns
-                                        if (dataTable.Columns[j].ColumnName is "DateOfBirth" or "DOJ" or "FamilyMemberDOB"
-                                            or "PreviousCompanyFrom" or "PreviousCompanyTo" or "DateOfResignation" or "DateOfLeft")
-                                        {
-                                            if (DateTime.TryParse(cellValue, out _))
-                                            {
-                                                worksheet.Cell(i + 2, j + 1).Style.DateFormat.Format = "dd-mmm-yy";
-                                            }
-                                        }
-                                        // Apply number formatting for salary columns
-                                        else if (dataTable.Columns[j].ColumnName is "InHandSalary" or "LastCTCAnnual")
-                                        {
-                                            if (decimal.TryParse(cellValue, out _))
-                                            {
-                                                worksheet.Cell(i + 2, j + 1).Style.NumberFormat.Format = "#,##0.00";
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Auto-fit columns and freeze header row
-                                worksheet.Columns().AdjustToContents();
-                                worksheet.SheetView.FreezeRows(1);
-
-                                // Save to memory stream
-                                using (var stream = new MemoryStream())
-                                {
-                                    workbook.SaveAs(stream);
-                                    var content = stream.ToArray();
-                                    return File(
-                                        content,
-                                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        $"EmployeeDetails_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
-                                    );
-                                }
-                            }
+                            // Build the .xlsx with a streaming OpenXML writer (SAX). For large exports
+                            // (~60k rows x 137 cols) this is dramatically faster and lighter than
+                            // ClosedXML, which holds the whole workbook in memory as objects.
+                            var content = BuildEmployeeExcelFast(dataTable);
+                            return File(
+                                content,
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                $"EmployeeDetails_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                            );
                         }
                     }
                 }
@@ -313,6 +280,133 @@ WHERE l.rn = 1";
                 return StatusCode(500, $"An error occurred: {ex.Message}");
             }
         }
+
+        // Streaming .xlsx writer for large exports. Writes every value as an inline string
+        // (all SP columns come through as text anyway), with a bold, frozen header row.
+        // Uses OpenXmlWriter (SAX) so memory stays flat regardless of row count.
+        private static byte[] BuildEmployeeExcelFast(System.Data.DataTable dt)
+        {
+            using var ms = new MemoryStream();
+            using (var doc = DocumentFormat.OpenXml.Packaging.SpreadsheetDocument.Create(
+                ms, DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook))
+            {
+                var wbPart = doc.AddWorkbookPart();
+
+                // Minimal stylesheet: font 0 = normal, font 1 = bold; cellFormat 0 = default, 1 = bold.
+                var stylesPart = wbPart.AddNewPart<DocumentFormat.OpenXml.Packaging.WorkbookStylesPart>();
+                stylesPart.Stylesheet = new DocumentFormat.OpenXml.Spreadsheet.Stylesheet(
+                    new DocumentFormat.OpenXml.Spreadsheet.Fonts(
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(),
+                        new DocumentFormat.OpenXml.Spreadsheet.Font(new DocumentFormat.OpenXml.Spreadsheet.Bold())
+                    ) { Count = 2U },
+                    new DocumentFormat.OpenXml.Spreadsheet.Fills(
+                        new DocumentFormat.OpenXml.Spreadsheet.Fill(
+                            new DocumentFormat.OpenXml.Spreadsheet.PatternFill { PatternType = DocumentFormat.OpenXml.Spreadsheet.PatternValues.None })
+                    ) { Count = 1U },
+                    new DocumentFormat.OpenXml.Spreadsheet.Borders(
+                        new DocumentFormat.OpenXml.Spreadsheet.Border()
+                    ) { Count = 1U },
+                    new DocumentFormat.OpenXml.Spreadsheet.CellStyleFormats(
+                        new DocumentFormat.OpenXml.Spreadsheet.CellFormat()
+                    ) { Count = 1U },
+                    new DocumentFormat.OpenXml.Spreadsheet.CellFormats(
+                        new DocumentFormat.OpenXml.Spreadsheet.CellFormat(),
+                        new DocumentFormat.OpenXml.Spreadsheet.CellFormat { FontId = 1U, ApplyFont = true }
+                    ) { Count = 2U }
+                );
+                stylesPart.Stylesheet.Save();
+
+                var wsPart = wbPart.AddNewPart<DocumentFormat.OpenXml.Packaging.WorksheetPart>();
+                using (var writer = DocumentFormat.OpenXml.OpenXmlWriter.Create(wsPart))
+                {
+                    writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.Worksheet());
+
+                    // Freeze the header row.
+                    writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.SheetViews());
+                    writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.SheetView { WorkbookViewId = 0U });
+                    writer.WriteElement(new DocumentFormat.OpenXml.Spreadsheet.Pane
+                    {
+                        VerticalSplit = 1D,
+                        TopLeftCell = "A2",
+                        ActivePane = DocumentFormat.OpenXml.Spreadsheet.PaneValues.BottomLeft,
+                        State = DocumentFormat.OpenXml.Spreadsheet.PaneStateValues.Frozen
+                    });
+                    writer.WriteEndElement(); // SheetView
+                    writer.WriteEndElement(); // SheetViews
+
+                    writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.SheetData());
+
+                    int colCount = dt.Columns.Count;
+
+                    // Header row (bold).
+                    writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.Row());
+                    for (int j = 0; j < colCount; j++)
+                        WriteInlineCell(writer, dt.Columns[j].ColumnName, 1U);
+                    writer.WriteEndElement();
+
+                    // Data rows.
+                    foreach (System.Data.DataRow row in dt.Rows)
+                    {
+                        writer.WriteStartElement(new DocumentFormat.OpenXml.Spreadsheet.Row());
+                        for (int j = 0; j < colCount; j++)
+                            WriteInlineCell(writer, row[j]?.ToString(), 0U);
+                        writer.WriteEndElement();
+                    }
+
+                    writer.WriteEndElement(); // SheetData
+                    writer.WriteEndElement(); // Worksheet
+                    writer.Close();
+                }
+
+                wbPart.Workbook = new DocumentFormat.OpenXml.Spreadsheet.Workbook();
+                var sheets = wbPart.Workbook.AppendChild(new DocumentFormat.OpenXml.Spreadsheet.Sheets());
+                sheets.Append(new DocumentFormat.OpenXml.Spreadsheet.Sheet
+                {
+                    Id = wbPart.GetIdOfPart(wsPart),
+                    SheetId = 1U,
+                    Name = "EmployeeDetails"
+                });
+                wbPart.Workbook.Save();
+            }
+            return ms.ToArray();
+        }
+
+        private static void WriteInlineCell(DocumentFormat.OpenXml.OpenXmlWriter writer, string value, uint styleIndex)
+        {
+            var cell = new DocumentFormat.OpenXml.Spreadsheet.Cell
+            {
+                DataType = DocumentFormat.OpenXml.Spreadsheet.CellValues.InlineString
+            };
+            if (styleIndex != 0U) cell.StyleIndex = styleIndex;
+            writer.WriteStartElement(cell);
+            writer.WriteElement(new DocumentFormat.OpenXml.Spreadsheet.InlineString(
+                new DocumentFormat.OpenXml.Spreadsheet.Text(SanitizeXml(value ?? string.Empty))
+                {
+                    Space = DocumentFormat.OpenXml.SpaceProcessingModeValues.Preserve
+                }));
+            writer.WriteEndElement();
+        }
+
+        // Strip characters that are invalid in XML 1.0 so the .xlsx never comes out corrupt.
+        private static string SanitizeXml(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            System.Text.StringBuilder sb = null;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char ch = s[i];
+                bool ok = ch == 0x9 || ch == 0xA || ch == 0xD
+                          || (ch >= 0x20 && ch <= 0xD7FF) || (ch >= 0xE000 && ch <= 0xFFFD);
+                if (!ok)
+                {
+                    sb ??= new System.Text.StringBuilder(s, 0, i, s.Length);
+                    continue;
+                }
+                sb?.Append(ch);
+            }
+            return sb?.ToString() ?? s;
+        }
+
         [HttpGet("{id}")]
         public async Task<IActionResult> GetEmployeeById(long id)
         {

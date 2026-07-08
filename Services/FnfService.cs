@@ -714,6 +714,42 @@ namespace HRMSAPI.Services
             }
             finally { await conn.CloseAsync(); }
         }
+
+        // Returns which FNF tab an exact ecode belongs to: "pending" | "processed" | "completed" | null (not found).
+        // pending  = employee has no FNF_Header yet
+        // processed = FNF created but still in the unpaid view
+        // completed = FNF present and not in the unpaid view (paid/done)
+        public async Task<string?> LocateTabByEcodeAsync(string ecode)
+        {
+            if (string.IsNullOrWhiteSpace(ecode)) return null;
+            var trimmed = ecode.Trim();
+
+            var conn = _db.Database.GetDbConnection();
+            await conn.OpenAsync();
+            try
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+DECLARE @eid BIGINT = (SELECT TOP 1 EmployeeId FROM dbo.tblEmployee WHERE Ecode = @ecode ORDER BY EmployeeId DESC);
+IF @eid IS NULL
+    SELECT CAST(NULL AS varchar(20)) AS Tab;
+ELSE IF NOT EXISTS (SELECT 1 FROM dbo.FNF_Header WHERE EmployeeId = @eid)
+    SELECT 'pending' AS Tab;
+ELSE IF EXISTS (SELECT 1 FROM dbo.vw_FNF_AccountsList_Unpaid WHERE Ecode = @ecode)
+    SELECT 'processed' AS Tab;
+ELSE
+    SELECT 'completed' AS Tab;";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "@ecode";
+                p.Value = trimmed;
+                cmd.Parameters.Add(p);
+
+                var result = await cmd.ExecuteScalarAsync();
+                return result == null || result == DBNull.Value ? null : result.ToString();
+            }
+            finally { await conn.CloseAsync(); }
+        }
+
         public async Task<(List<Dictionary<string, object>>, Dictionary<string, object>?)> CalculateBonusAsync(BonusCalcRequestDto dto)
         {
             var rows = new List<Dictionary<string, object>>();
@@ -883,17 +919,23 @@ namespace HRMSAPI.Services
             {
                 Direction = ParameterDirection.Output
             };
+            var updatedCountParam = new SqlParameter("@UpdatedCount", SqlDbType.Int)
+            {
+                Direction = ParameterDirection.Output
+            };
 
             cmd.Parameters.Add(duplicateEcodesParam);
             cmd.Parameters.Add(alreadyDoneEcodesParam);
             cmd.Parameters.Add(processedCountParam);
             cmd.Parameters.Add(totalRecordsParam);
+            cmd.Parameters.Add(updatedCountParam);
 
             await conn.OpenAsync();
             await cmd.ExecuteNonQueryAsync();
 
             // Get output values
             response.ProcessedCount = processedCountParam.Value as int? ?? 0;
+            response.UpdatedCount = updatedCountParam.Value as int? ?? 0;
             response.TotalRecords = totalRecordsParam.Value as int? ?? 0;
 
             // Parse JSON arrays to lists
@@ -927,25 +969,65 @@ namespace HRMSAPI.Services
                 }
             }
 
-            // Set appropriate message
-            if (response.ProcessedCount > 0)
-            {
-                response.Message = $"Successfully processed {response.ProcessedCount} out of {response.TotalRecords} records.";
+            // ---- Build the skipped/duplicate rows (for the "download duplicates" feature) ----
+            // Reasons: "Already completed" (FNF already paid), "Duplicate in file" (ecode repeated
+            // in the sheet), "Unknown Ecode" (not found in employee master).
+            var dupSet = new HashSet<string>(response.DuplicateEcodes ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            var doneSet = new HashSet<string>(response.AlreadyDoneEcodes ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            var inFileDupes = request.Rows
+                .GroupBy(r => (r.Ecode ?? "").Trim(), StringComparer.OrdinalIgnoreCase)
+                .Where(g => !string.IsNullOrEmpty(g.Key) && g.Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-                if (response.DuplicateEcodes.Any())
-                    response.Message += $" Found {response.DuplicateEcodes.Count} duplicate Ecodes.";
+            foreach (var row in request.Rows)
+            {
+                var ec = (row.Ecode ?? "").Trim();
+                if (string.IsNullOrEmpty(ec)) continue;
+
+                string? reason = null;
+                if (doneSet.Contains(ec)) reason = "Already completed";
+                else if (dupSet.Contains(ec))
+                    reason = inFileDupes.Contains(ec) ? "Duplicate in file" : "Unknown Ecode (not in employee master)";
+
+                if (reason == null) continue;
+
+                response.DuplicateRows.Add(new FnfDuplicateRowDto
+                {
+                    Ecode = ec,
+                    Reason = reason,
+                    TotalPayable = row.TotalPayable,
+                    NetPayable = row.NetPayable,
+                    PaymentStatus = row.PaymentStatus,
+                    ChequeNo = row.ChequeNo,
+                    PaymentVoucherNo = row.PaymentVoucherNo,
+                    PaymentRemarks = row.PaymentRemarks
+                });
+            }
+
+            // ---- Message ----
+            var didWork = response.ProcessedCount > 0 || response.UpdatedCount > 0;
+            if (didWork)
+            {
+                response.Success = true;
+                response.Message =
+                    $"Processed {response.TotalRecords} record(s): {response.ProcessedCount} new, " +
+                    $"{response.UpdatedCount} updated to Completed.";
+
                 if (response.AlreadyDoneEcodes.Any())
-                    response.Message += $" Found {response.AlreadyDoneEcodes.Count} already completed Ecodes.";
+                    response.Message += $" {response.AlreadyDoneEcodes.Count} already completed (skipped).";
+                if (response.DuplicateEcodes.Any())
+                    response.Message += $" {response.DuplicateEcodes.Count} duplicate/unknown Ecode(s) skipped.";
             }
             else
             {
                 response.Success = false;
                 response.Message = "No records were processed.";
 
-                if (response.DuplicateEcodes.Any())
-                    response.Message += $" All records were duplicates: {string.Join(", ", response.DuplicateEcodes)}";
-                else if (response.AlreadyDoneEcodes.Any())
+                if (response.AlreadyDoneEcodes.Any())
                     response.Message += $" All records already had FNF completed: {string.Join(", ", response.AlreadyDoneEcodes)}";
+                else if (response.DuplicateEcodes.Any())
+                    response.Message += $" All records were duplicate/unknown Ecodes: {string.Join(", ", response.DuplicateEcodes)}";
             }
 
             return response;
@@ -1593,21 +1675,32 @@ namespace HRMSAPI.Services
             var worksheet = workbook.Worksheet(1);
 
             var rows = new List<FnfBulkUploadRowDto>();
-            var firstRow = true;
+            var validationErrors = new List<string>();
 
-            foreach (var row in worksheet.Rows())
+            // Only Ecode and Remarks are mandatory; every other field is optional.
+            foreach (var row in worksheet.RowsUsed().Skip(1)) // skip header
             {
-                if (firstRow)
-                {
-                    firstRow = false;
-                    continue; // Skip header row
-                }
+                var ecode = row.Cell(1).GetString()?.Trim();
+                var remarks = row.Cell(36).GetString()?.Trim();
 
-                if (row.Cell(1).IsEmpty()) break; // Stop at empty Ecode
+                // Fully blank row -> ignore silently
+                if (string.IsNullOrWhiteSpace(ecode) && string.IsNullOrWhiteSpace(remarks) && row.IsEmpty())
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(ecode))
+                {
+                    validationErrors.Add($"Row {row.RowNumber()}: Ecode is required.");
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(remarks))
+                {
+                    validationErrors.Add($"Row {row.RowNumber()} (Ecode {ecode}): Remarks is required.");
+                    continue;
+                }
 
                 var fnfRow = new FnfBulkUploadRowDto
                 {
-                    Ecode = row.Cell(1).GetString(),
+                    Ecode = ecode,
                     FNFDate = GetDateTimeValue(row.Cell(2)),
                     DateOfLeaving = GetDateTimeValue(row.Cell(3)),
                     UnpaidSalaryAmount = GetDecimalValue(row.Cell(4)),
@@ -1638,18 +1731,48 @@ namespace HRMSAPI.Services
                     DepositOn = GetDecimalValue(row.Cell(29)),
                     SendForPaymentAmount = GetDecimalValue(row.Cell(30)),
                     AmountPaid = GetDecimalValue(row.Cell(31)),
-                    PaymentStatus = row.Cell(32).GetString(),
+                    // This is the "FNF done" upload — mark as completed/paid so the ecode
+                    // shows ONLY in the Completed tab (not Pending/Processed). Sheet value wins if provided.
+                    PaymentStatus = string.IsNullOrWhiteSpace(row.Cell(32).GetString())
+                                        ? "Transfered"
+                                        : row.Cell(32).GetString().Trim(),
                     ChequeNo = row.Cell(33).GetString(),
                     ChequeDate = GetDateTimeValue(row.Cell(34)),
                     PaymentVoucherNo = row.Cell(35).GetString(),
-                    PaymentRemarks = row.Cell(36).GetString()
+                    PaymentRemarks = remarks
                 };
 
                 rows.Add(fnfRow);
             }
 
+            if (rows.Count == 0)
+            {
+                return new FnfBulkUploadResponseDto
+                {
+                    Success = false,
+                    TotalRecords = 0,
+                    ProcessedCount = 0,
+                    Message = validationErrors.Count > 0
+                        ? "No valid rows. " + string.Join(" ", validationErrors)
+                        : "No records found in the sheet.",
+                    ErrorMessages = validationErrors
+                };
+            }
+
+            // Fast, single set-based DB call — stores the sheet values as-is (no per-row recalculation).
             var request = new FnfBulkUploadRequestDto { Rows = rows, User = user };
-            return await BulkUploadAsync(request);
+            var response = await BulkUploadAsync(request);
+
+            // Surface any skipped rows (missing Ecode/Remarks) in the response.
+            if (validationErrors.Count > 0)
+            {
+                response.ErrorMessages ??= new List<string>();
+                response.ErrorMessages.AddRange(validationErrors);
+                response.Message = (response.Message ?? "").TrimEnd() +
+                    $" Skipped {validationErrors.Count} row(s) missing Ecode/Remarks.";
+            }
+
+            return response;
         }
 
         private static DateTime? GetDateTimeValue(IXLCell cell)
@@ -1767,6 +1890,225 @@ namespace HRMSAPI.Services
 
             // Auto-fit columns
             worksheet.Columns().AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
+        }
+
+        // Comprehensive FNF export across ALL statuses with an optional status filter.
+        // status: null/"All" | "Completed" | "Processed" | "Pending"
+        // Includes every column (additions, deductions, payment incl. Cheque No/UTR No & Voucher No).
+        public async Task<byte[]> ExportAllFnfAsync(string? search, DateTime? from, DateTime? to, string? status)
+        {
+            var st = (status ?? "all").Trim().ToLowerInvariant();
+            bool wantCompleted = st == "all" || st == "completed" || st == "paid";
+            bool wantProcessed = st == "all" || st == "processed" || st == "unpaid";
+            bool wantPending   = st == "all" || st == "pending";
+            bool wantFnf       = wantCompleted || wantProcessed;
+
+            // Column layout: (Header, source column name, kind s=string d=decimal t=date)
+            var cols = new (string Header, string Src, char Kind)[]
+            {
+                ("Employee Code","Ecode",'s'),
+                ("Employee Name","EmployeeName",'s'),
+                ("Department","DepartmentName",'s'),
+                ("Designation","DesignationName",'s'),
+                ("Location","LocationName",'s'),
+                ("STCode","STCode",'s'),
+                ("Date of Joining","JoiningDate",'t'),
+                ("Date of Leaving","DateOfLeaving",'t'),
+                ("Last Punch Date","LastPunchDate",'t'),
+                ("FNF Date","FNFDate",'t'),
+                ("Salary Month","SalaryMonth",'s'),
+                ("Payable Days","PayableDays",'d'),
+                ("Unpaid Salary Amount","UnpaidSalaryAmount",'d'),
+                ("Rate","Rate",'d'),
+                ("Days","Days",'d'),
+                ("Bonus","Bonus",'d'),
+                ("Bonus Period From","BonusPeriodFrom",'t'),
+                ("Bonus Period Till","BonusPeriodTill",'t'),
+                ("Gratuity","Gratuity",'d'),
+                ("Earned Leave Amount","E_LeaveAmount",'d'),
+                ("EL Days","ELDays",'d'),
+                ("Notice Salary","NoticeSalary",'d'),
+                ("Other Addition 1","OtherAddition1",'d'),
+                ("Other Addition 2","OtherAddition2",'d'),
+                ("Other Addition 3","OtherAddition3",'d'),
+                ("Other Addition 4","OtherAddition4",'d'),
+                ("Total Additions","TotalAdditions",'d'),
+                ("Loan Balance","LoanBalance",'d'),
+                ("Advance Balance","AdvanceBalance",'d'),
+                ("Other Deduction 1","OtherDeduction1",'d'),
+                ("Other Deduction 2","OtherDeduction2",'d'),
+                ("Other Deduction 3","OtherDeduction3",'d'),
+                ("Other Deduction 4","OtherDeduction4",'d'),
+                ("TDS","TDS",'d'),
+                ("PF","PF",'s'),
+                ("ESIC","ESIC",'s'),
+                ("P.Tax","PTax",'s'),
+                ("Total Deductions","TotalDeductions",'d'),
+                ("Total Payable","TotalPayable",'d'),
+                ("Net Amount","NetAmount",'d'),
+                ("Deposit On","DepositOn",'d'),
+                ("Send For Payment Amount","SendForPaymentAmount",'d'),
+                ("Amount Paid","AmountPaid",'d'),
+                ("Payment Status","PayStatus",'s'),
+                ("Cheque No/UTR No","ChequeNo",'s'),
+                ("Cheque Date","ChequeDate",'t'),
+                ("Payment Voucher No","PaymentVoucherNo",'s'),
+                ("Payment Remarks","PayRemarks",'s'),
+                ("PAN No","PanNo",'s'),
+                ("Bank Name","BankName",'s'),
+                ("Account No","AccountNo",'s'),
+                ("IFSC","IFSC",'s'),
+                ("Status","StatusBucket",'s'),
+            };
+
+            const string doneStatuses = "'Transfered','Transferred','Paid','Completed','Done','FNF DONE'";
+
+            var nameExpr = "ISNULL(e.[FULL NAME], CONCAT(ISNULL(e.FirstName,''),' ',ISNULL(NULLIF(e.MiddleName,''),''),CASE WHEN ISNULL(e.LastName,'')<>'' THEN ' '+e.LastName ELSE '' END))";
+
+            // ---- FNF branch (Completed + Processed) ----
+            string fnfSql = $@"
+SELECT * FROM (
+    SELECT
+        CASE WHEN p.ChequeNo IS NOT NULL AND (
+                 ISNULL(LTRIM(RTRIM(p.ChequeNo)),'')<>'' OR ISNULL(LTRIM(RTRIM(p.PaymentVoucherNo)),'')<>''
+              OR ISNULL(LTRIM(RTRIM(p.PayStatus)),'') IN ({doneStatuses}) )
+             THEN 'Completed' ELSE 'Processed' END AS StatusBucket,
+        e.Ecode,
+        {nameExpr} AS EmployeeName,
+        dept.DepartmentName, desg.DesignationName, l.LocationName, l.STCode,
+        TRY_CONVERT(date, e.[JOINING DATE]) AS JoiningDate,
+        a.DateOfLeaving, pn.LastPunchDate, a.FNFDate, a.SalaryMonth,
+        sn.paybledays AS PayableDays,
+        a.UnpaidSalaryAmount, a.Rate, a.Days, a.Bonus, a.BonusPeriodFrom, a.BonusPeriodTill,
+        a.Gratuity, a.E_LeaveAmount, a.ELDays, a.NoticeSalary,
+        a.OtherAddition1, a.OtherAddition2, a.OtherAddition3, a.OtherAddition4,
+        CAST(ISNULL(a.UnpaidSalaryAmount,0)+ISNULL(a.Bonus,0)+ISNULL(a.Gratuity,0)+ISNULL(a.E_LeaveAmount,0)+ISNULL(a.NoticeSalary,0)
+            +ISNULL(a.OtherAddition1,0)+ISNULL(a.OtherAddition2,0)+ISNULL(a.OtherAddition3,0)+ISNULL(a.OtherAddition4,0) AS decimal(18,2)) AS TotalAdditions,
+        d.LoanBalance, d.AdvanceBalance, d.OtherDeduction1, d.OtherDeduction2, d.OtherDeduction3, d.OtherDeduction4,
+        d.TDS, sn.[PF(Total)] AS PF, sn.[ESIC(Total)] AS ESIC, sn.PTax,
+        CAST(ISNULL(d.LoanBalance,0)+ISNULL(d.AdvanceBalance,0)+ISNULL(d.OtherDeduction1,0)+ISNULL(d.OtherDeduction2,0)
+            +ISNULL(d.OtherDeduction3,0)+ISNULL(d.OtherDeduction4,0)+ISNULL(d.TDS,0) AS decimal(18,2)) AS TotalDeductions,
+        d.TotalPayable,
+        CAST((ISNULL(a.UnpaidSalaryAmount,0)+ISNULL(a.Bonus,0)+ISNULL(a.Gratuity,0)+ISNULL(a.E_LeaveAmount,0)+ISNULL(a.NoticeSalary,0)
+             +ISNULL(a.OtherAddition1,0)+ISNULL(a.OtherAddition2,0)+ISNULL(a.OtherAddition3,0)+ISNULL(a.OtherAddition4,0))
+            -(ISNULL(d.LoanBalance,0)+ISNULL(d.AdvanceBalance,0)+ISNULL(d.OtherDeduction1,0)+ISNULL(d.OtherDeduction2,0)
+             +ISNULL(d.OtherDeduction3,0)+ISNULL(d.OtherDeduction4,0)+ISNULL(d.TDS,0)) AS decimal(18,2)) AS NetAmount,
+        d.DepositOn,
+        p.SendForPaymentAmount, p.AmountPaid, p.PayStatus, p.ChequeNo, p.ChequeDate, p.PaymentVoucherNo, p.PayRemarks,
+        e.[PAN NO] AS PanNo, e.[BANK NAME] AS BankName, e.[A/C NO] AS AccountNo, e.[BANK IFSC CODE] AS IFSC
+    FROM dbo.FNF_Header h
+    LEFT JOIN dbo.tblEmployee e ON e.EmployeeId = h.EmployeeId
+    LEFT JOIN dbo.tblDepartment dept ON dept.DepartmentId = e.DepartmentId
+    LEFT JOIN dbo.tblDesignation desg ON desg.DesignationId = e.DesignationId
+    LEFT JOIN dbo.tblLocation l ON l.LocationId = e.LocationId
+    LEFT JOIN dbo.FNF_Additions a ON a.FNFId = h.FNFId
+    LEFT JOIN dbo.FNF_Deductions d ON d.FNFId = h.FNFId
+    OUTER APPLY (SELECT TOP 1 p2.SendForPaymentAmount, p2.AmountPaid, p2.[Status] AS PayStatus, p2.ChequeNo, p2.ChequeDate, p2.PaymentVoucherNo, p2.Remarks AS PayRemarks
+                 FROM dbo.FNF_Payment p2 WHERE p2.FNFId = h.FNFId ORDER BY p2.PaymentId DESC) p
+    OUTER APPLY (SELECT TOP 1 s.paybledays, s.[PF(Total)], s.[ESIC(Total)], s.PTax
+                 FROM dbo.EmpAttendanceViewSnapshot s WHERE s.Ecode = e.Ecode AND s.[Month-Year] = a.SalaryMonth) sn
+    OUTER APPLY (SELECT MAX(x.AttendanceDate) AS LastPunchDate
+                 FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test x
+                 WHERE x.ECode = e.Ecode AND TRY_CAST(x.TotalWorkingMinutes AS time) >= '04:30') pn
+    WHERE e.Ecode LIKE 'V%'
+      AND (@search IS NULL OR @search = '' OR e.Ecode LIKE @search + '%' OR {nameExpr} LIKE '%' + @search + '%')
+      AND (@from IS NULL OR a.FNFDate >= @from)
+      AND (@to   IS NULL OR a.FNFDate <= @to)
+) X
+WHERE (@bucket = 'both' OR X.StatusBucket = @bucket)";
+
+            // ---- Pending branch (employees with no FNF yet) ----
+            string pendingSql = $@"
+SELECT
+    'Pending' AS StatusBucket,
+    e.Ecode, {nameExpr} AS EmployeeName,
+    dept.DepartmentName, desg.DesignationName, l.LocationName, l.STCode,
+    TRY_CONVERT(date, e.[JOINING DATE]) AS JoiningDate,
+    TRY_CONVERT(date, e.[DateOfLeft]) AS DateOfLeaving,
+    pn.LastPunchDate,
+    e.[PAN NO] AS PanNo, e.[BANK NAME] AS BankName, e.[A/C NO] AS AccountNo, e.[BANK IFSC CODE] AS IFSC
+FROM dbo.tblEmployee e
+LEFT JOIN dbo.tblDepartment dept ON dept.DepartmentId = e.DepartmentId
+LEFT JOIN dbo.tblDesignation desg ON desg.DesignationId = e.DesignationId
+LEFT JOIN dbo.tblLocation l ON l.LocationId = e.LocationId
+OUTER APPLY (SELECT MAX(x.AttendanceDate) AS LastPunchDate
+             FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test x
+             WHERE x.ECode = e.Ecode AND TRY_CAST(x.TotalWorkingMinutes AS time) >= '04:30') pn
+WHERE ISNULL(e.IsStore,0)=0 AND ISNULL(e.IsActive,0)=0
+  AND e.Ecode LIKE 'V%'
+  AND NOT EXISTS (SELECT 1 FROM dbo.FNF_Header fh WHERE fh.EmployeeId = e.EmployeeId)
+  AND e.[DateOfLeft] IS NOT NULL
+  AND (@search IS NULL OR @search = '' OR e.Ecode LIKE @search + '%' OR {nameExpr} LIKE '%' + @search + '%')
+  AND (
+        (@from IS NOT NULL AND TRY_CONVERT(date, e.[DateOfLeft]) >= @from)
+        OR (@from IS NULL AND TRY_CONVERT(date, e.[DateOfLeft]) >= DATEADD(YEAR,-1,GETDATE()))
+      )
+  AND (@to IS NULL OR TRY_CONVERT(date, e.[DateOfLeft]) <= @to)";
+
+            using var workbook = new XLWorkbook();
+            var ws = workbook.Worksheets.Add("FNF Report");
+            for (int i = 0; i < cols.Length; i++) ws.Cell(1, i + 1).Value = cols[i].Header;
+            ws.Row(1).Style.Font.Bold = true;
+            ws.SheetView.FreezeRows(1);
+
+            int rowIdx = 1;
+
+            using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            async Task WriteFromQuery(string sql, string bucket)
+            {
+                using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 300 };
+                cmd.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@from", (object?)from ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@to", (object?)to ?? DBNull.Value);
+                if (bucket != null) cmd.Parameters.AddWithValue("@bucket", bucket);
+
+                using var rdr = await cmd.ExecuteReaderAsync();
+                var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < rdr.FieldCount; i++) present.Add(rdr.GetName(i));
+
+                while (await rdr.ReadAsync())
+                {
+                    rowIdx++;
+                    for (int c = 0; c < cols.Length; c++)
+                    {
+                        if (!present.Contains(cols[c].Src)) continue;
+                        var val = rdr[cols[c].Src];
+                        if (val == null || val == DBNull.Value) continue;
+                        var cell = ws.Cell(rowIdx, c + 1);
+                        switch (cols[c].Kind)
+                        {
+                            case 'd':
+                                cell.Value = Convert.ToDouble(val);
+                                break;
+                            case 't':
+                                if (val is DateTime dtv) cell.Value = dtv.ToString("dd-MMM-yy");
+                                else cell.Value = val.ToString();
+                                break;
+                            default:
+                                cell.Value = val.ToString();
+                                break;
+                        }
+                    }
+                }
+            }
+
+            if (wantFnf)
+            {
+                var bucket = wantCompleted && wantProcessed ? "both" : (wantCompleted ? "Completed" : "Processed");
+                await WriteFromQuery(fnfSql, bucket);
+            }
+            if (wantPending)
+            {
+                await WriteFromQuery(pendingSql, null);
+            }
+
+            ws.Columns().AdjustToContents();
 
             using var stream = new MemoryStream();
             workbook.SaveAs(stream);

@@ -49,6 +49,10 @@ namespace HRMSAPI.Controllers
                 ["deptbgt-vs-actemp-loc"] = ("dbo.usp_LocationDeptWiseBgtEmpVsActEmpReport", "LOC_Dept_BgtEmp_vs_ActEmp_Gap_Report_", false),
                 ["absent-emp"] = ("dbo.usp_EmployeeWiseAbsentReport", "LOC_EMP_Absent_TD_MTD_Gap_Report_", false),
                 ["subdeptbgt-vs-actemp-loc"] = ("dbo.usp_LocationSubDeptWiseBgtEmpVsActEmpReport", "LOC_SubDept_BgtEmp_vs_ActEmp_Gap_Report_", false),
+                ["manual-gf-present-gt4"] = ("dbo.usp_LocEmpManualGFPresentGapReport", "LOC_EMP_Manual_GF_Present_GT4_Gap_Report_", false),
+                ["leave-availed-gt4"] = ("dbo.usp_LocEmpLeaveAvailedGapReport", "LOC_EMP_Leave_Availed_GT4_Gap_Report_", false),
+                ["lm-vs-tm-gross-gap"] = ("dbo.usp_LocEmpLMvsTMGrossGapReport", "LOC_EMP_LM_vs_TM_Gross_Salary_Gap_Report_", false),
+                ["emp-loc-change-lm-vs-tm"] = ("dbo.usp_EmpLocChangeLMvsTMGapReport", "EMP_LOC_Change_LM_vs_TM_Gap_Report_", false),
             };
 
         /// <summary>Dropdown options for the Gap Reports page.</summary>
@@ -80,6 +84,10 @@ namespace HRMSAPI.Controllers
                 new { key = "deptbgt-vs-actemp-loc", name = "Location-Dept-wise Bgt Emp vs Act Emp Gap Report", category = "Manpower / Budget" },
                 new { key = "absent-emp", name = "Employee-wise Absent TD/MTD Gap Report", category = "Attendance" },
                 new { key = "subdeptbgt-vs-actemp-loc", name = "Location-SubDept-wise Bgt Emp vs Act Emp Gap Report", category = "Manpower / Budget" },
+                new { key = "manual-gf-present-gt4", name = "Location-Employee Manual & GF Present > 4 Days Gap Report", category = "Manual / GF & Leave" },
+                new { key = "leave-availed-gt4", name = "Location-Employee Leave Availed > 4 Days Gap Report", category = "Manual / GF & Leave" },
+                new { key = "lm-vs-tm-gross-gap", name = "Location-Employee LM vs TM Gross Salary Gap Report", category = "LM vs TM (Salary/Loc)" },
+                new { key = "emp-loc-change-lm-vs-tm", name = "Employee Location Change LM vs TM Gap Report", category = "LM vs TM (Salary/Loc)" },
             };
             return Ok(list);
         }

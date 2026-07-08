@@ -111,6 +111,10 @@ public partial class tblEmployee
 
     public DateTime? UpdatedOn { get; set; }
 
+    // System/device IP captured on the last update (flows into tblEmployee_History via
+    // temporal versioning; surfaced in the Employee Change Log as the change's System IP).
+    public string UpdatedIp { get; set; }
+
     public string DeletedBy { get; set; }
 
     public DateTime? DeletedOn { get; set; }

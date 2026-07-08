@@ -28,7 +28,7 @@ namespace HRMSAPI.Implementation
             _logger = logger;
         }
 
-        public async Task<FetchAndResponse> UploadBgtSeatMasterExcelAsync(IFormFile file)
+        public async Task<FetchAndResponse> UploadBgtSeatMasterExcelAsync(IFormFile file, string? uploadedBy = null)
 {
     var expectedHeaders = new[] { "LOC CODE", "DEPARTMENT", "DESIGNATION", "SALARY BGT", "ORG CHART", "REPORTING MANAGER DESG", "ACTIVE", "SUB DEPARTMENT 1", "SUB DEPARTMENT 2", "SUB DEPARTMENT 3" };
     if (file == null || file.Length == 0)
@@ -275,6 +275,10 @@ namespace HRMSAPI.Implementation
                             "BGTSEATMaster upload rejected:\n" + string.Join("\n", rowErrors),
                             HttpStatusCode.BadRequest);
 
+                    // capture WHO uploaded
+                    await WriteBgtDeleteAuditAsync(conn, null, "UPLOAD", uploadedBy,
+                        null, $"Uploaded {created.Count} seat(s)");
+
                     return BuildFetchSuccessResponse("BGTSEATMaster uploaded successfully", created);
                 }
                 catch (Exception ex)
@@ -301,6 +305,11 @@ namespace HRMSAPI.Implementation
                     return BuildFetchSuccessResponse("Fetched all BGTSEATMaster records successfully", data);
                 }
 
+                // Exclude rows where the Ecode is actually the store code (Ecode == STCode) from the export.
+                var exportData = data
+                    .Where(r => !string.Equals((r.Ecode ?? "").Trim(), (r.STCode ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
                 using var workbook = new ClosedXML.Excel.XLWorkbook();
                 var worksheet = workbook.Worksheets.Add("BGTSeatMaster");
 
@@ -324,9 +333,9 @@ namespace HRMSAPI.Implementation
                 worksheet.Cell(1, 17).Value = "ActualReportingDesig";
                 worksheet.Cell(1, 18).Value = "ACTIVE";
 
-                for (int i = 0; i < data.Count; i++)
+                for (int i = 0; i < exportData.Count; i++)
                 {
-                    var r = data[i];
+                    var r = exportData[i];
                     worksheet.Cell(i + 2, 1).Value = r.STCode;
                     worksheet.Cell(i + 2, 2).Value = r.DepartmentId;
                     worksheet.Cell(i + 2, 3).Value = r.DepartmentName;
@@ -365,7 +374,32 @@ namespace HRMSAPI.Implementation
                 return BuildFetchErrorResponse(ex.Message,HttpStatusCode.BadRequest);
             }
         }
-		public async Task<ExecuteAndReponse> DeleteSeatsBySeriesAsync(string locCode, int deptSno, int desgSno, int deleteCount)
+		// Writes an audit row capturing WHO deleted BGT seat master rows (ecode), when, and details.
+		// Best-effort: never let an audit failure break the delete.
+		private static async Task WriteBgtDeleteAuditAsync(System.Data.Common.DbConnection conn, System.Data.Common.DbTransaction tx,
+			string changeType, string deletedBy, string primaryKey, string details)
+		{
+			try
+			{
+				using var cmd = conn.CreateCommand();
+				if (tx != null) cmd.Transaction = tx;
+				// @by is the numeric EmployeeId from the JWT (or 'System'); resolve it to the Ecode for ChangedBy.
+				cmd.CommandText = @"
+DECLARE @ecode nvarchar(200) = @by;
+IF ISNUMERIC(@by) = 1
+    SELECT @ecode = ISNULL((SELECT TOP 1 Ecode FROM dbo.tblEmployee WHERE EmployeeId = TRY_CONVERT(bigint, @by)), @by);
+INSERT INTO dbo.AuditLog (TableName, PrimaryKeyValue, ColumnName, OldValue, NewValue, ChangedBy, ChangedDate, ChangeType)
+VALUES ('BGTSEATMaster', @pk, NULL, @by, @details, @ecode, GETDATE(), @ct);";
+				cmd.Parameters.Add(new SqlParameter("@pk", SqlDbType.VarChar, -1) { Value = (object)primaryKey ?? DBNull.Value });
+				cmd.Parameters.Add(new SqlParameter("@details", SqlDbType.VarChar, -1) { Value = (object)details ?? DBNull.Value });
+				cmd.Parameters.Add(new SqlParameter("@by", SqlDbType.NVarChar, 200) { Value = string.IsNullOrWhiteSpace(deletedBy) ? "System" : deletedBy });
+				cmd.Parameters.Add(new SqlParameter("@ct", SqlDbType.VarChar, 50) { Value = changeType });
+				await cmd.ExecuteNonQueryAsync();
+			}
+			catch { /* auditing must not break the delete */ }
+		}
+
+		public async Task<ExecuteAndReponse> DeleteSeatsBySeriesAsync(string locCode, int deptSno, int desgSno, int deleteCount, string? deletedBy = null)
 		{
 			if (string.IsNullOrWhiteSpace(locCode))
 				return BuildExecuteErrorResponse("LOC_CODE is required", HttpStatusCode.BadRequest);
@@ -392,6 +426,8 @@ namespace HRMSAPI.Implementation
 					cmd.Parameters.Add(p4);
 
 					await cmd.ExecuteNonQueryAsync();
+					await WriteBgtDeleteAuditAsync(conn, null, "DELETE_BY_SERIES", deletedBy,
+						$"{locCode}/{deptSno}/{desgSno}", $"DeleteCount={deleteCount}");
 					return BuildExecuteSuccessResponse($"Deleted {deleteCount} seat(s) for {locCode}/{deptSno}/{desgSno} successfully");
 				}
 				catch (SqlException ex)
@@ -413,7 +449,7 @@ namespace HRMSAPI.Implementation
 
 		// Precise delete of specific seat entries (single row or bulk) by
 		// LOC_CODE + DEPT_SNO + DESG_SNO + SEAT_MASTER_NO. Runs in one transaction.
-		public async Task<ExecuteAndReponse> DeleteSeatsAsync(List<BgtSeatDeleteItem> items)
+		public async Task<ExecuteAndReponse> DeleteSeatsAsync(List<BgtSeatDeleteItem> items, string? deletedBy = null)
 		{
 			var toDelete = (items ?? new List<BgtSeatDeleteItem>())
 				.Where(i => i != null && !string.IsNullOrWhiteSpace(i.StCode) && !string.IsNullOrWhiteSpace(i.SeatNo))
@@ -444,6 +480,9 @@ namespace HRMSAPI.Implementation
 						cmd.Parameters.Add(new SqlParameter("@seat", SqlDbType.VarChar, 50) { Value = it.SeatNo });
 						total += await cmd.ExecuteNonQueryAsync();
 					}
+					await WriteBgtDeleteAuditAsync(conn, tx, "DELETE_SEATS", deletedBy,
+						string.Join(", ", toDelete.Select(x => $"{x.StCode}/{x.DeptSno}/{x.DesgSno}/{x.SeatNo}")),
+						$"Deleted {total} seat entr{(total == 1 ? "y" : "ies")}");
 					tx.Commit();
 					return BuildExecuteSuccessResponse($"Deleted {total} seat entr{(total == 1 ? "y" : "ies")} successfully.");
 				}
@@ -468,7 +507,7 @@ namespace HRMSAPI.Implementation
 		// Delete ALL budget seats for one or more stores (LOC_CODE). Backs up the affected rows to a
 		// timestamped table first (BGTSEATMaster is non-temporal, so a delete is otherwise
 		// unrecoverable), then deletes. Backup + delete run in one transaction (atomic).
-		public async Task<ExecuteAndReponse> DeleteSeatsByStoreAsync(List<string> locCodes)
+		public async Task<ExecuteAndReponse> DeleteSeatsByStoreAsync(List<string> locCodes, string? deletedBy = null)
 		{
 			var codes = (locCodes ?? new List<string>())
 				.Where(s => !string.IsNullOrWhiteSpace(s))
@@ -524,6 +563,9 @@ namespace HRMSAPI.Implementation
 						del = await cd.ExecuteNonQueryAsync();
 					}
 
+					await WriteBgtDeleteAuditAsync(conn, tx, "DELETE_BY_STORE", deletedBy,
+						string.Join(", ", codes), $"Deleted {del} row(s). Backup={bak}");
+
 					tx.Commit();
 					return BuildExecuteSuccessResponse($"Deleted {del} budget seat(s) across {codes.Count} store(s): {string.Join(", ", codes)}. Backup saved as dbo.{bak}.");
 				}
@@ -547,7 +589,7 @@ namespace HRMSAPI.Implementation
 
 		// Delete EVERY budget seat (whole table). Backs up the FULL table to a timestamped table
 		// first, then deletes all rows. Backup + delete run in one transaction (atomic).
-		public async Task<ExecuteAndReponse> DeleteAllSeatsAsync()
+		public async Task<ExecuteAndReponse> DeleteAllSeatsAsync(string? deletedBy = null)
 		{
 			var bak = $"BGTSEATMaster_DelBak_All_{DateTime.Now:yyyyMMdd_HHmmss}";
 
@@ -584,6 +626,9 @@ namespace HRMSAPI.Implementation
 						cd.CommandText = "DELETE FROM dbo.BGTSEATMaster";
 						del = await cd.ExecuteNonQueryAsync();
 					}
+
+					await WriteBgtDeleteAuditAsync(conn, tx, "DELETE_ALL", deletedBy,
+						null, $"Deleted ALL {del} row(s). Backup={bak}");
 
 					tx.Commit();
 					return BuildExecuteSuccessResponse($"Deleted ALL {del} budget seat(s). Full backup saved as dbo.{bak}.");

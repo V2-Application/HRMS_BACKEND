@@ -44,6 +44,21 @@ namespace HRMSAPI.Controllers
             return StatusCode(500, result);
         }
 
+        // Downloads the LOC-WISE EMP-WISE SALARY REPORT in the 148-column PAYROLL FORMAT,
+        // one row per employee using the latest run for the month. New report — does not
+        // affect the existing All/Latest exports.
+        [HttpGet("payroll-format-export"), RequirePageAccess("/payroll-summary")]
+        public async Task<IActionResult> PayrollFormatExport([FromQuery] string month = null, [FromQuery] int? status = null)
+        {
+            if (!string.IsNullOrWhiteSpace(month) && !Regex.IsMatch(month, @"^[A-Z][a-z]{2}-\d{2}$", RegexOptions.IgnoreCase))
+            {
+                return BadRequest(new FetchAndResponse() { Status = false, Message = "Month format must be 'MMM-YY' (e.g., Jul-25)" });
+            }
+
+            var (bytes, fileName) = await _service.ExportPayrollFormatAsync(month, status);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+
         [HttpPost("salary-process-to-given-to-bank-or-paid-by-cash"), Authorize, RequirePageAccess("/given-to-bank")]
         public async Task<IActionResult> SalaryProcessToGivenToBankOrPaidByCash([FromBody] UpdateSalaryStatusRequestDto request)
         {

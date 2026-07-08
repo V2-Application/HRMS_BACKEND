@@ -7,16 +7,14 @@ BEGIN
     /*
       LOC._ABSENT TD/MTD GAP REPORT  (read-only)
       One row per location:
-        LOC CD     = tblLocation.STCode
-        LOC NM     = tblLocation.LocationName
-        LOC TYPE   = name-based (HO new / Old HO / Central / DC(DW01,DH24) / Hub / Store)
-        LOC STATUS = 'Active' if tblLocation.IsActive=1 else 'UPC'
-        ACT EMP.   = ALL active employees (tblEmployee.IsActive=1) mapped to that location
-        TD         = ABSENT days (materialized Status='Absent') at the store for @AsOfDate (yesterday)
+        LOC CD / LOC NM / LOC TYPE / LOC STATUS
+        ACT EMP.   = ALL active employees mapped to that location
+        TD         = ABSENT days at the store for @AsOfDate (yesterday)
         MTD        = ABSENT days for the current pay cycle through @AsOfDate
-        RCA / ATR / HR REMARKS -> left blank (manual follow-up columns, per the template)
-      Only full-day 'Absent' is counted (Half/Quarter Day Absent are NOT included).
-      "Today's" download uses data THROUGH YESTERDAY (@AsOfDate defaults to GETDATE()-1).
+        RCA / ATR / HR REMARKS -> blank manual columns
+      Only full-day 'Absent'/'On Leave' is counted (Half/Quarter Day Absent are NOT included).
+      DOJ rule: days BEFORE an employee's date-of-joining are NOT counted as absent (joins on the
+      15th -> 1st..14th not counted).
       Pay cycle = 26th of prev month .. 25th of current; cycle start = most recent 26th on/before @AsOfDate.
       Returns ALL locations. Marks/changes nothing.
     */
@@ -29,9 +27,9 @@ BEGIN
         END;
 
     IF OBJECT_ID('tempdb..#Emp') IS NOT NULL DROP TABLE #Emp;
-    CREATE TABLE #Emp(EmployeeId BIGINT NOT NULL PRIMARY KEY, ECode NVARCHAR(50) NOT NULL, LocationId INT NULL);
-    INSERT INTO #Emp(EmployeeId, ECode, LocationId)
-    SELECT e.EmployeeId, e.ECode, e.LocationId
+    CREATE TABLE #Emp(EmployeeId BIGINT NOT NULL PRIMARY KEY, ECode NVARCHAR(50) NOT NULL, LocationId INT NULL, DOJ DATE NULL);
+    INSERT INTO #Emp(EmployeeId, ECode, LocationId, DOJ)
+    SELECT e.EmployeeId, e.ECode, e.LocationId, TRY_CONVERT(date, e.[DOJ])
     FROM dbo.tblEmployee e WITH (NOLOCK)
     WHERE e.IsActive = 1 AND e.ECode IS NOT NULL;
     CREATE INDEX IX_Emp_ECode ON #Emp(ECode);
@@ -46,7 +44,8 @@ BEGIN
     JOIN dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test t WITH (NOLOCK)
       ON t.ECode = e.ECode
      AND CONVERT(date,t.AttendanceDate) BETWEEN @CycleStart AND @ToDate
-     AND t.Status = N'Absent'
+     AND t.Status IN (N'Absent', N'On Leave')
+     AND (e.DOJ IS NULL OR CONVERT(date,t.AttendanceDate) >= e.DOJ)   -- not absent before joining
     WHERE e.LocationId IS NOT NULL
     GROUP BY e.LocationId;
 

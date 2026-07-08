@@ -41,6 +41,44 @@ namespace HRMSAPI.Implementation
             _logger = logger;
             _httpContextAccessor = httpContextAccessor;
         }
+
+        /// <summary>
+        /// Resolves the caller's client/device IP for audit (Employee Change Log).
+        /// Honors X-Forwarded-For (first hop) when behind a proxy, else the socket remote IP.
+        /// </summary>
+        private string GetClientIp()
+        {
+            try
+            {
+                var ctx = _httpContextAccessor?.HttpContext;
+                if (ctx == null) return null;
+
+                // Behind IIS ARR / any reverse proxy the real client IP is in these headers.
+                var fwd = ctx.Request?.Headers["X-Forwarded-For"].ToString();
+                if (!string.IsNullOrWhiteSpace(fwd))
+                    return NormalizeIp(fwd.Split(',')[0].Trim());
+
+                var real = ctx.Request?.Headers["X-Real-IP"].ToString();
+                if (!string.IsNullOrWhiteSpace(real))
+                    return NormalizeIp(real.Trim());
+
+                var ip = ctx.Connection?.RemoteIpAddress;
+                if (ip != null && ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+                return NormalizeIp(ip?.ToString());
+            }
+            catch { return null; }
+        }
+
+        // Present loopback / IPv4-mapped addresses in a familiar full form.
+        private static string NormalizeIp(string ip)
+        {
+            if (string.IsNullOrWhiteSpace(ip)) return ip;
+            ip = ip.Trim();
+            if (ip == "::1") return "127.0.0.1";                       // IPv6 loopback -> IPv4 loopback
+            if (ip.StartsWith("::ffff:")) return ip.Substring(7);      // IPv4-mapped IPv6 -> plain IPv4
+            return ip;
+        }
+
         public async Task<(List<GetEmployeeDetailsResult> Employees, long TotalCount, int CurrentPageNumber)> EmployeeList(int pageNumber, int pageSize, string searchTerm = "")
         {
             try
@@ -921,6 +959,7 @@ namespace HRMSAPI.Implementation
                 employeeData.UpdatedBy = updatedBy;
                 employeeData.LastUpdatedBy = updatedBy;
                 employeeData.UpdatedOn = DateTime.UtcNow;
+                employeeData.UpdatedIp = GetClientIp();   // system/device IP for the Employee Change Log
 
                 // Newly added fields
                 employeeData.BasicSalary = Convert.ToDecimal(employee.candidateInfo.basicSalary);
@@ -1593,6 +1632,7 @@ namespace HRMSAPI.Implementation
                         employee.UpdatedBy = updatedBy;
                         employee.LastUpdatedBy = updatedBy;
                         employee.UpdatedOn = DateTime.UtcNow;
+                        employee.UpdatedIp = GetClientIp();   // system/device IP for the Employee Change Log
                     }
 
                     int ra = await _context.SaveChangesAsync();
@@ -2124,6 +2164,7 @@ namespace HRMSAPI.Implementation
                     emp.LastUpdatedBy = string.IsNullOrWhiteSpace(request.lastUpdatedBy) ? "System" : request.lastUpdatedBy;
                     emp.UpdatedBy = emp.LastUpdatedBy;   // keep both audit columns in sync
                     emp.UpdatedOn = DateTime.UtcNow;
+                    emp.UpdatedIp = GetClientIp();   // system/device IP for the Employee Change Log
                     emp.DeletedOn = DateTime.UtcNow;
                     emp.ActiveInActiveRemarks = request.remarks;
 

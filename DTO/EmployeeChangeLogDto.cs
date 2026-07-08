@@ -9,6 +9,7 @@ namespace HRMSAPI.DTO
         public string VersionLabel { get; set; }
         public string ChangedBy { get; set; }
         public DateTime ChangedOn { get; set; }
+        public string ChangedIp { get; set; }   // system/device IP the change was made from
     }
 }
 

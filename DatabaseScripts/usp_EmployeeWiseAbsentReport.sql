@@ -7,24 +7,17 @@ BEGIN
     /*
       LOC_EMP._TD/MTD ABSENT GAP REPORT  (read-only)
       One row per ACTIVE employee who has at least one full-day ABSENT in the current pay cycle:
-        LOC CD        = tblLocation.STCode
-        LOC NM        = tblLocation.LocationName
-        LOC TYPE      = name-based (HO new / Old HO / Central / DC(DW01,DH24) / Hub / Store)
-        STATS OLD/NEW = left blank (manual column, per the template; not used for absent tracking)
-        EMP CODE      = tblEmployee.ECode
-        EMP NM        = tblEmployee.[FULL NAME]
-        DEPT.         = tblDepartment.DepartmentName
-        SUB.-DEPT.    = tblSubDepartment.SubDepartmentName (primary / SubDepartmentId1)
-        DESGN.        = tblDesignation.DesignationName
+        LOC CD / LOC NM / LOC TYPE / STATS OLD/NEW
+        EMP CODE / EMP NM / DEPT. / SUB.-DEPT. / DESGN.
+        D.O.J         = tblEmployee.[DOJ] (date of joining)
         TD            = full-day ABSENT on @AsOfDate (yesterday) -> 1 or 0
         MTD           = full-day ABSENT count for the current pay cycle through @AsOfDate
-        RCA / ATR / HR REMARKS -> left blank (manual follow-up columns, per the template)
-      Only full-day 'Absent' is counted (Half/Quarter Day Absent are NOT included).
+        RCA / ATR / HR REMARKS -> blank manual columns
+      Only full-day 'Absent'/'On Leave' is counted (Half/Quarter Day Absent are NOT included).
+      DOJ rule: days BEFORE an employee's date-of-joining are NOT counted as absent (the employee
+      had not joined yet) -- e.g. joins on the 15th -> 1st..14th are not counted.
       Pay cycle = 26th of prev month .. 25th of current; cycle start = most recent 26th on/before @AsOfDate.
-      "Today's" download uses data THROUGH YESTERDAY (@AsOfDate defaults to GETDATE()-1).
-      Store-login / system accounts are EXCLUDED: ECode = a store STCode, OR no real name
-        ([FULL NAME] blank or equal to the ECode, e.g. region/cluster/store login codes).
-      Only employees with MTD absent > 0 are returned. Marks/changes nothing.
+      Store-login / system accounts are EXCLUDED. Only employees with MTD absent > 0 are returned.
     */
 
     DECLARE @ToDate     DATE = ISNULL(@AsOfDate, DATEADD(DAY, -1, CAST(GETDATE() AS DATE)));
@@ -36,16 +29,16 @@ BEGIN
 
     -- active employees (exclude store-login accounts where ECode is actually a store code)
     IF OBJECT_ID('tempdb..#Emp') IS NOT NULL DROP TABLE #Emp;
-    CREATE TABLE #Emp(EmployeeId BIGINT NOT NULL PRIMARY KEY, ECode NVARCHAR(50) NOT NULL);
-    INSERT INTO #Emp(EmployeeId, ECode)
-    SELECT e.EmployeeId, e.ECode
+    CREATE TABLE #Emp(EmployeeId BIGINT NOT NULL PRIMARY KEY, ECode NVARCHAR(50) NOT NULL, DOJ DATE NULL);
+    INSERT INTO #Emp(EmployeeId, ECode, DOJ)
+    SELECT e.EmployeeId, e.ECode, TRY_CONVERT(date, e.[DOJ])
     FROM dbo.tblEmployee e WITH (NOLOCK)
     WHERE e.IsActive = 1 AND e.ECode IS NOT NULL
       AND e.[FULL NAME] IS NOT NULL AND LTRIM(RTRIM(e.[FULL NAME])) <> '' AND e.[FULL NAME] <> e.ECode
       AND NOT EXISTS (SELECT 1 FROM dbo.tblLocation lx WITH (NOLOCK) WHERE lx.STCode = e.ECode);
     CREATE INDEX IX_Emp_ECode ON #Emp(ECode);
 
-    -- full-day ABSENT TD / MTD per employee
+    -- full-day ABSENT TD / MTD per employee (days before DOJ are excluded)
     IF OBJECT_ID('tempdb..#Abs') IS NOT NULL DROP TABLE #Abs;
     CREATE TABLE #Abs(EmployeeId BIGINT NOT NULL PRIMARY KEY, TD INT NOT NULL, MTD INT NOT NULL);
     INSERT INTO #Abs(EmployeeId, TD, MTD)
@@ -56,7 +49,8 @@ BEGIN
     JOIN dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test t WITH (NOLOCK)
       ON t.ECode = e.ECode
      AND CONVERT(date,t.AttendanceDate) BETWEEN @CycleStart AND @ToDate
-     AND t.Status = N'Absent'
+     AND t.Status IN (N'Absent', N'On Leave')
+     AND (e.DOJ IS NULL OR CONVERT(date,t.AttendanceDate) >= e.DOJ)   -- not absent before joining
     GROUP BY e.EmployeeId;
 
     SELECT
@@ -76,6 +70,7 @@ BEGIN
         d.DepartmentName           AS [DEPT.],
         sd1.SubDepartmentName      AS [SUB.-DEPT.],
         dg.DesignationName         AS [DESGN.],
+        TRY_CONVERT(date, e.[DOJ]) AS [D.O.J],
         a.TD                       AS [TD],
         a.MTD                      AS [MTD],
         CAST(NULL AS varchar(200)) AS [RCA],

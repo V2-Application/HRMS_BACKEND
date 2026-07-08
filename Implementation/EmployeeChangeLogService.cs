@@ -67,7 +67,10 @@ namespace HRMSAPI.Implementation
                                         : reader.GetString(reader.GetOrdinal("ChangedBy")),
                                     ChangedOn = reader.IsDBNull(reader.GetOrdinal("ChangedOn"))
                                         ? DateTime.MinValue
-                                        : reader.GetDateTime(reader.GetOrdinal("ChangedOn"))
+                                        : reader.GetDateTime(reader.GetOrdinal("ChangedOn")),
+                                    ChangedIp = reader.IsDBNull(reader.GetOrdinal("ChangedIp"))
+                                        ? string.Empty
+                                        : reader.GetString(reader.GetOrdinal("ChangedIp"))
                                 };
                                 allChangeLogs.Add(changeLog);
                             }

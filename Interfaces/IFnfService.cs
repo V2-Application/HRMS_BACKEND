@@ -21,8 +21,10 @@ namespace HRMSAPI.Interfaces
         Task<FnfBulkUploadResponseDto> UploadCompletedFNFExcelAsync(IFormFile file, string user);
         Task<int> UpdatePaymentStatusAsync(long fnfId, string status, string remarks);
         Task<byte[]> ExportToExcelAsync(string? search, DateTime? from, DateTime? to, string? paymentStatus);
+        Task<byte[]> ExportAllFnfAsync(string? search, DateTime? from, DateTime? to, string? status);
         Task<byte[]> ExportPendingToExcelAsync();
         Task<Response> FnfPendingToProcessing(long employeeid);
+        Task<string?> LocateTabByEcodeAsync(string ecode);
 
     }
 }

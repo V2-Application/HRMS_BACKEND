@@ -749,6 +749,9 @@ namespace HRMSAPI.Implementation
                 var req = wrapper.Request;
                 var roleLower = role?.Trim().ToLowerInvariant();
                 var isCallerSuperAdmin = roleLower == "superadmin" || roleLower == "it superadmin" || roleLower == "master";
+                // Regularize HR = final-authority approver: approving finalizes the whole request
+                // (acts like SuperAdmin for regularize), regardless of Manager/LP. Old flow unchanged.
+                var isCallerRegularizeHr = roleLower == "regularize hr" || roleLower == "regularizehr" || roleLower == "regularize-hr";
                 var isCallerLp = isCallerSuperAdmin || roleLower == "lp" || roleLower == "audit";
                 var isCallerReportingManager = req.ReportingManagerId == callerEmployeeId;
 
@@ -756,9 +759,9 @@ namespace HRMSAPI.Implementation
                 var trimmedRemarks = dto.Remarks?.Trim();
 
                 // ===== Role-based logic =====
-                if (isCallerSuperAdmin || callerEmployeeId==10)
+                if (isCallerSuperAdmin || isCallerRegularizeHr || callerEmployeeId==10)
                 {
-                    // SuperAdmin updates both
+                    // SuperAdmin / Regularize HR (final authority) updates both → finalizes the request
                     req.ManagerApprovalStatusId = dto.StatusId;
                     req.ManagerApproverId = callerEmployeeId;
                     req.ManagerApprovalOn = now;
@@ -989,6 +992,18 @@ namespace HRMSAPI.Implementation
                     var today = DateTime.Today;
                     var prevMonth = today.AddMonths(-1);
                     var cycleFrom = new DateTime(prevMonth.Year, prevMonth.Month, 26);
+
+                    // Regularize HR (final approver) gets a wider Pending window: one extra cycle back
+                    // (starts at the 26th two months prior — e.g. on 01-Jul-2026 it starts 26-May-2026)
+                    // so nothing pending is missed across cycle boundaries.
+                    var roleNormForWindow = role.Trim().ToLowerInvariant();
+                    bool isRegularizeHrWindow = roleNormForWindow == "regularize hr" || roleNormForWindow == "regularizehr" || roleNormForWindow == "regularize-hr";
+                    if (isRegularizeHrWindow)
+                    {
+                        var back2 = today.AddMonths(-2);
+                        cycleFrom = new DateTime(back2.Year, back2.Month, 26);
+                    }
+
                     var cycleToExclusive = today.AddDays(1); // today inclusive
                     query = query.Where(x => x.request.RequestDate >= cycleFrom && x.request.RequestDate < cycleToExclusive);
                 }
@@ -1004,12 +1019,14 @@ namespace HRMSAPI.Implementation
                 //  - SuperAdmin / StoreHR (non-actors) still see the entire org / their store by the
                 //    overall request.StatusId.
                 bool isSuperAdmin = roleNorm == "superadmin";
+                // Regularize HR sees ALL requests org-wide (like SuperAdmin), filtered by overall status.
+                bool isRegularizeHr = roleNorm == "regularize hr" || roleNorm == "regularizehr" || roleNorm == "regularize-hr";
                 bool isApprovedOrRejectedView = statusId == AttendanceStatuses.Approved || statusId == AttendanceStatuses.Rejected;
                 bool isPendingView = statusId == AttendanceStatuses.Pending;
 
                 if (isApprovedOrRejectedView)
                 {
-                    if (!isSuperAdmin)
+                    if (!isSuperAdmin && !isRegularizeHr)
                     {
                         // Match on the caller's own tier status — manager-approved rows stay
                         // visible in the manager's Approved tab even while LP is still acting.
@@ -1019,9 +1036,9 @@ namespace HRMSAPI.Implementation
                     }
                     // SuperAdmin: no additional row filter; uses overall request.StatusId filter below.
                 }
-                else if (isSuperAdmin)
+                else if (isSuperAdmin || isRegularizeHr)
                 {
-                    // Pending / all view for SuperAdmin (strict role): see all rows in the org (still within the date cycle when statusId==4)
+                    // Pending / all view for SuperAdmin / Regularize HR: see all rows in the org (still within the date cycle when statusId==4)
                 }
                 else if (isStoreHr)
                 {
@@ -1067,7 +1084,7 @@ namespace HRMSAPI.Implementation
                 // Overall status filter applies only to roles that don't act on the request
                 // (SuperAdmin, StoreHR). Manager / LP / Audit are already tier-filtered above,
                 // so applying request.StatusId here would re-hide rows that the tier sees.
-                if (statusId != 0 && (isSuperAdmin || isStoreHr))
+                if (statusId != 0 && (isSuperAdmin || isStoreHr || isRegularizeHr))
                     query = query.Where(x => x.request.StatusId == statusId);
 
                 // Search (now also on STCode / LocationName)
@@ -1115,8 +1132,10 @@ namespace HRMSAPI.Implementation
                             ? (x.employee.FirstName + " " + x.employee.LastName)
                             : x.employee.FirstName ?? x.employee.LastName ?? "Unknown"),
 
-                    PunchIn = (TimeSpan)x.request.PunchIn,   // if PunchIn/PunchOut are nullable TimeSpan?, consider mapping to TimeSpan? to avoid exceptions
-                    PunchOut = (TimeSpan)x.request.PunchOut,
+                    // PunchIn/PunchOut are nullable in the table; some older requests have NULLs.
+                    // Coalesce to zero so the projection never throws on null (was hiding the whole list).
+                    PunchIn = x.request.PunchIn ?? TimeSpan.Zero,
+                    PunchOut = x.request.PunchOut ?? TimeSpan.Zero,
 
                     Reason = x.request.Reason != null ? x.request.Reason.Trim() : null,
                     Remarks = x.request.Remarks != null ? x.request.Remarks.Trim() : null,
