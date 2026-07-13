@@ -3042,12 +3042,27 @@ namespace HRMSAPI.Implementation
             using var connection = new SqlConnection(cs);
             await connection.OpenAsync(cancellationToken);
 
-            bool hasLoc;
+            // Decide the punch-location source:
+            //   - "live": ATTLOG linked server (192.168.151.25) is reachable (PROD) -> resolve locations
+            //             live from ATTLOG, so the export works even when the saved table is empty.
+            //   - "saved": no linked server (DEV) but the pre-populated saved table exists -> use it.
+            //   - "none": neither -> no location columns.
+            // Both paths require the Biomax map to translate device location -> ST Code.
+            bool hasBiomax, hasSavedTbl, hasAttlogLinked;
             using (var chk = connection.CreateCommand())
             {
-                chk.CommandText = "SELECT CASE WHEN OBJECT_ID('dbo.tblAttendancePunchLocation') IS NOT NULL AND OBJECT_ID('dbo.tblBiomaxAttendanceLocationMap') IS NOT NULL THEN 1 ELSE 0 END";
-                hasLoc = Convert.ToInt32(await chk.ExecuteScalarAsync(cancellationToken)) == 1;
+                chk.CommandText = @"SELECT
+                    CASE WHEN OBJECT_ID('dbo.tblBiomaxAttendanceLocationMap') IS NOT NULL THEN 1 ELSE 0 END,
+                    CASE WHEN OBJECT_ID('dbo.tblAttendancePunchLocation') IS NOT NULL THEN 1 ELSE 0 END,
+                    CASE WHEN EXISTS (SELECT 1 FROM sys.servers WHERE name = '192.168.151.25') THEN 1 ELSE 0 END";
+                using var rr = await chk.ExecuteReaderAsync(cancellationToken);
+                await rr.ReadAsync(cancellationToken);
+                hasBiomax = rr.GetInt32(0) == 1;
+                hasSavedTbl = rr.GetInt32(1) == 1;
+                hasAttlogLinked = rr.GetInt32(2) == 1;
             }
+            string locMode = (hasBiomax && hasAttlogLinked) ? "live"
+                           : (hasBiomax && hasSavedTbl) ? "saved" : "none";
 
             var headers = new List<string>
             {
@@ -3057,31 +3072,76 @@ namespace HRMSAPI.Implementation
                 "TotalMonthlyWorkingHours","Status","RegularizePunchIn","RegularizePunchOut","IsRegularize","TotalWorkingDays"
             };
 
+            var preamble = "";
             var locSelect = "";
             var locJoin = "";
-            if (hasLoc)
+            if (locMode != "none")
             {
-                var pivots = string.Join(",\n            ", Enumerable.Range(1, 12).Select(n =>
-                    $"MAX(CASE WHEN apl.PunchNo='Punch{n}' THEN bm.STCode END) AS Punch{n}Loc"));
+                // Shared pivot: inner subquery yields (ECode, AttendanceDate, PunchNo, STCode) as alias x.
+                var pivots = string.Join(",\n                ", Enumerable.Range(1, 12).Select(n =>
+                    $"MAX(CASE WHEN x.PunchNo='Punch{n}' THEN x.STCode END) AS Punch{n}Loc"));
                 locSelect = ", " + string.Join(", ", Enumerable.Range(1, 12).Select(n => $"loc.Punch{n}Loc"));
-                locJoin = $@"
+                for (int n = 1; n <= 12; n++) headers.Add($"Punch{n} Location");
+
+                if (locMode == "saved")
+                {
+                    locJoin = $@"
         LEFT JOIN (
-            SELECT apl.ECode, apl.AttendanceDate,
-            {pivots}
-            FROM dbo.tblAttendancePunchLocation apl
-            LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
-                ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = apl.PunchLocation COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
-            WHERE apl.AttendanceDate BETWEEN @FromDate AND @ToDate
-              AND (@ECode IS NULL OR apl.ECode = @ECode)
-              AND apl.PunchLocation IS NOT NULL
-            GROUP BY apl.ECode, apl.AttendanceDate
+            SELECT x.ECode, x.AttendanceDate,
+                {pivots}
+            FROM (
+                SELECT apl.ECode, apl.AttendanceDate, apl.PunchNo, bm.STCode
+                FROM dbo.tblAttendancePunchLocation apl
+                LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
+                    ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = apl.PunchLocation COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+                WHERE apl.AttendanceDate BETWEEN @FromDate AND @ToDate
+                  AND (@ECode IS NULL OR apl.ECode = @ECode)
+                  AND apl.PunchLocation IS NOT NULL
+            ) x
+            GROUP BY x.ECode, x.AttendanceDate
         ) loc ON loc.ECode COLLATE DATABASE_DEFAULT = p.ECode COLLATE DATABASE_DEFAULT
              AND loc.AttendanceDate = CAST(p.AttendanceDate AS date)";
-                for (int n = 1; n <= 12; n++) headers.Add($"Punch{n} Location");
+                }
+                else // live
+                {
+                    // Pull the range's ATTLOG rows into a session #temp once (fast single remote scan),
+                    // then match each of the 12 punch times to its device location and map to ST Code.
+                    preamble = @"
+        SELECT Employeecode, Logdatetime, Location INTO #att
+        FROM [192.168.151.25].[SmartOfficedb].[dbo].ATTLOG
+        WHERE Logdatetime >= @FromDate AND Logdatetime < DATEADD(DAY, 1, @ToDate);
+        CREATE CLUSTERED INDEX IX_att ON #att(Employeecode, Logdatetime);";
+                    locJoin = $@"
+        LEFT JOIN (
+            SELECT x.ECode, x.AttendanceDate,
+                {pivots}
+            FROM (
+                SELECT s.ECode, CAST(s.AttendanceDate AS date) AS AttendanceDate, u.PunchNo, bm.STCode
+                FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS s WITH (NOLOCK)
+                CROSS APPLY (VALUES
+                    ('Punch1',s.Punch1),('Punch2',s.Punch2),('Punch3',s.Punch3),('Punch4',s.Punch4),
+                    ('Punch5',s.Punch5),('Punch6',s.Punch6),('Punch7',s.Punch7),('Punch8',s.Punch8),
+                    ('Punch9',s.Punch9),('Punch10',s.Punch10),('Punch11',s.Punch11),('Punch12',s.Punch12)
+                ) u(PunchNo, PunchTime)
+                LEFT JOIN #att a
+                    ON a.Employeecode COLLATE DATABASE_DEFAULT = s.ECode COLLATE DATABASE_DEFAULT
+                   AND CAST(a.Logdatetime AS date) = CAST(s.AttendanceDate AS date)
+                   AND CONVERT(varchar(8), a.Logdatetime, 108) = u.PunchTime
+                LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
+                    ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = a.Location COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+                WHERE s.AttendanceDate BETWEEN @FromDate AND @ToDate
+                  AND (@ECode IS NULL OR s.ECode = @ECode)
+                  AND u.PunchTime IS NOT NULL AND u.PunchTime <> '' AND u.PunchTime <> '00:00:00'
+            ) x
+            GROUP BY x.ECode, x.AttendanceDate
+        ) loc ON loc.ECode COLLATE DATABASE_DEFAULT = p.ECode COLLATE DATABASE_DEFAULT
+             AND loc.AttendanceDate = CAST(p.AttendanceDate AS date)";
+                }
             }
 
             // SELECT columns in the SAME order as the headers above (AttendanceDate pre-formatted as text).
             var sql = $@"
+        SET NOCOUNT ON;{preamble}
         SELECT
               p.EmployeeName, p.ECode, p.DesignationName, p.LocationName, p.STCode, p.DepartmentName,
               p.Machine_Type AS MachineType, CONVERT(varchar(10), p.AttendanceDate, 23) AS AttendanceDate,
