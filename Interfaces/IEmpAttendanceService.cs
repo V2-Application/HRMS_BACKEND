@@ -104,6 +104,9 @@ namespace HRMSAPI.Interfaces
         //by nikhil sharma for excel only
         Task<List<PunchFetchDto>> FetchPunchesRangeExcel(DateTime fromDate, DateTime toDate, string? ecode, CancellationToken cancellationToken = default);
 
+        // Streaming export (constant memory) — writes the .xlsx directly to filePath.
+        Task StreamPunchesRangeExcelAsync(DateTime fromDate, DateTime toDate, string? ecode, string filePath, CancellationToken cancellationToken = default);
+
         // Merge Monthly Punches Range
         Task<int> MergeMonthlyPunchesRangeAsync(DateTime fromDate, DateTime toDate, string ecode);
 

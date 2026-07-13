@@ -1,6 +1,7 @@
 ﻿using ClosedXML.Excel;
-using DocumentFormat.OpenXml.Drawing.Charts;
-using DocumentFormat.OpenXml.InkML;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using HRMSAPI.Data;
 using HRMSAPI.DTO;
 using HRMSAPI.Interfaces;
@@ -2845,60 +2846,62 @@ namespace HRMSAPI.Implementation
         {
             var punches = new List<PunchFetchDto>();
 
-            const string sql = @"
-        SELECT
-              EmpAttendanceId
-            , EmployeeId
-            , EmployeeName
-            , ECode
-            , AttendanceDate
-            , Machine_Type          AS MachineType
-            , DesignationName
-            , LocationName
-            , STCode
-            , DepartmentName
-            , ShiftName
-            , ShiftStartTime
-            , ShiftEndTime
-            , IsHoliday
-            , HolidayName
-            , PunchIn
-            , PunchOut
-            , Punch1
-            , Punch2
-            , Punch3
-            , Punch4
-            , Punch5
-            , Punch6
-            , Punch7
-            , Punch8
-            , Punch9
-            , Punch10
-            , Punch11
-            , Punch12
-            , ValidPunchCount
-            , RegularizePunchIn
-            , RegularizePuncOut
-            , IsRegularize
-            , IsOnLeave
-            , TotalWorkingMinutes
-            , LateMinutes
-            , EarlyMinutes
-            , Status
-            , TotalWorkingDays
-            , TotalMonthlyWorkingHours
-        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test WITH (NOLOCK)
-        WHERE AttendanceDate BETWEEN @FromDate AND @ToDate
-          AND (@ECode IS NULL OR ECode = @ECode);";
-
             using (var connection = _context.Database.GetDbConnection())
             {
                 await connection.OpenAsync(cancellationToken);
+
+                // Location enrichment is done SET-BASED in SQL: LEFT JOIN a per-day pivot of the saved
+                // punch-location table, with ST Code from the local Biomax map. This scales to any range
+                // (no in-memory dictionary). Guard so the export still works if those tables are absent.
+                bool hasLoc;
+                using (var chk = connection.CreateCommand())
+                {
+                    chk.CommandText = "SELECT CASE WHEN OBJECT_ID('dbo.tblAttendancePunchLocation') IS NOT NULL AND OBJECT_ID('dbo.tblBiomaxAttendanceLocationMap') IS NOT NULL THEN 1 ELSE 0 END";
+                    chk.CommandType = CommandType.Text;
+                    hasLoc = Convert.ToInt32(await chk.ExecuteScalarAsync(cancellationToken)) == 1;
+                }
+
+                var locSelect = "";
+                var locJoin = "";
+                if (hasLoc)
+                {
+                    // Show ONLY the mapped ST Code in the export columns (not the raw device location).
+                    var pivots = string.Join(",\n            ", Enumerable.Range(1, 12).Select(n =>
+                        $"MAX(CASE WHEN apl.PunchNo='Punch{n}' THEN bm.STCode END) AS Punch{n}Loc"));
+                    locSelect = ", " + string.Join(", ", Enumerable.Range(1, 12).Select(n => $"loc.Punch{n}Loc"));
+                    locJoin = $@"
+        LEFT JOIN (
+            SELECT apl.ECode, apl.AttendanceDate,
+            {pivots}
+            FROM dbo.tblAttendancePunchLocation apl
+            LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
+                ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = apl.PunchLocation COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+            WHERE apl.AttendanceDate BETWEEN @FromDate AND @ToDate
+              AND (@ECode IS NULL OR apl.ECode = @ECode)
+              AND apl.PunchLocation IS NOT NULL
+            GROUP BY apl.ECode, apl.AttendanceDate
+        ) loc ON loc.ECode COLLATE DATABASE_DEFAULT = p.ECode COLLATE DATABASE_DEFAULT
+             AND loc.AttendanceDate = CAST(p.AttendanceDate AS date)";
+                }
+
+                var sql = $@"
+        SELECT
+              p.EmpAttendanceId, p.EmployeeId, p.EmployeeName, p.ECode, p.AttendanceDate,
+              p.Machine_Type AS MachineType, p.DesignationName, p.LocationName, p.STCode, p.DepartmentName,
+              p.ShiftName, p.ShiftStartTime, p.ShiftEndTime, p.IsHoliday, p.HolidayName, p.PunchIn, p.PunchOut,
+              p.Punch1, p.Punch2, p.Punch3, p.Punch4, p.Punch5, p.Punch6, p.Punch7, p.Punch8, p.Punch9,
+              p.Punch10, p.Punch11, p.Punch12, p.ValidPunchCount, p.RegularizePunchIn, p.RegularizePuncOut,
+              p.IsRegularize, p.IsOnLeave, p.TotalWorkingMinutes, p.LateMinutes, p.EarlyMinutes, p.Status,
+              p.TotalWorkingDays, p.TotalMonthlyWorkingHours{locSelect}
+        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS p WITH (NOLOCK){locJoin}
+        WHERE p.AttendanceDate BETWEEN @FromDate AND @ToDate
+          AND (@ECode IS NULL OR p.ECode = @ECode);";
 
                 using (var command = connection.CreateCommand())
                 {
                     command.CommandText = sql;
                     command.CommandType = CommandType.Text;
+                    command.CommandTimeout = 600;
 
                     var fromDateParam = command.CreateParameter();
                     fromDateParam.ParameterName = "@FromDate";
@@ -2944,6 +2947,23 @@ namespace HRMSAPI.Implementation
 
                             var s = reader.GetValue(ordinal)?.ToString() ?? "00:00:00";
                             return string.IsNullOrEmpty(s) ? "00:00:00" : s;
+                        }
+
+                        Dictionary<string, string> ReadLocs()
+                        {
+                            var d = new Dictionary<string, string>();
+                            for (int n = 1; n <= 12; n++)
+                            {
+                                int ord;
+                                try { ord = reader.GetOrdinal("Punch" + n + "Loc"); }
+                                catch { continue; }
+                                if (!reader.IsDBNull(ord))
+                                {
+                                    var s = reader.GetValue(ord)?.ToString();
+                                    if (!string.IsNullOrWhiteSpace(s)) d["Punch" + n] = s;
+                                }
+                            }
+                            return d;
                         }
 
                         while (await reader.ReadAsync(cancellationToken))
@@ -3000,7 +3020,10 @@ namespace HRMSAPI.Implementation
                                 // In your old code you collapsed numeric(38,1) → int days
                                 TotalWorkingDays = reader.IsDBNull(reader.GetOrdinal("TotalWorkingDays"))
                                     ? 0
-                                    : Convert.ToInt32(Math.Round(Convert.ToDouble(reader["TotalWorkingDays"])))
+                                    : Convert.ToInt32(Math.Round(Convert.ToDouble(reader["TotalWorkingDays"]))),
+
+                                // Per-punch device location (+ ST Code), joined set-based in the SQL above.
+                                PunchLocations = hasLoc ? ReadLocs() : null
                             });
                         }
                     }
@@ -3008,6 +3031,146 @@ namespace HRMSAPI.Implementation
             }
 
             return punches;
+        }
+
+        // Streaming Excel export (OpenXmlWriter + SqlDataReader) — constant memory, scales to
+        // hundreds of thousands of rows. Writes the .xlsx directly to <filePath>. Same columns as
+        // FetchPunchesRangeExcel's export, plus 12 "PunchN Location" columns showing the mapped ST Code.
+        public async Task StreamPunchesRangeExcelAsync(DateTime fromDate, DateTime toDate, string? ecode, string filePath, CancellationToken cancellationToken = default)
+        {
+            var cs = _configuration.GetConnectionString("DefaultConnection");
+            using var connection = new SqlConnection(cs);
+            await connection.OpenAsync(cancellationToken);
+
+            bool hasLoc;
+            using (var chk = connection.CreateCommand())
+            {
+                chk.CommandText = "SELECT CASE WHEN OBJECT_ID('dbo.tblAttendancePunchLocation') IS NOT NULL AND OBJECT_ID('dbo.tblBiomaxAttendanceLocationMap') IS NOT NULL THEN 1 ELSE 0 END";
+                hasLoc = Convert.ToInt32(await chk.ExecuteScalarAsync(cancellationToken)) == 1;
+            }
+
+            var headers = new List<string>
+            {
+                "EmployeeName","ECode","DesignationName","LocationName","STCode","DepartmentName","MachineType",
+                "AttendanceDate","Punch1","Punch2","Punch3","Punch4","Punch5","Punch6","Punch7","Punch8","Punch9",
+                "Punch10","Punch11","Punch12","PunchIn","PunchOut","TotalWorkingMinutes","LateMinutes","EarlyMinutes",
+                "TotalMonthlyWorkingHours","Status","RegularizePunchIn","RegularizePunchOut","IsRegularize","TotalWorkingDays"
+            };
+
+            var locSelect = "";
+            var locJoin = "";
+            if (hasLoc)
+            {
+                var pivots = string.Join(",\n            ", Enumerable.Range(1, 12).Select(n =>
+                    $"MAX(CASE WHEN apl.PunchNo='Punch{n}' THEN bm.STCode END) AS Punch{n}Loc"));
+                locSelect = ", " + string.Join(", ", Enumerable.Range(1, 12).Select(n => $"loc.Punch{n}Loc"));
+                locJoin = $@"
+        LEFT JOIN (
+            SELECT apl.ECode, apl.AttendanceDate,
+            {pivots}
+            FROM dbo.tblAttendancePunchLocation apl
+            LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
+                ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = apl.PunchLocation COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+            WHERE apl.AttendanceDate BETWEEN @FromDate AND @ToDate
+              AND (@ECode IS NULL OR apl.ECode = @ECode)
+              AND apl.PunchLocation IS NOT NULL
+            GROUP BY apl.ECode, apl.AttendanceDate
+        ) loc ON loc.ECode COLLATE DATABASE_DEFAULT = p.ECode COLLATE DATABASE_DEFAULT
+             AND loc.AttendanceDate = CAST(p.AttendanceDate AS date)";
+                for (int n = 1; n <= 12; n++) headers.Add($"Punch{n} Location");
+            }
+
+            // SELECT columns in the SAME order as the headers above (AttendanceDate pre-formatted as text).
+            var sql = $@"
+        SELECT
+              p.EmployeeName, p.ECode, p.DesignationName, p.LocationName, p.STCode, p.DepartmentName,
+              p.Machine_Type AS MachineType, CONVERT(varchar(10), p.AttendanceDate, 23) AS AttendanceDate,
+              p.Punch1, p.Punch2, p.Punch3, p.Punch4, p.Punch5, p.Punch6, p.Punch7, p.Punch8, p.Punch9,
+              p.Punch10, p.Punch11, p.Punch12, p.PunchIn, p.PunchOut, p.TotalWorkingMinutes, p.LateMinutes,
+              p.EarlyMinutes, p.TotalMonthlyWorkingHours, p.Status, p.RegularizePunchIn, p.RegularizePuncOut,
+              p.IsRegularize, p.TotalWorkingDays{locSelect}
+        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS p WITH (NOLOCK){locJoin}
+        WHERE p.AttendanceDate BETWEEN @FromDate AND @ToDate
+          AND (@ECode IS NULL OR p.ECode = @ECode);";
+
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            command.CommandTimeout = 1800;
+            var pf = command.CreateParameter(); pf.ParameterName = "@FromDate"; pf.Value = fromDate; command.Parameters.Add(pf);
+            var pt = command.CreateParameter(); pt.ParameterName = "@ToDate"; pt.Value = toDate; command.Parameters.Add(pt);
+            var pe = command.CreateParameter(); pe.ParameterName = "@ECode"; pe.Value = string.IsNullOrWhiteSpace(ecode) ? (object)DBNull.Value : ecode; command.Parameters.Add(pe);
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            int fieldCount = reader.FieldCount;
+
+            using var doc = SpreadsheetDocument.Create(filePath, SpreadsheetDocumentType.Workbook);
+            var wbPart = doc.AddWorkbookPart();
+            var wsPart = wbPart.AddNewPart<WorksheetPart>();
+
+            // Write the worksheet XML BY HAND straight to the part stream — the fastest path for
+            // hundreds of thousands of rows (OpenXmlWriter's per-cell object serialization is the
+            // real bottleneck). Inline strings; empty cells collapse to <c/>; values XML-escaped.
+            using (var sw = new System.IO.StreamWriter(wsPart.GetStream(System.IO.FileMode.Create), new System.Text.UTF8Encoding(false), 1 << 20))
+            {
+                sw.Write("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+                sw.Write("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+
+                sw.Write("<row>");
+                foreach (var htxt in headers)
+                {
+                    sw.Write("<c t=\"str\"><v>");
+                    WriteXmlEscaped(sw, htxt);
+                    sw.Write("</v></c>");
+                }
+                sw.Write("</row>");
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    sw.Write("<row>");
+                    for (int i = 0; i < fieldCount; i++)
+                    {
+                        var val = reader.IsDBNull(i) ? "" : (reader.GetValue(i)?.ToString() ?? "");
+                        if (val.Length == 0 || val == "00:00:00") { sw.Write("<c/>"); continue; }
+                        sw.Write("<c t=\"str\"><v>");
+                        WriteXmlEscaped(sw, val);
+                        sw.Write("</v></c>");
+                    }
+                    sw.Write("</row>");
+                }
+
+                sw.Write("</sheetData></worksheet>");
+            }
+
+            wbPart.Workbook = new Workbook();
+            var sheets = wbPart.Workbook.AppendChild(new Sheets());
+            sheets.Append(new Sheet { Id = wbPart.GetIdOfPart(wsPart), SheetId = 1U, Name = "Punches" });
+            wbPart.Workbook.Save();
+        }
+
+        // Fast XML text escaping. Fast path: most values have no special chars, so write the whole
+        // string in one call (avoids per-char Write overhead on hundreds of millions of chars).
+        private static void WriteXmlEscaped(System.IO.TextWriter w, string s)
+        {
+            bool clean = true;
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == '&' || c == '<' || c == '>' || c < 0x20) { clean = false; break; }
+            }
+            if (clean) { w.Write(s); return; }
+
+            foreach (var ch in s)
+            {
+                switch (ch)
+                {
+                    case '&': w.Write("&amp;"); break;
+                    case '<': w.Write("&lt;"); break;
+                    case '>': w.Write("&gt;"); break;
+                    default:
+                        if (ch >= 0x20 || ch == '\t' || ch == '\n' || ch == '\r') w.Write(ch);
+                        break;
+                }
+            }
         }
 
         #endregion

@@ -37,7 +37,22 @@ namespace HRMSAPI.Middlewares
                 }
                 logger.Info($"Request Started | Path: {context.Request.Path}, Method: {context.Request.Method}, Body: {requestBody}");
 
-                // ---- Capture Response ----
+                // File downloads / exports: DO NOT buffer or log the body. Buffering re-holds the whole
+                // file in memory (defeats streaming, causes spikes/failures on large files) and logging
+                // binary bloats the logs. Stream these straight through to the client.
+                var path = context.Request.Path.Value ?? "";
+                bool isDownload = path.Contains("download", StringComparison.OrdinalIgnoreCase)
+                                  || path.Contains("export", StringComparison.OrdinalIgnoreCase)
+                                  || path.Contains("excel", StringComparison.OrdinalIgnoreCase);
+
+                if (isDownload)
+                {
+                    await _next(context);
+                    logger.Info($"Request Completed | StatusCode: {context.Response.StatusCode} (file download; body not logged)");
+                    return;
+                }
+
+                // ---- Capture Response (JSON/text APIs only; capped) ----
                 var originalResponseBody = context.Response.Body;
                 using (var newResponseBody = new MemoryStream())
                 {
@@ -45,10 +60,19 @@ namespace HRMSAPI.Middlewares
 
                     await _next(context); // Call the next middleware
 
-                    // Read response
                     newResponseBody.Seek(0, SeekOrigin.Begin);
-                    var responseBodyText = await new StreamReader(newResponseBody).ReadToEndAsync();
-                    newResponseBody.Seek(0, SeekOrigin.Begin);
+                    var contentType = context.Response.ContentType ?? "";
+                    string responseBodyText;
+                    if ((contentType.Contains("json") || contentType.Contains("text") || contentType == "")
+                        && newResponseBody.Length <= 200_000)
+                    {
+                        responseBodyText = await new StreamReader(newResponseBody).ReadToEndAsync();
+                        newResponseBody.Seek(0, SeekOrigin.Begin);
+                    }
+                    else
+                    {
+                        responseBodyText = $"[{newResponseBody.Length} bytes, {contentType}]";
+                    }
 
                     logger.Info($"Request Completed | StatusCode: {context.Response.StatusCode}, Response Body: {responseBodyText}");
 

@@ -401,6 +401,16 @@ namespace HRMSAPI.Controllers
                     return BadRequest("Request cannot be null.");
 
                 // cancellationToken is bound to HttpContext.RequestAborted: a "Stop" from the UI aborts the query.
+                // Stream the export straight to a temp .xlsx (OpenXmlWriter = constant memory) so it scales
+                // to hundreds of thousands of rows. cancellationToken (HttpContext.RequestAborted) cancels on "Stop".
+                var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Punches_{Guid.NewGuid():N}.xlsx");
+                await _service.StreamPunchesRangeExcelAsync(request.FromDate, request.ToDate, request.ECode, tempPath, cancellationToken);
+                var exportStream = new System.IO.FileStream(tempPath, System.IO.FileMode.Open, System.IO.FileAccess.Read,
+                    System.IO.FileShare.Read, 81920, System.IO.FileOptions.DeleteOnClose | System.IO.FileOptions.Asynchronous);
+                return File(exportStream, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    $"Punches_{request.FromDate:yyyyMMdd}_to_{request.ToDate:yyyyMMdd}.xlsx");
+
+#pragma warning disable CS0162 // legacy ClosedXML build below is unreachable (streaming path above is used)
                 var data = await _service.FetchPunchesRangeExcel(request.FromDate, request.ToDate, request.ECode, cancellationToken);
 
                 using var workbook = new XLWorkbook();
@@ -414,49 +424,22 @@ namespace HRMSAPI.Controllers
             "EmployeeName","ECode","DesignationName","LocationName","STCode","DepartmentName","MachineType",
             "AttendanceDate","Punch1","Punch2","Punch3","Punch4","Punch5","Punch6","Punch7","Punch8","Punch9",
             "Punch10","Punch11","Punch12","PunchIn","PunchOut","TotalWorkingMinutes","LateMinutes","EarlyMinutes",
-            "TotalMonthlyWorkingHours","Status","RegularizePunchIn","RegularizePunchOut","IsRegularize","TotalWorkingDays"
+            "TotalMonthlyWorkingHours","Status","RegularizePunchIn","RegularizePunchOut","IsRegularize","TotalWorkingDays",
+            "Punch1 Location","Punch2 Location","Punch3 Location","Punch4 Location","Punch5 Location","Punch6 Location",
+            "Punch7 Location","Punch8 Location","Punch9 Location","Punch10 Location","Punch11 Location","Punch12 Location"
         };
 
                 for (int i = 0; i < headers.Length; i++)
                     worksheet.Cell(1, i + 1).Value = headers[i];
 
-                // -------------------------
-                // FORMATTING
-                // -------------------------
-                worksheet.Column(8).Style.DateFormat.Format = "yyyy-MM-dd";     // AttendanceDate
-                worksheet.Columns(9, 20).Style.DateFormat.Format = "hh:mm:ss";  // Punch1 - Punch12
-                worksheet.Column(21).Style.DateFormat.Format = "hh:mm:ss";      // PunchIn
-                worksheet.Column(22).Style.DateFormat.Format = "hh:mm:ss";      // PunchOut
-                worksheet.Column(24).Style.NumberFormat.Format = "0";           // LateMinutes
-                worksheet.Column(25).Style.NumberFormat.Format = "0";           // EarlyMinutes
-                worksheet.Column(28).Style.DateFormat.Format = "hh:mm:ss";      // RegularizePunchIn
-                worksheet.Column(29).Style.DateFormat.Format = "hh:mm:ss";      // RegularizePunchOut
                 worksheet.Column(31).Style.NumberFormat.Format = "0.0";         // TotalWorkingDays
 
-                // -------------------------
-                // HELPERS
-                // -------------------------
                 void SetTimeStringCell(IXLCell cell, string? time)
                 {
-                    if (string.IsNullOrWhiteSpace(time) || time == "00:00:00")
-                    {
-                        cell.Value = "";   // empty cell
-                        return;
-                    }
-
-                    if (TimeSpan.TryParse(time, out var ts))
-                    {
-                        cell.Value = ts;   // Excel time
-                    }
-                    else
-                    {
-                        cell.Value = time; // fallback as string
-                    }
+                    if (string.IsNullOrWhiteSpace(time) || time == "00:00:00") { cell.Value = ""; return; }
+                    if (TimeSpan.TryParse(time, out var ts)) cell.Value = ts; else cell.Value = time;
                 }
 
-                // -------------------------
-                // DATA
-                // -------------------------
                 int row = 2;
 
                 foreach (var item in data ?? Enumerable.Empty<PunchFetchDto>())
@@ -516,10 +499,30 @@ namespace HRMSAPI.Controllers
 
                     worksheet.Cell(row, 31).Value = item.TotalWorkingDays;
 
+                    // Punch1–Punch12 device locations (+ mapped ST Code), columns 32–43.
+                    for (int n = 1; n <= 12; n++)
+                    {
+                        string locVal = "";
+                        if (item.PunchLocations != null && item.PunchLocations.TryGetValue($"Punch{n}", out var lv))
+                            locVal = lv ?? "";
+                        worksheet.Cell(row, 31 + n).Value = locVal;
+                    }
+
                     row++;
                 }
 
-                worksheet.Columns().AdjustToContents();
+                // AdjustToContents measures every cell — extremely slow on large sheets.
+                // Only auto-fit for small exports; otherwise set sensible fixed widths.
+                if ((data?.Count ?? 0) <= 3000)
+                {
+                    worksheet.Columns().AdjustToContents();
+                }
+                else
+                {
+                    worksheet.Column(1).Width = 26;  // EmployeeName
+                    worksheet.Columns(2, 31).Width = 14;
+                    worksheet.Columns(32, 43).Width = 20; // Punch locations
+                }
 
                 using var stream = new MemoryStream();
                 workbook.SaveAs(stream);
@@ -532,6 +535,7 @@ namespace HRMSAPI.Controllers
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     fileName
                 );
+#pragma warning restore CS0162
             }
             catch (OperationCanceledException)
             {

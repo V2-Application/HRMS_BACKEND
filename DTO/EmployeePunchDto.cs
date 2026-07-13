@@ -1,4 +1,5 @@
 ﻿using ClosedXML.Excel;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace HRMSAPI.DTO
@@ -6,6 +7,10 @@ namespace HRMSAPI.DTO
 
     public class PunchFetchDto
     {
+        // Per-punch device location (+ mapped ST Code), keyed by "Punch1".."Punch12".
+        // Populated for the Excel export so each punch column has its punch location.
+        public Dictionary<string, string> PunchLocations { get; set; }
+
         public int EmployeeId { get; set; }
         public string EmployeeName { get; set; }
         public string ECode { get; set; }
