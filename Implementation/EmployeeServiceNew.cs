@@ -971,7 +971,15 @@ namespace HRMSAPI.Implementation
                 employeeData.monthlyGrossCTC = employee.candidateInfo.monthlyGrossCtc;
                 employeeData.annuallyNetCTC = employee.candidateInfo.annuallyNetCtc;
                 employeeData.PFApplicable = employee.candidateInfo.pfApplicable;
-                employeeData.BonusApplicable = employee.candidateInfo.bonusApplicable;
+                // Normalize to a canonical bucket so stray inputs (e.g. boolean "true"/"false"
+                // from some form paths) never get stored raw. Valid values: Ctc / Stat / No.
+                // A raw "true"/"yes"/"1" means bonus applicable -> Ctc bucket (matches the uploader).
+                employeeData.BonusApplicable = (employee.candidateInfo.bonusApplicable?.Trim().ToLowerInvariant()) switch
+                {
+                    "ctc" or "yes" or "true" or "1" => "Ctc",
+                    "stat" => "Stat",
+                    _ => "No",
+                };
                 employeeData.ESICApplicable = employee.candidateInfo.esicApplicable;
                 employeeData.ReportHeadEcode = employee.candidateInfo.reportHeadEcode;
                 employeeData.ShiftID = employee.candidateInfo.ShiftID ?? 1;

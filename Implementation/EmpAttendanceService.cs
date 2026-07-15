@@ -3066,7 +3066,8 @@ namespace HRMSAPI.Implementation
 
             var headers = new List<string>
             {
-                "EmployeeName","ECode","DesignationName","LocationName","STCode","DepartmentName","MachineType",
+                "EmployeeName","ECode","DesignationName","LocationName","STCode","DepartmentName",
+                "SubDepartment1","SubDepartment2","SubDepartment3","MachineType",
                 "AttendanceDate","Punch1","Punch2","Punch3","Punch4","Punch5","Punch6","Punch7","Punch8","Punch9",
                 "Punch10","Punch11","Punch12","PunchIn","PunchOut","TotalWorkingMinutes","LateMinutes","EarlyMinutes",
                 "TotalMonthlyWorkingHours","Status","RegularizePunchIn","RegularizePunchOut","IsRegularize","TotalWorkingDays"
@@ -3077,11 +3078,25 @@ namespace HRMSAPI.Implementation
             var locJoin = "";
             if (locMode != "none")
             {
-                // Shared pivot: inner subquery yields (ECode, AttendanceDate, PunchNo, STCode) as alias x.
-                var pivots = string.Join(",\n                ", Enumerable.Range(1, 12).Select(n =>
-                    $"MAX(CASE WHEN x.PunchNo='Punch{n}' THEN x.STCode END) AS Punch{n}Loc"));
-                locSelect = ", " + string.Join(", ", Enumerable.Range(1, 12).Select(n => $"loc.Punch{n}Loc"));
-                for (int n = 1; n <= 12; n++) headers.Add($"Punch{n} Location");
+                // Shared pivot: inner subquery yields (ECode, AttendanceDate, PunchNo, DeviceLocation,
+                // STCode, STName) as alias x. Each punch expands to 3 columns: device Location Name,
+                // ST Code, and ST Name (store name from tblLocation).
+                var pivots = string.Join(",\n                ", Enumerable.Range(1, 12).SelectMany(n => new[]
+                {
+                    $"MAX(CASE WHEN x.PunchNo='Punch{n}' THEN x.DeviceLocation END) AS Punch{n}LocName",
+                    $"MAX(CASE WHEN x.PunchNo='Punch{n}' THEN x.STCode END) AS Punch{n}StCode",
+                    $"MAX(CASE WHEN x.PunchNo='Punch{n}' THEN x.STName END) AS Punch{n}StName"
+                }));
+                locSelect = ", " + string.Join(", ", Enumerable.Range(1, 12).SelectMany(n => new[]
+                {
+                    $"loc.Punch{n}LocName", $"loc.Punch{n}StCode", $"loc.Punch{n}StName"
+                }));
+                for (int n = 1; n <= 12; n++)
+                {
+                    headers.Add($"Punch{n} Location Name");
+                    headers.Add($"Punch{n} ST Code");
+                    headers.Add($"Punch{n} ST Name");
+                }
 
                 if (locMode == "saved")
                 {
@@ -3090,10 +3105,13 @@ namespace HRMSAPI.Implementation
             SELECT x.ECode, x.AttendanceDate,
                 {pivots}
             FROM (
-                SELECT apl.ECode, apl.AttendanceDate, apl.PunchNo, bm.STCode
+                SELECT apl.ECode, apl.AttendanceDate, apl.PunchNo,
+                       apl.PunchLocation AS DeviceLocation, bm.STCode, ln.LocationName AS STName
                 FROM dbo.tblAttendancePunchLocation apl
                 LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
                     ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = apl.PunchLocation COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+                LEFT JOIN dbo.tblLocation ln
+                    ON ln.STCode COLLATE DATABASE_DEFAULT = bm.STCode COLLATE DATABASE_DEFAULT AND ISNULL(ln.IsDeleted, 0) = 0
                 WHERE apl.AttendanceDate BETWEEN @FromDate AND @ToDate
                   AND (@ECode IS NULL OR apl.ECode = @ECode)
                   AND apl.PunchLocation IS NOT NULL
@@ -3116,7 +3134,8 @@ namespace HRMSAPI.Implementation
             SELECT x.ECode, x.AttendanceDate,
                 {pivots}
             FROM (
-                SELECT s.ECode, CAST(s.AttendanceDate AS date) AS AttendanceDate, u.PunchNo, bm.STCode
+                SELECT s.ECode, CAST(s.AttendanceDate AS date) AS AttendanceDate, u.PunchNo,
+                       a.Location AS DeviceLocation, bm.STCode, ln.LocationName AS STName
                 FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS s WITH (NOLOCK)
                 CROSS APPLY (VALUES
                     ('Punch1',s.Punch1),('Punch2',s.Punch2),('Punch3',s.Punch3),('Punch4',s.Punch4),
@@ -3129,6 +3148,8 @@ namespace HRMSAPI.Implementation
                    AND CONVERT(varchar(8), a.Logdatetime, 108) = u.PunchTime
                 LEFT JOIN dbo.tblBiomaxAttendanceLocationMap bm
                     ON bm.DeviceLocation COLLATE DATABASE_DEFAULT = a.Location COLLATE DATABASE_DEFAULT AND bm.IsDeleted = 0
+                LEFT JOIN dbo.tblLocation ln
+                    ON ln.STCode COLLATE DATABASE_DEFAULT = bm.STCode COLLATE DATABASE_DEFAULT AND ISNULL(ln.IsDeleted, 0) = 0
                 WHERE s.AttendanceDate BETWEEN @FromDate AND @ToDate
                   AND (@ECode IS NULL OR s.ECode = @ECode)
                   AND u.PunchTime IS NOT NULL AND u.PunchTime <> '' AND u.PunchTime <> '00:00:00'
@@ -3144,12 +3165,17 @@ namespace HRMSAPI.Implementation
         SET NOCOUNT ON;{preamble}
         SELECT
               p.EmployeeName, p.ECode, p.DesignationName, p.LocationName, p.STCode, p.DepartmentName,
+              sd1.SubDepartmentName AS SubDepartment1, sd2.SubDepartmentName AS SubDepartment2, sd3.SubDepartmentName AS SubDepartment3,
               p.Machine_Type AS MachineType, CONVERT(varchar(10), p.AttendanceDate, 23) AS AttendanceDate,
               p.Punch1, p.Punch2, p.Punch3, p.Punch4, p.Punch5, p.Punch6, p.Punch7, p.Punch8, p.Punch9,
               p.Punch10, p.Punch11, p.Punch12, p.PunchIn, p.PunchOut, p.TotalWorkingMinutes, p.LateMinutes,
               p.EarlyMinutes, p.TotalMonthlyWorkingHours, p.Status, p.RegularizePunchIn, p.RegularizePuncOut,
               p.IsRegularize, p.TotalWorkingDays{locSelect}
-        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS p WITH (NOLOCK){locJoin}
+        FROM dbo.tbl_fn_GetMonthlyPunchesRange_productionnewnick_test AS p WITH (NOLOCK)
+        LEFT JOIN dbo.tblEmployee e WITH (NOLOCK) ON e.EmployeeId = p.EmployeeId
+        LEFT JOIN dbo.tblSubDepartment sd1 ON sd1.SubDepartmentId = e.SubDepartmentId1
+        LEFT JOIN dbo.tblSubDepartment sd2 ON sd2.SubDepartmentId = e.SubDepartmentId2
+        LEFT JOIN dbo.tblSubDepartment sd3 ON sd3.SubDepartmentId = e.SubDepartmentId3{locJoin}
         WHERE p.AttendanceDate BETWEEN @FromDate AND @ToDate
           AND (@ECode IS NULL OR p.ECode = @ECode);";
 
