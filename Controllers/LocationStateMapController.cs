@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using HRMSAPI.Extension;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -24,6 +25,7 @@ namespace HRMSAPI.Controllers
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
+    [RequirePageAccess("/master/store-state-mapping")]
     public class LocationStateMapController : ControllerBase
     {
         private readonly IConfiguration _config;
