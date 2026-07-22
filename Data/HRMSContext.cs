@@ -4811,7 +4811,9 @@ public partial class HRMSContext : DbContext
                             .HasColumnName("ValidTo");
                     }));
 
-            entity.Property(e => e.CL).HasColumnType("decimal(18, 1)");
+            // CL DB column is decimal(18, 2); mapping it as scale 1 made EF round values like
+            // 0.07 -> 0.1 before saving (the real cause of "CL shows 0.1"). Match the DB scale.
+            entity.Property(e => e.CL).HasColumnType("decimal(18, 2)");
             entity.Property(e => e.COMP_OFF).HasColumnType("decimal(18, 1)");
             entity.Property(e => e.CreatedBy).HasMaxLength(50);
             entity.Property(e => e.CreatedOn)

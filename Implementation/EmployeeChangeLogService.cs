@@ -3,6 +3,7 @@ using HRMSAPI.DTO;
 using HRMSAPI.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Data;
 
@@ -11,11 +12,13 @@ namespace HRMSAPI.Implementation
     public class EmployeeChangeLogService : IEmployeeChangeLogService
     {
         private readonly HRMSContext _context;
+        private readonly IConfiguration _config;
         private readonly ILogger<EmployeeChangeLogService> _logger;
 
-        public EmployeeChangeLogService(HRMSContext context, ILogger<EmployeeChangeLogService> logger)
+        public EmployeeChangeLogService(HRMSContext context, IConfiguration config, ILogger<EmployeeChangeLogService> logger)
         {
             _context = context;
+            _config = config;
             _logger = logger;
         }
 
@@ -30,49 +33,52 @@ namespace HRMSAPI.Implementation
 
                 var allChangeLogs = new List<EmployeeChangeLogDto>();
 
-                using (var connection = _context.Database.GetDbConnection())
+                // Use a DEDICATED connection from the connection string — NOT the shared
+                // DbContext connection (_context.Database.GetDbConnection()). The controller's
+                // [RequirePageAccess] filter runs first and uses the same scoped DbContext for
+                // its RBAC query; reusing/opening that connection here can throw
+                // "The connection was already open" (or dispose the context's connection),
+                // surfacing as an intermittent 500. A private connection avoids that entirely.
+                var connString = _context.Database.GetConnectionString()
+                                 ?? _config.GetConnectionString("DefaultConnection");
+
+                using (var connection = new SqlConnection(connString))
                 {
                     await connection.OpenAsync();
                     using (var command = connection.CreateCommand())
                     {
-                        command.CommandText = "[HRMS].[dbo].[usp_GetEmployeeChangeLog]";
+                        command.CommandText = "[dbo].[usp_GetEmployeeChangeLog]";
                         command.CommandType = CommandType.StoredProcedure;
-
-                        // Only pass @Ecode parameter - no pagination
+                        command.CommandTimeout = 120;
                         command.Parameters.Add(new SqlParameter("@Ecode", SqlDbType.NVarChar, 50) { Value = ecode });
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
+                            // Resolve ordinals once, tolerating a column being absent on a given
+                            // environment (returns -1 -> treated as empty) so a schema difference
+                            // can never crash the whole request.
+                            int oEcode = SafeOrdinal(reader, "Ecode");
+                            int oColumn = SafeOrdinal(reader, "ColumnName");
+                            int oOld = SafeOrdinal(reader, "OldValue");
+                            int oNew = SafeOrdinal(reader, "NewValue");
+                            int oVer = SafeOrdinal(reader, "VersionLabel");
+                            int oBy = SafeOrdinal(reader, "ChangedBy");
+                            int oOn = SafeOrdinal(reader, "ChangedOn");
+                            int oIp = SafeOrdinal(reader, "ChangedIp");
+
                             while (await reader.ReadAsync())
                             {
-                                var changeLog = new EmployeeChangeLogDto
+                                allChangeLogs.Add(new EmployeeChangeLogDto
                                 {
-                                    Ecode = reader.IsDBNull(reader.GetOrdinal("Ecode"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("Ecode")),
-                                    ColumnName = reader.IsDBNull(reader.GetOrdinal("ColumnName"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("ColumnName")),
-                                    OldValue = reader.IsDBNull(reader.GetOrdinal("OldValue"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("OldValue")),
-                                    NewValue = reader.IsDBNull(reader.GetOrdinal("NewValue"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("NewValue")),
-                                    VersionLabel = reader.IsDBNull(reader.GetOrdinal("VersionLabel"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("VersionLabel")),
-                                    ChangedBy = reader.IsDBNull(reader.GetOrdinal("ChangedBy"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("ChangedBy")),
-                                    ChangedOn = reader.IsDBNull(reader.GetOrdinal("ChangedOn"))
-                                        ? DateTime.MinValue
-                                        : reader.GetDateTime(reader.GetOrdinal("ChangedOn")),
-                                    ChangedIp = reader.IsDBNull(reader.GetOrdinal("ChangedIp"))
-                                        ? string.Empty
-                                        : reader.GetString(reader.GetOrdinal("ChangedIp"))
-                                };
-                                allChangeLogs.Add(changeLog);
+                                    Ecode = GetStr(reader, oEcode),
+                                    ColumnName = GetStr(reader, oColumn),
+                                    OldValue = GetStr(reader, oOld),
+                                    NewValue = GetStr(reader, oNew),
+                                    VersionLabel = GetStr(reader, oVer),
+                                    ChangedBy = GetStr(reader, oBy),
+                                    ChangedOn = (oOn < 0 || reader.IsDBNull(oOn)) ? DateTime.MinValue : reader.GetDateTime(oOn),
+                                    ChangedIp = GetStr(reader, oIp)
+                                });
                             }
                         }
                     }
@@ -86,6 +92,20 @@ namespace HRMSAPI.Implementation
                 throw new ApplicationException($"An error occurred while fetching employee change log: {ex.Message}", ex);
             }
         }
+
+        private static int SafeOrdinal(IDataRecord reader, string name)
+        {
+            try { return reader.GetOrdinal(name); }
+            catch (IndexOutOfRangeException) { return -1; }
+        }
+
+        // Read any column as a string regardless of its SQL type (handles sql_variant / non-nvarchar
+        // columns that GetString would otherwise throw on). Returns "" for missing/null.
+        private static string GetStr(IDataRecord reader, int ordinal)
+        {
+            if (ordinal < 0 || reader.IsDBNull(ordinal)) return string.Empty;
+            var v = reader.GetValue(ordinal);
+            return v?.ToString() ?? string.Empty;
+        }
     }
 }
-

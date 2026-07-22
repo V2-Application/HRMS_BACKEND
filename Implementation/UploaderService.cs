@@ -735,6 +735,21 @@ namespace HRMSAPI.Implementation
                 return BuildFetchErrorResponse(ex.Message, HttpStatusCode.BadRequest);
             }
         }
+        // Tolerant numeric cell read that returns false (rather than 0) when the cell is empty or
+        // non-numeric, so callers can leave existing values untouched. Reads the native numeric
+        // value first (correct regardless of the cell's text form), then falls back to a string
+        // parse with NumberStyles.Any — which, unlike the default decimal.TryParse, allows the
+        // scientific-notation Excel emits for values like 0.07 ("7.0000000000000007E-2").
+        private static bool TryParseCell(IXLCell cell, out decimal value)
+        {
+            value = 0m;
+            if (cell == null || cell.IsEmpty()) return false;
+            try { if (cell.TryGetValue<decimal>(out var d)) { value = d; return true; } } catch { /* fall through */ }
+            var s = cell.GetValue<string>()?.Trim();
+            if (string.IsNullOrEmpty(s)) return false;
+            return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
+        }
+
         public async Task<FetchAndResponse> UploadLeaveOpeningBalTableAsync(IFormFile file)
         {
             try
@@ -774,19 +789,27 @@ namespace HRMSAPI.Implementation
                         return BuildFetchErrorResponse($"Duplicate (E_CODE, MONTH) '{ecode}, {month}' found in Excel.", HttpStatusCode.BadRequest);
                 }
 
-                var keyStrings = rows
-    .Select(r => $"{r.Cell(1).GetValue<string>()?.Trim().ToLower()}|{r.Cell(2).GetValue<string>()?.Trim().ToLower()}")
-    .ToList();
+                // Load existing rows by the DISTINCT MONTH(s) in the file (usually 1), NOT by a
+                // per-row composite key. The old approach built one (E_CODE|MONTH) key per row and
+                // used .Contains() over that list — with a large file (10k+ rows) this blows past
+                // SQL Server's 2100-parameter limit, the query throws, and the whole upload aborts
+                // (no inserts, no updates). Filtering by the handful of months keeps the query tiny
+                // and correct, then we match on (E_CODE, MONTH) in memory.
+                var fileMonths = rows
+                    .Select(r => r.Cell(2).GetValue<string>()?.Trim().ToLower())
+                    .Where(m => !string.IsNullOrEmpty(m))
+                    .Distinct()
+                    .ToList();
 
                 var existing = await _context.LeaveOpeningBalTables
-                    .Where(x => keyStrings.Contains(x.E_CODE.ToLower() + "|" + x.MONTH.ToLower()))
+                    .Where(x => fileMonths.Contains(x.MONTH.ToLower()))
                     .ToListAsync();
 
-
-                // Build dictionary with (E_CODE, MONTH) as key
-                var existingDict = existing.ToDictionary(
-                    x => (x.E_CODE.ToLower(), x.MONTH.ToLower())
-                );
+                // Build dictionary with (E_CODE, MONTH) as key. Guard against any duplicate
+                // (E_CODE, MONTH) already present in the table so ToDictionary can't throw.
+                var existingDict = existing
+                    .GroupBy(x => (x.E_CODE.Trim().ToLower(), x.MONTH.Trim().ToLower()))
+                    .ToDictionary(g => g.Key, g => g.First());
 
                 var newRows = new List<LeaveOpeningBalTable>();
                 var updatedRows = new List<LeaveOpeningBalTable>();
@@ -798,11 +821,16 @@ namespace HRMSAPI.Implementation
                     var month = row.Cell(2).GetValue<string>()?.Trim();
                     if (string.IsNullOrEmpty(ecode) || string.IsNullOrEmpty(month)) continue;
 
-                    decimal elVal, clVal, compOffVal, slVal;
-                    bool hasEL = decimal.TryParse(row.Cell(3).GetValue<string>(), out elVal);
-                    bool hasCL = decimal.TryParse(row.Cell(4).GetValue<string>(), out clVal);
-                    bool hasCompOff = decimal.TryParse(row.Cell(5).GetValue<string>(), out compOffVal);
-                    bool hasSL = decimal.TryParse(row.Cell(6).GetValue<string>(), out slVal);
+                    // NOTE: Excel often stores numbers as floating point whose text form is
+                    // scientific notation, e.g. 0.07 -> "7.0000000000000007E-2". Plain
+                    // decimal.TryParse (NumberStyles.Number) REJECTS the exponent, so the value
+                    // was silently dropped (hasCL=false) and the balance kept its old figure
+                    // (e.g. 0.07 shown as 0.10). Parse with NumberStyles.Float (allows exponent)
+                    // and InvariantCulture so these values are read correctly.
+                    bool hasEL = TryParseCell(row.Cell(3), out decimal elVal);
+                    bool hasCL = TryParseCell(row.Cell(4), out decimal clVal);
+                    bool hasCompOff = TryParseCell(row.Cell(5), out decimal compOffVal);
+                    bool hasSL = TryParseCell(row.Cell(6), out decimal slVal);
 
                     var key = (ecode.ToLower(), month.ToLower());
 
