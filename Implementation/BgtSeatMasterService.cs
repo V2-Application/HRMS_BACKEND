@@ -235,6 +235,9 @@ namespace HRMSAPI.Implementation
                     using var cmd = conn.CreateCommand();
                     cmd.CommandText = "dbo.sp_BGTSeatMaster_InsertOnly_FromXml";
                     cmd.CommandType = CommandType.StoredProcedure;
+                    // Bulk XML-shred insert of a full seat-master upload can exceed the 30s
+                    // default SqlCommand timeout on large files -> "Execution Timeout Expired".
+                    cmd.CommandTimeout = 600; // 10 minutes
 
                     cmd.Parameters.Add(new SqlParameter("@RowsXml", SqlDbType.Xml)
                     {

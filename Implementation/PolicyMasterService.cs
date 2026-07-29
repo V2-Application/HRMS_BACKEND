@@ -311,7 +311,7 @@ SELECT @@ROWCOUNT;";
         // ============================ Single-row UPDATE (from UI) ============================
         public async Task<ExecuteAndReponse> UpdatePtaxAsync(PtaxUpdateDto dto)
         {
-            if (dto == null || dto.Id <= 0)
+            if (dto == null || dto.Id == null || dto.Id <= 0)
                 return BuildExecuteErrorResponse("Valid row Id is required.", HttpStatusCode.BadRequest);
             if (string.IsNullOrWhiteSpace(dto.State))
                 return BuildExecuteErrorResponse("State is required.", HttpStatusCode.BadRequest);
@@ -350,7 +350,7 @@ SELECT @@ROWCOUNT;";
 
         public async Task<ExecuteAndReponse> UpdateLwfAsync(LwfUpdateDto dto)
         {
-            if (dto == null || dto.Id <= 0)
+            if (dto == null || dto.Id == null || dto.Id <= 0)
                 return BuildExecuteErrorResponse("Valid row Id is required.", HttpStatusCode.BadRequest);
             if (string.IsNullOrWhiteSpace(dto.State))
                 return BuildExecuteErrorResponse("State is required.", HttpStatusCode.BadRequest);

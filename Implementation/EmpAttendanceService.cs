@@ -362,6 +362,56 @@ namespace HRMSAPI.Implementation
 
 
         #region Attendance Request
+        // Regularize gate: an employee may raise a regularization if their role has the RBAC
+        // Regularize action (107), OR an admin has opened a Regularize Access window for their
+        // ecode / store / globally on the request date. Admin/HR roles always allowed.
+        // FAIL-OPEN: any lookup error (e.g. the window table is absent on prod) returns true so
+        // the pre-existing ungated behaviour is preserved. DEV feature.
+        private async Task<bool> IsRegularizeAllowedAsync(long employeeId, DateTime requestDate, string? role)
+        {
+            try
+            {
+                var rl = (role ?? string.Empty).Trim().ToLowerInvariant();
+                if (rl == "master" || rl == "superadmin" || rl == "it superadmin"
+                    || rl == "regularize hr" || rl == "regularizehr" || rl == "regularize-hr")
+                    return true;
+
+                await using var conn = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+                await conn.OpenAsync();
+
+                // 1) Does the employee's role still have the Regularize action checked?
+                await using (var c = conn.CreateCommand())
+                {
+                    c.CommandTimeout = 30;
+                    c.CommandText = @"
+SELECT COUNT(*) FROM dbo.tblEmployeeRole er
+JOIN dbo.RBACNode n ON n.RoleId = er.RoleId AND n.NodeType = 'Action' AND n.RefId = 107 AND n.IsChecked = 1
+WHERE er.EmployeeId = @e;";
+                    c.Parameters.AddWithValue("@e", employeeId);
+                    if (Convert.ToInt32(await c.ExecuteScalarAsync()) > 0) return true;
+                }
+
+                // 2) Otherwise require an open Regularize Access window on this date.
+                await using (var c = conn.CreateCommand())
+                {
+                    c.CommandTimeout = 30;
+                    c.CommandText = @"
+SELECT COUNT(*) FROM dbo.tblRegularizeAccessWindow w
+LEFT JOIN dbo.tblEmployee e ON e.EmployeeId = @e
+LEFT JOIN dbo.tblLocation l ON l.LocationId = e.LocationId
+WHERE w.IsActive = 1 AND CAST(w.AccessDate AS date) = CAST(@d AS date)
+  AND ( (w.Ecode = e.Ecode) OR (w.STCode = l.STCode) OR (w.Ecode IS NULL AND w.STCode IS NULL) );";
+                    c.Parameters.AddWithValue("@e", employeeId);
+                    c.Parameters.AddWithValue("@d", requestDate.Date);
+                    return Convert.ToInt32(await c.ExecuteScalarAsync()) > 0;
+                }
+            }
+            catch
+            {
+                return true; // fail-open — never block due to a lookup/schema issue
+            }
+        }
+
         public async Task<int> CreateAttendanceRequestAsync(AttendanceRegularizationRequestDto requestDto, JwtLoginDetailDto loginDetail, string? fileUrl)
 
         {
@@ -395,6 +445,11 @@ namespace HRMSAPI.Implementation
                     }
                 }
 
+
+                // Regularize access gate (see IsRegularizeAllowedAsync): blocks raising when the
+                // employee has neither the RBAC Regularize action nor an admin-opened window for the date.
+                if (!await IsRegularizeAllowedAsync(employeeId, requestDto.RequestDate, loginDetail?.role))
+                    throw new InvalidOperationException("Regularization is not open for you on this date. Please contact HR.");
 
                 var isAlreadyRequested = await _context.tblAttendanceRegularizationRequests
                      .FirstOrDefaultAsync(r => r.EmployeeId == employeeId
@@ -900,6 +955,43 @@ namespace HRMSAPI.Implementation
 
 
 
+        // Returns AttendanceRequestIds that an admin has explicitly opened for approval via a
+        // Regularize Access window (dbo.tblRegularizeAccessWindow, OpenApprovals=1) matching the
+        // employee's Ecode / store STCode on the request date. Additive to the normal cycle window.
+        // Env-guarded: the table is a dev-only feature; if it is absent this returns an empty list.
+        private async Task<List<long>> GetRegularizeWindowOpenRequestIdsAsync()
+        {
+            var ids = new List<long>();
+            try
+            {
+                await using var conn = new SqlConnection(_configuration.GetConnectionString("DefaultConnection"));
+                await conn.OpenAsync();
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandTimeout = 60;
+                cmd.CommandText = @"
+SELECT r.AttendanceRequestId
+FROM dbo.tblAttendanceRegularizationRequest r
+JOIN dbo.tblEmployee e ON e.EmployeeId = r.EmployeeId
+LEFT JOIN dbo.tblLocation l ON l.LocationId = e.LocationId
+WHERE EXISTS (
+    SELECT 1 FROM dbo.tblRegularizeAccessWindow w
+    WHERE w.IsActive = 1 AND w.OpenApprovals = 1
+      AND CAST(w.AccessDate AS date) = CAST(r.RequestDate AS date)
+      AND ( (w.Ecode  IS NOT NULL AND w.Ecode  = e.Ecode)
+         OR (w.STCode IS NOT NULL AND w.STCode = l.STCode)
+         OR (w.Ecode  IS NULL AND w.STCode IS NULL) )
+);";
+                await using var rdr = await cmd.ExecuteReaderAsync();
+                while (await rdr.ReadAsync())
+                    ids.Add(Convert.ToInt64(rdr.GetValue(0)));
+            }
+            catch
+            {
+                // Table not present on this environment (e.g. prod) — feature simply inactive.
+            }
+            return ids;
+        }
+
         public async Task<PagedResult<AttendanceRegularizationRequestDto>> GetRegularizationRequestsAsync(
        long managerId,
        string role,
@@ -1006,7 +1098,16 @@ namespace HRMSAPI.Implementation
                     }
 
                     var cycleToExclusive = today.AddDays(1); // today inclusive
-                    query = query.Where(x => x.request.RequestDate >= cycleFrom && x.request.RequestDate < cycleToExclusive);
+
+                    // ADDITIVE: also surface requests that an admin has opened for approval via a
+                    // Regularize Access window (tblRegularizeAccessWindow, OpenApprovals=1) for the
+                    // employee's Ecode / store STCode on the request date — even if outside the cycle.
+                    // Env-guarded: if the (dev-only) table is absent this silently no-ops.
+                    var windowedIds = await GetRegularizeWindowOpenRequestIdsAsync();
+
+                    query = query.Where(x =>
+                        (x.request.RequestDate >= cycleFrom && x.request.RequestDate < cycleToExclusive)
+                        || windowedIds.Contains(x.request.AttendanceRequestId));
                 }
 
                 // === Role-based filtering ===
