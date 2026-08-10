@@ -1,0 +1,24 @@
+{
+  "name": "Create New EcodeWise Bonus Provisioning Policy Mapping",
+  "description": "Test case for creating a new EcodeWise Bonus Provisioning Policy Mapping",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "ecode": "E-001",
+      "bonusProvisioningPolicyMaster": "550e8400-e29b-41d4-a716-446655440000"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Upserted successfully",
+    "code": 200
+  },
+  "notes": "This will create a new mapping if the Ecode doesn't exist with IsActive = 1 and IsDeleted = 0. CreatedBy will be set from JWT EmployeeId claim. The system will automatically generate a new GUID for the Id field."
+}
+

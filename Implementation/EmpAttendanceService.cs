@@ -4152,6 +4152,13 @@ WHERE EXISTS (
                     return reader.IsDBNull(i) ? 0 : reader.GetInt32(i);
                 }
 
+                // ProofPaths is a later addition to usp_GetGeoAttendanceByRange. Read it
+                // tolerantly so an environment still running the older proc exports fine
+                // (blank proof column) instead of failing outright on GetOrdinal.
+                var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < reader.FieldCount; i++) cols.Add(reader.GetName(i));
+                string? GetStrOpt(string col) => cols.Contains(col) ? GetStr(col) : null;
+
                 while (await reader.ReadAsync(ct))
                 {
                     rows.Add(new GeoAttendanceExportDto
@@ -4159,6 +4166,9 @@ WHERE EXISTS (
                         Ecode = GetStr("Ecode"),
                         EmployeeName = GetStr("EmployeeName"),
                         DepartmentName = GetStr("DepartmentName"),
+                        SubDepartment1 = GetStrOpt("SubDepartment1"),
+                        SubDepartment2 = GetStrOpt("SubDepartment2"),
+                        SubDepartment3 = GetStrOpt("SubDepartment3"),
                         DesignationName = GetStr("DesignationName"),
                         LocationName = GetStr("LocationName"),
                         STCode = GetStr("STCode"),
@@ -4179,16 +4189,77 @@ WHERE EXISTS (
                         MasterApprovalOn = GetDt("MasterApprovalOn"),
                         MasterRemarks = GetStr("MasterRemarks"),
                         FinalStatus = GetStr("FinalStatus"),
+                        ProofPaths = GetStrOpt("ProofPaths"),
                     });
                 }
             }
 
+            // Proof files are static content under the API's own wwwroot, so links are
+            // built off the request host -- the same assumption the on-screen Geofence
+            // "Proof" column makes (it uses the axios baseURL). Set
+            // Reports:AttendanceProofBaseUrl to override when the files are served from
+            // a different host than the one handling this export.
+            var configuredProofBase = _configuration?["Reports:AttendanceProofBaseUrl"];
+            string proofBaseUrl;
+            if (!string.IsNullOrWhiteSpace(configuredProofBase))
+            {
+                proofBaseUrl = configuredProofBase;
+            }
+            else
+            {
+                var request = _httpContextAccessor.HttpContext?.Request;
+                proofBaseUrl = request != null ? $"{request.Scheme}://{request.Host}/" : string.Empty;
+            }
+            proofBaseUrl = proofBaseUrl.TrimEnd('/');
+
+            // 'GeoLocationAttendanceProof/2026/Jul/29/1234/selfie_290720261530123.jpg'
+            //   -> 'https://host/GeoLocationAttendanceProof/2026/Jul/29/1234/selfie_...jpg'
+            List<string> BuildProofUrls(string? pipeSeparated)
+            {
+                var urls = new List<string>();
+                if (string.IsNullOrWhiteSpace(pipeSeparated)) return urls;
+
+                foreach (var raw in pipeSeparated.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var path = raw.Trim();
+                    if (path.Length == 0) continue;
+
+                    string url;
+                    if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                        || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        url = path;
+                    }
+                    else
+                    {
+                        var normalized = path.Replace('\\', '/').TrimStart('/');
+                        var encoded = string.Join("/",
+                            normalized.Split('/').Select(Uri.EscapeDataString));
+                        url = string.IsNullOrEmpty(proofBaseUrl) ? normalized : $"{proofBaseUrl}/{encoded}";
+                    }
+
+                    if (!urls.Contains(url)) urls.Add(url);
+                }
+                return urls;
+            }
+
+            // Excel allows only one hyperlink per cell, so a punch day with several
+            // proofs gets one column per file -- every URL stays clickable. Width is
+            // driven by the widest row in this result set (observed max 5), capped so a
+            // freak row cannot blow the sheet out sideways.
+            const int ProofColumnCap = 10;
+            var proofUrlsByRow = rows.Select(r => BuildProofUrls(r.ProofPaths)).ToList();
+            var widestRow = proofUrlsByRow.Count > 0 ? proofUrlsByRow.Max(u => u.Count) : 0;
+            var proofColumnCount = Math.Clamp(widestRow, 1, ProofColumnCap);
+
             using var workbook = new XLWorkbook();
             var ws = workbook.Worksheets.Add("GeoAttendance");
 
-            var headers = new[]
+            var headers = new List<string>
             {
-                "Ecode", "Employee Name", "Department", "Designation", "Location", "ST Code",
+                "Ecode", "Employee Name",
+                "Department", "Sub Department 1", "Sub Department 2", "Sub Department 3",
+                "Designation", "Location", "ST Code",
                 "RM Ecode", "Reporting Manager",
                 "Punch Date", "Punch Count", "Punch In Count", "Punch Out Count",
                 "First Punch (UTC)", "Last Punch (UTC)",
@@ -4196,8 +4267,15 @@ WHERE EXISTS (
                 "Master Status", "Master Approver", "Master Approved On", "Master Remarks",
                 "Final Status"
             };
+            // Derived, not hardcoded: the proof block always starts one past the last
+            // data column, so inserting a column above cannot desync the two.
+            var firstProofColumn = headers.Count + 1;
+            for (int p = 0; p < proofColumnCount; p++)
+            {
+                headers.Add(proofColumnCount == 1 ? "Proof File URL" : $"Proof File URL {p + 1}");
+            }
 
-            for (int i = 0; i < headers.Length; i++)
+            for (int i = 0; i < headers.Count; i++)
             {
                 ws.Cell(1, i + 1).Value = headers[i];
                 ws.Cell(1, i + 1).Style.Font.Bold = true;
@@ -4208,32 +4286,71 @@ WHERE EXISTS (
             {
                 var r = rows[i];
                 var row = i + 2;
-                ws.Cell(row, 1).Value = r.Ecode ?? "";
-                ws.Cell(row, 2).Value = r.EmployeeName ?? "";
-                ws.Cell(row, 3).Value = r.DepartmentName ?? "";
-                ws.Cell(row, 4).Value = r.DesignationName ?? "";
-                ws.Cell(row, 5).Value = r.LocationName ?? "";
-                ws.Cell(row, 6).Value = r.STCode ?? "";
-                ws.Cell(row, 7).Value = r.ReportingManagerEcode ?? "";
-                ws.Cell(row, 8).Value = r.ReportingManagerName ?? "";
-                ws.Cell(row, 9).Value = r.PunchDate != DateTime.MinValue ? r.PunchDate.ToString("yyyy-MM-dd") : "";
-                ws.Cell(row, 10).Value = r.PunchCount;
-                ws.Cell(row, 11).Value = r.PunchInCount;
-                ws.Cell(row, 12).Value = r.PunchOutCount;
-                ws.Cell(row, 13).Value = r.FirstPunchUtc.HasValue ? r.FirstPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
-                ws.Cell(row, 14).Value = r.LastPunchUtc.HasValue ? r.LastPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
-                ws.Cell(row, 15).Value = r.ManagerStatus ?? "";
-                ws.Cell(row, 16).Value = r.ManagerApproverId ?? "";
-                ws.Cell(row, 17).Value = r.ManagerApprovalOn.HasValue ? r.ManagerApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
-                ws.Cell(row, 18).Value = r.ManagerRemarks ?? "";
-                ws.Cell(row, 19).Value = r.MasterStatus ?? "";
-                ws.Cell(row, 20).Value = r.MasterApproverId ?? "";
-                ws.Cell(row, 21).Value = r.MasterApprovalOn.HasValue ? r.MasterApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
-                ws.Cell(row, 22).Value = r.MasterRemarks ?? "";
-                ws.Cell(row, 23).Value = r.FinalStatus ?? "";
+
+                // Written in header order via a running counter so the two lists cannot
+                // drift apart when a column is added.
+                var c = 1;
+                ws.Cell(row, c++).Value = r.Ecode ?? "";
+                ws.Cell(row, c++).Value = r.EmployeeName ?? "";
+                ws.Cell(row, c++).Value = r.DepartmentName ?? "";
+                ws.Cell(row, c++).Value = r.SubDepartment1 ?? "";
+                ws.Cell(row, c++).Value = r.SubDepartment2 ?? "";
+                ws.Cell(row, c++).Value = r.SubDepartment3 ?? "";
+                ws.Cell(row, c++).Value = r.DesignationName ?? "";
+                ws.Cell(row, c++).Value = r.LocationName ?? "";
+                ws.Cell(row, c++).Value = r.STCode ?? "";
+                ws.Cell(row, c++).Value = r.ReportingManagerEcode ?? "";
+                ws.Cell(row, c++).Value = r.ReportingManagerName ?? "";
+                ws.Cell(row, c++).Value = r.PunchDate != DateTime.MinValue ? r.PunchDate.ToString("yyyy-MM-dd") : "";
+                ws.Cell(row, c++).Value = r.PunchCount;
+                ws.Cell(row, c++).Value = r.PunchInCount;
+                ws.Cell(row, c++).Value = r.PunchOutCount;
+                ws.Cell(row, c++).Value = r.FirstPunchUtc.HasValue ? r.FirstPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, c++).Value = r.LastPunchUtc.HasValue ? r.LastPunchUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, c++).Value = r.ManagerStatus ?? "";
+                ws.Cell(row, c++).Value = r.ManagerApproverId ?? "";
+                ws.Cell(row, c++).Value = r.ManagerApprovalOn.HasValue ? r.ManagerApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, c++).Value = r.ManagerRemarks ?? "";
+                ws.Cell(row, c++).Value = r.MasterStatus ?? "";
+                ws.Cell(row, c++).Value = r.MasterApproverId ?? "";
+                ws.Cell(row, c++).Value = r.MasterApprovalOn.HasValue ? r.MasterApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                ws.Cell(row, c++).Value = r.MasterRemarks ?? "";
+                ws.Cell(row, c++).Value = r.FinalStatus ?? "";
+
+                var proofUrls = proofUrlsByRow[i];
+                for (int p = 0; p < proofColumnCount; p++)
+                {
+                    var proofCell = ws.Cell(row, firstProofColumn + p);
+                    if (p >= proofUrls.Count)
+                    {
+                        proofCell.Value = "";
+                        continue;
+                    }
+
+                    // Only reachable if a row exceeds ProofColumnCap: the last column
+                    // absorbs the overflow so no proof is silently dropped.
+                    var isLastColumn = p == proofColumnCount - 1;
+                    var overflow = isLastColumn && proofUrls.Count > proofColumnCount;
+
+                    proofCell.Value = overflow
+                        ? string.Join(Environment.NewLine, proofUrls.Skip(p))
+                        : proofUrls[p];
+                    if (overflow) proofCell.Style.Alignment.WrapText = true;
+
+                    proofCell.SetHyperlink(new XLHyperlink(proofUrls[p]));
+                    proofCell.Style.Font.FontColor = XLColor.Blue;
+                    proofCell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                }
             }
 
             ws.ColumnsUsed().AdjustToContents();
+            // AdjustToContents on a full proof URL makes the sheet unusably wide -- cap
+            // the proof columns so the leading data columns stay on screen.
+            for (int p = 0; p < proofColumnCount; p++)
+            {
+                var col = ws.Column(firstProofColumn + p);
+                col.Width = Math.Min(col.Width, 60);
+            }
 
             using var stream = new MemoryStream();
             workbook.SaveAs(stream);

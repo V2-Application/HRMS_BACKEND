@@ -43,6 +43,16 @@ namespace HRMSAPI.Controllers
             return c;
         }
 
+        // Uploaded docs are stored as paths relative to wwwroot (served via app.UseStaticFiles()).
+        // Prepend the same base URL already used for resume/proof links elsewhere (Reports:ResumeBaseUrl)
+        // so the portal gets a fully-qualified, clickable link instead of a bare relative path.
+        private string? ToAbsoluteUrl(string? relativePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativePath)) return null;
+            var baseUrl = _config["Reports:ResumeBaseUrl"] ?? "";
+            return baseUrl.TrimEnd('/') + "/" + relativePath.TrimStart('/');
+        }
+
         // Files coming from the multipart form. All optional.
         public class RegistrationFiles
         {
@@ -202,6 +212,12 @@ ORDER BY Id DESC;";
                 var row = new Dictionary<string, object?>();
                 for (int i = 0; i < r.FieldCount; i++)
                     row[r.GetName(i)] = r.IsDBNull(i) ? null : r.GetValue(i);
+
+                row["PhotoPath"] = ToAbsoluteUrl(row["PhotoPath"] as string);
+                row["ResumePath"] = ToAbsoluteUrl(row["ResumePath"] as string);
+                row["AadhaarPath"] = ToAbsoluteUrl(row["AadhaarPath"] as string);
+                row["MarksheetPath"] = ToAbsoluteUrl(row["MarksheetPath"] as string);
+
                 rows.Add(row);
             }
             return Ok(new { status = true, data = rows });
@@ -275,10 +291,21 @@ ORDER BY Id DESC;";
                     ws.Cell(row, 14).Value = Str("PassingYear");
                     ws.Cell(row, 15).Value = Str("PreferredLearningMode");
                     ws.Cell(row, 16).Value = (r["AgreedToTerms"] is DBNull) ? "" : (Convert.ToBoolean(r["AgreedToTerms"]) ? "Yes" : "No");
-                    ws.Cell(row, 17).Value = string.IsNullOrWhiteSpace(Str("PhotoPath")) ? "" : "Yes";
-                    ws.Cell(row, 18).Value = string.IsNullOrWhiteSpace(Str("ResumePath")) ? "" : "Yes";
-                    ws.Cell(row, 19).Value = string.IsNullOrWhiteSpace(Str("AadhaarPath")) ? "" : "Yes";
-                    ws.Cell(row, 20).Value = string.IsNullOrWhiteSpace(Str("MarksheetPath")) ? "" : "Yes";
+
+                    void SetDocLink(int col, string pathCol)
+                    {
+                        var url = ToAbsoluteUrl(Str(pathCol));
+                        var cell = ws.Cell(row, col);
+                        if (string.IsNullOrWhiteSpace(url)) { cell.Value = ""; return; }
+                        cell.Value = "Open";
+                        cell.SetHyperlink(new XLHyperlink(url));
+                        cell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                        cell.Style.Font.FontColor = XLColor.Blue;
+                    }
+                    SetDocLink(17, "PhotoPath");
+                    SetDocLink(18, "ResumePath");
+                    SetDocLink(19, "AadhaarPath");
+                    SetDocLink(20, "MarksheetPath");
                     // Form filled: date in dd-MMM-yy + separate time column
                     ws.Cell(row, 21).Value = created.HasValue ? created.Value.ToString("dd-MMM-yy", CultureInfo.InvariantCulture) : "";
                     ws.Cell(row, 22).Value = created.HasValue ? created.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture) : "";

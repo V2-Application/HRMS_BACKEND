@@ -59,6 +59,12 @@ BEGIN
     WHERE e.IsActive = 0                              -- separated (from Employee Master)
       AND lp.LastPunchDt IS NULL                      -- last punch date missing (the gap)
       AND NOT EXISTS (SELECT 1 FROM dbo.tblLocation lx WITH (NOLOCK) WHERE lx.STCode = e.ECode)
+      AND NOT EXISTS (                                -- exclude F&F Completed (Pending/Processing stay)
+            SELECT 1 FROM dbo.FNF_Header h WITH (NOLOCK)
+            JOIN dbo.FNF_Payment pmt WITH (NOLOCK) ON pmt.FNFId = h.FNFId
+            WHERE h.EmployeeId = e.EmployeeId
+              AND (pmt.Status IN ('Paid','FNF DONE') OR pmt.AmountPaid > 0)
+          )
     ORDER BY [SEPERATION DATE] DESC, l.STCode, e.ECode;
 
     SET NOCOUNT OFF;

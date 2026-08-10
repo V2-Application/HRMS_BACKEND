@@ -47,6 +47,12 @@ BEGIN
     LEFT JOIN sep sp ON sp.EmployeeId = e.EmployeeId AND sp.rn = 1
     LEFT JOIN dbo.tblResignationType trt WITH (NOLOCK) ON trt.ResignationTypeId = sp.ResignationTypeId
     WHERE e.IsActive = 0                              -- separated (from the master)
+      AND NOT EXISTS (                                -- exclude F&F Completed (Pending/Processing stay)
+            SELECT 1 FROM dbo.FNF_Header h WITH (NOLOCK)
+            JOIN dbo.FNF_Payment pmt WITH (NOLOCK) ON pmt.FNFId = h.FNFId
+            WHERE h.EmployeeId = e.EmployeeId
+              AND (pmt.Status IN ('Paid','FNF DONE') OR pmt.AmountPaid > 0)
+          )
       -- RESIGNATION MISSING: no non-revoked separation that carries a resignation date
       AND NOT EXISTS (
             SELECT 1 FROM dbo.tblEmployeeSepration s2 WITH (NOLOCK)

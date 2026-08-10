@@ -39,6 +39,27 @@ BEGIN
         FROM dbo.AttendanceRecord ar
         WHERE CONVERT(DATE, ar.PunchTimeUtc) BETWEEN @StartDate AND @EndDate
         GROUP BY ar.EmployeeId, CONVERT(DATE, ar.PunchTimeUtc)
+    ),
+    -- A punch day can carry several proof files (one per punch). DISTINCT first
+    -- so a re-used path is not repeated, then collapse to one pipe-separated
+    -- cell -- the API splits it back out and turns each into an absolute URL.
+    ProofAgg AS
+    (
+        SELECT
+            p.EmployeeId,
+            p.PunchDate,
+            STRING_AGG(CAST(p.ProofPath AS NVARCHAR(MAX)), N' | ') AS ProofPaths
+        FROM
+        (
+            SELECT DISTINCT
+                ar.EmployeeId,
+                CONVERT(DATE, ar.PunchTimeUtc)  AS PunchDate,
+                LTRIM(RTRIM(ar.ProofPath))      AS ProofPath
+            FROM dbo.AttendanceRecord ar
+            WHERE CONVERT(DATE, ar.PunchTimeUtc) BETWEEN @StartDate AND @EndDate
+              AND NULLIF(LTRIM(RTRIM(ar.ProofPath)), N'') IS NOT NULL
+        ) p
+        GROUP BY p.EmployeeId, p.PunchDate
     )
     SELECT
         e.Ecode,
@@ -48,6 +69,9 @@ BEGIN
                  )), N''),
                  N'Unknown') AS EmployeeName,
         d.DepartmentName,
+        sd1.SubDepartmentName AS SubDepartment1,
+        sd2.SubDepartmentName AS SubDepartment2,
+        sd3.SubDepartmentName AS SubDepartment3,
         des.DesignationName,
         loc.LocationName,
         loc.STCode,
@@ -74,15 +98,23 @@ BEGIN
         ga.MasterApproverId,
         ga.MasterApprovalOn,
         ga.MasterRemarks,
-        ISNULL(sf.StatusName,  'Pending') AS FinalStatus
+        ISNULL(sf.StatusName,  'Pending') AS FinalStatus,
+        pr.ProofPaths
     FROM PunchAgg pa
     INNER JOIN dbo.tblEmployee e        ON e.EmployeeId = pa.EmployeeId
+    LEFT JOIN ProofAgg pr
+        ON pr.EmployeeId = pa.EmployeeId AND pr.PunchDate = pa.PunchDate
     LEFT JOIN dbo.GeoAttendanceApproval ga
         ON ga.EmployeeId = pa.EmployeeId AND ga.PunchDate = pa.PunchDate
     LEFT JOIN dbo.tblStatus sm          ON sm.StatusId = ga.ManagerApprovalStatusId
     LEFT JOIN dbo.tblStatus sms         ON sms.StatusId = ga.MasterApprovalStatusId
     LEFT JOIN dbo.tblStatus sf          ON sf.StatusId = ga.FinalStatusId
     LEFT JOIN dbo.tblDepartment d       ON d.DepartmentId = e.DepartmentId
+    -- Sub-department chain off the EMPLOYEE record (tblEmployee.SubDepartmentId1/2/3);
+    -- any level may be null, hence three independent LEFT JOINs.
+    LEFT JOIN dbo.tblSubDepartment sd1   ON sd1.SubDepartmentId = e.SubDepartmentId1
+    LEFT JOIN dbo.tblSubDepartment sd2   ON sd2.SubDepartmentId = e.SubDepartmentId2
+    LEFT JOIN dbo.tblSubDepartment sd3   ON sd3.SubDepartmentId = e.SubDepartmentId3
     LEFT JOIN dbo.tblDesignation des    ON des.DesignationId = e.DesignationId
     LEFT JOIN dbo.tblLocation loc       ON loc.LocationId = e.LocationId
     LEFT JOIN dbo.tblEmployee rh        ON rh.Ecode = e.ReportheadEcode

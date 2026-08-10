@@ -1,0 +1,21 @@
+{
+  "name": "Upsert with Null Body (Validation Error)",
+  "description": "Test case for validation error when request body is null",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": null
+  },
+  "expectedResponse": {
+    "status": false,
+    "message": "EcodeWiseBonusProvisioningPolicyMapping data is required",
+    "code": 400
+  },
+  "notes": "This test case validates that the API returns an error when the request body is null."
+}
+

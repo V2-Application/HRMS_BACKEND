@@ -1,0 +1,252 @@
+{
+  "info": {
+    "name": "EcodeWise Bonus Provisioning Policy Mapping API",
+    "description": "Test collection for EcodeWise Bonus Provisioning Policy Mapping APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5151",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "your_jwt_token_here",
+      "type": "string"
+    },
+    {
+      "key": "ecode",
+      "value": "E-001",
+      "type": "string"
+    },
+    {
+      "key": "mappingId",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "string"
+    },
+    {
+      "key": "bonusPolicyId",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "GET - Get All Active Mappings",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping"]
+        },
+        "description": "Retrieves all active mappings (IsActive = 1 and IsDeleted = 0) with employee full names"
+      }
+    },
+    {
+      "name": "POST - Create New Mapping",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ecode\": \"{{ecode}}\",\n  \"bonusProvisioningPolicyMaster\": \"{{bonusPolicyId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "upsert"]
+        },
+        "description": "Creates a new mapping if Ecode doesn't exist with IsActive = 1 and IsDeleted = 0"
+      }
+    },
+    {
+      "name": "POST - Update Existing Mapping",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ecode\": \"{{ecode}}\",\n  \"bonusProvisioningPolicyMaster\": \"660e8400-e29b-41d4-a716-446655440000\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "upsert"]
+        },
+        "description": "Updates existing mapping if Ecode exists with IsActive = 1 and IsDeleted = 0"
+      }
+    },
+    {
+      "name": "POST - Upsert with Missing Ecode (Validation Error)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ecode\": \"\",\n  \"bonusProvisioningPolicyMaster\": \"{{bonusPolicyId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "upsert"]
+        },
+        "description": "Test case for validation error when Ecode is missing"
+      }
+    },
+    {
+      "name": "POST - Upsert without Authentication (Unauthorized)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ecode\": \"{{ecode}}\",\n  \"bonusProvisioningPolicyMaster\": \"{{bonusPolicyId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "upsert"]
+        },
+        "description": "Test case for unauthorized access when JWT token is missing"
+      }
+    },
+    {
+      "name": "POST - Delete Existing Mapping",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{mappingId}}\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "delete"]
+        },
+        "description": "Soft deletes a mapping by setting IsActive = 0 and IsDeleted = 1"
+      }
+    },
+    {
+      "name": "POST - Delete with Invalid ID (Validation Error)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "delete"]
+        },
+        "description": "Test case for validation error when ID is empty GUID"
+      }
+    },
+    {
+      "name": "POST - Delete Non-existent Mapping (Not Found)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"99999999-9999-9999-9999-999999999999\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "EcodeWiseBonusProvisioningPolicyMapping", "delete"]
+        },
+        "description": "Test case for error when trying to delete a mapping that doesn't exist"
+      }
+    }
+  ]
+}
+

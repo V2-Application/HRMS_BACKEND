@@ -5,6 +5,9 @@ namespace HRMSAPI.DTO
         public string? Ecode { get; set; }
         public string? EmployeeName { get; set; }
         public string? DepartmentName { get; set; }
+        public string? SubDepartment1 { get; set; }
+        public string? SubDepartment2 { get; set; }
+        public string? SubDepartment3 { get; set; }
         public string? DesignationName { get; set; }
         public string? LocationName { get; set; }
         public string? STCode { get; set; }
@@ -25,5 +28,11 @@ namespace HRMSAPI.DTO
         public DateTime? MasterApprovalOn { get; set; }
         public string? MasterRemarks { get; set; }
         public string? FinalStatus { get; set; }
+
+        /// <summary>
+        /// wwwroot-relative proof paths for the punch day, pipe-separated (' | ').
+        /// Null when no punch that day carried a proof file.
+        /// </summary>
+        public string? ProofPaths { get; set; }
     }
 }

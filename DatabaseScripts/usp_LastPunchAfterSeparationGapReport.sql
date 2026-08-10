@@ -59,6 +59,12 @@ BEGIN
     LEFT JOIN dbo.tblSubDepartment sd2 WITH (NOLOCK) ON sd2.SubDepartmentId = e.SubDepartmentId2
     LEFT JOIN dbo.tblSubDepartment sd3 WITH (NOLOCK) ON sd3.SubDepartmentId = e.SubDepartmentId3
     WHERE e.IsActive = 0                              -- separated (from Employee Master)
+      AND NOT EXISTS (                                -- exclude F&F Completed (Pending/Processing stay)
+            SELECT 1 FROM dbo.FNF_Header h WITH (NOLOCK)
+            JOIN dbo.FNF_Payment pmt WITH (NOLOCK) ON pmt.FNFId = h.FNFId
+            WHERE h.EmployeeId = e.EmployeeId
+              AND (pmt.Status IN ('Paid','FNF DONE') OR pmt.AmountPaid > 0)
+          )
       AND lp.LastPunchDt IS NOT NULL
       AND sep.SeparationDate IS NOT NULL
       AND lp.LastPunchDt > CAST(sep.SeparationDate AS date)   -- last punch AFTER separation (the gap)

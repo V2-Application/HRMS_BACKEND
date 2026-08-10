@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "moduleName": "Employee",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 10,
+        "subModuleName": "Profile & Settings",
+        "createdBy": "tester",
+        "actions": []
+      }
+    ]
+  }
+] 

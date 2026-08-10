@@ -1,0 +1,33 @@
+[
+  {
+    "id": 1,
+    "moduleName": "Employee",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 11,
+        "subModuleName": "Organization",
+        "createdBy": "tester",
+        "actions": [
+          {
+            "id": 101,
+            "actionName": "View Org Chart",
+            "createdBy": "tester",
+            "furtherParts": [
+              {
+                "id": 1001,
+                "actionFurtherPartName": "Tree View (renamed)",
+                "createdBy": "tester"
+              },
+              {
+                "id": 0,
+                "actionFurtherPartName": "Compact View",
+                "createdBy": "tester"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+] 

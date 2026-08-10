@@ -1,0 +1,23 @@
+{
+  "name": "Delete Non-existent Mapping (Not Found)",
+  "description": "Test case for error when trying to delete a mapping that doesn't exist",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "id": "99999999-9999-9999-9999-999999999999"
+    }
+  },
+  "expectedResponse": {
+    "status": false,
+    "message": "EcodeWiseBonusProvisioningPolicyMapping with ID 99999999-9999-9999-9999-999999999999 not found",
+    "code": 404
+  },
+  "notes": "This test case validates that the API returns a not found error when trying to delete a mapping that doesn't exist in the database."
+}
+

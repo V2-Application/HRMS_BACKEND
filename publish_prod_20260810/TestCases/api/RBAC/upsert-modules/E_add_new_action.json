@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "moduleName": "Employee",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 10,
+        "subModuleName": "Profile",
+        "createdBy": "tester",
+        "actions": [
+          {
+            "id": 0,
+            "actionName": "Export Profile",
+            "createdBy": "tester",
+            "furtherParts": []
+          }
+        ]
+      }
+    ]
+  }
+] 
