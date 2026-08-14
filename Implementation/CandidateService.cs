@@ -1214,6 +1214,50 @@ namespace HRMSAPI.Implementation
                 if (!apprDeptDesigOk)
                     return new Response { Status = false, StatusCode = HttpStatusCode.BadRequest, Message = apprDeptDesigErr };
 
+                // Budget freeze: re-check seat availability at approval time too (the seat
+                // situation may have changed since the candidate was first submitted).
+                // Excludes this candidate's own record so it doesn't count against itself.
+                int.TryParse(candidate.LOCATION, out var apprLocId);
+                if (apprLocId > 0 && apprDeptId > 0 && apprDesigId > 0)
+                {
+                    var apprSeatCheck = await CheckSeatAvailabilityAsync(
+                        apprLocId, apprDeptId, candidate.SubDepartmentId1, candidate.SubDepartmentId2, candidate.SubDepartmentId3,
+                        apprDesigId, candidate.GROSS_SALARY, candidate.Id);
+                    var apprSeatResult = apprSeatCheck.Data as SeatAvailabilityResultDTO;
+                    if (!apprSeatCheck.Status || apprSeatResult == null || !apprSeatResult.IsAvailable)
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.BadRequest,
+                            Message = apprSeatResult?.Message ?? "No budgeted seat available for the selected Location, Department, Sub-Department and Designation."
+                        };
+                    }
+                }
+
+                // Sub-Department 1 is mandatory at approval/ecode-generation time whenever the
+                // candidate's department actually has sub-departments defined — mirrors the
+                // candidate form's own requiredLevel1 rule as a server-side safety net.
+                if (candidate.SubDepartmentId1 == null && apprDeptId > 0)
+                {
+                    await using var subDeptConn = new SqlConnection(_context.Database.GetConnectionString());
+                    await subDeptConn.OpenAsync();
+                    await using var subDeptCmd = subDeptConn.CreateCommand();
+                    subDeptCmd.CommandText = "SELECT COUNT(1) FROM tblSubDepartment WHERE DepartmentId = @DepartmentId AND ISNULL(IsActive,1) = 1";
+                    subDeptCmd.Parameters.Add(new SqlParameter("@DepartmentId", apprDeptId));
+                    var subDeptCount = (int)await subDeptCmd.ExecuteScalarAsync();
+
+                    if (subDeptCount > 0)
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.BadRequest,
+                            Message = "Sub-Department 1 is mandatory for this Department. Please update the candidate with a Sub-Department 1 before approving."
+                        };
+                    }
+                }
+
                 const int approvedStatusId = 1; // Assuming StatusId 1 = "Approved"
 
                 int? hrApprovalStatusId = null;
@@ -1734,6 +1778,77 @@ namespace HRMSAPI.Implementation
                     return (false, $"Designation '{desg.DesignationName}' is inactive. Please select an active designation.");
             }
             return (true, null);
+        }
+
+        // "Freeze the budget": is there an unfilled BGT seat for this Store + Department +
+        // Sub-Department(1/2/3) + Designation? Backed by usp_CheckCandidateSeatAvailability
+        // (new, additive proc — counts active employees AND active/in-pipeline candidates
+        // against the budgeted seat count).
+        public async Task<Response> CheckSeatAvailabilityAsync(int locationId, int departmentId, int? subDepartmentId1, int? subDepartmentId2, int? subDepartmentId3, int designationId, decimal? salary, long? excludeCandidateId)
+        {
+            try
+            {
+                // Dedicated connection (not _context's shared one) — callers like UpdateData and
+                // CandidateInitiate already have an EF transaction open on the shared connection when
+                // they call this, and without MultipleActiveResultSets the raw ADO command below would
+                // collide with it and throw.
+                await using var conn = new SqlConnection(_context.Database.GetConnectionString());
+                await conn.OpenAsync();
+
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = "dbo.usp_CheckCandidateSeatAvailability";
+                cmd.CommandType = System.Data.CommandType.StoredProcedure;
+
+                cmd.Parameters.Add(new SqlParameter("@LocationId", locationId));
+                cmd.Parameters.Add(new SqlParameter("@DepartmentId", departmentId));
+                cmd.Parameters.Add(new SqlParameter("@SubDepartmentId1", System.Data.SqlDbType.Int) { Value = (object?)subDepartmentId1 ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@SubDepartmentId2", System.Data.SqlDbType.Int) { Value = (object?)subDepartmentId2 ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@SubDepartmentId3", System.Data.SqlDbType.Int) { Value = (object?)subDepartmentId3 ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@DesignationId", designationId));
+                cmd.Parameters.Add(new SqlParameter("@Salary", System.Data.SqlDbType.Decimal) { Value = (object?)salary ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@ExcludeCandidateId", System.Data.SqlDbType.BigInt) { Value = (object?)excludeCandidateId ?? DBNull.Value });
+
+                SeatAvailabilityResultDTO? result = null;
+                await using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        result = new SeatAvailabilityResultDTO
+                        {
+                            SeatBudget = reader.GetInt32(reader.GetOrdinal("SeatBudget")),
+                            FilledByEmployees = reader.GetInt32(reader.GetOrdinal("FilledByEmployees")),
+                            FilledByCandidates = reader.GetInt32(reader.GetOrdinal("FilledByCandidates")),
+                            Occupied = reader.GetInt32(reader.GetOrdinal("Occupied")),
+                            Vacancy = reader.GetInt32(reader.GetOrdinal("Vacancy")),
+                            MaxBudgetedSalary = reader.IsDBNull(reader.GetOrdinal("MaxBudgetedSalary")) ? null : reader.GetDecimal(reader.GetOrdinal("MaxBudgetedSalary")),
+                            IsAvailable = reader.GetBoolean(reader.GetOrdinal("IsAvailable")),
+                            LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString(reader.GetOrdinal("LocationName")),
+                            DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? null : reader.GetString(reader.GetOrdinal("DepartmentName")),
+                            SubDepartmentName1 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName1")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName1")),
+                            SubDepartmentName2 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName2")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName2")),
+                            SubDepartmentName3 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName3")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName3")),
+                            DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? null : reader.GetString(reader.GetOrdinal("DesignationName")),
+                            Message = reader.IsDBNull(reader.GetOrdinal("Message")) ? null : reader.GetString(reader.GetOrdinal("Message")),
+                        };
+                    }
+                }
+
+                return new Response
+                {
+                    Status = true,
+                    StatusCode = HttpStatusCode.OK,
+                    Data = result
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Response
+                {
+                    Status = false,
+                    StatusCode = HttpStatusCode.InternalServerError,
+                    Message = ex.Message
+                };
+            }
         }
 
         public async Task<Response> GetCandidateInfo(int candidateID)
@@ -2566,6 +2681,7 @@ namespace HRMSAPI.Implementation
             string searchTerm = "")
         {
             searchTerm = searchTerm?.Trim().ToLower();
+            var connStr = _context.Database.GetConnectionString();
             var connection = _context.Database.GetDbConnection();
 
             // Resume / offer-letter files are hosted on the production server only.
@@ -2597,6 +2713,18 @@ namespace HRMSAPI.Implementation
                 ? Convert.ToInt32(loginDetail.EmployeeId)
                 : (int?)null;
 
+            // The main list proc and the applicant-form enrichment query used to run serially
+            // on one connection (proc -> wait -> enrichment), which on a large/unfiltered export
+            // adds up to one very long request — the same shape that trips an upstream timeout
+            // (seen in prod as a "CORS error"/net::ERR_FAILED, since the connection gets killed
+            // before a response can be sent). The enrichment query previously filtered by the IDs
+            // returned from the main proc, which forced it to wait; it now pulls unconditionally
+            // (all candidates) instead, so it has no dependency on the main proc's result and both
+            // can run concurrently on separate connections. Same SQL, same final merged output —
+            // no stored procedure or data was changed.
+            await using var enrichConn = new SqlConnection(connStr);
+            await enrichConn.OpenAsync();
+
             await using var command = connection.CreateCommand();
             command.CommandText = "dbo.sp_GetApplicantListNew01";
             command.CommandType = CommandType.StoredProcedure;
@@ -2612,42 +2740,12 @@ namespace HRMSAPI.Implementation
             command.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.Int) { Value = (object?)roleId ?? DBNull.Value });
             command.Parameters.Add(new SqlParameter("@EmployeeId", SqlDbType.Int) { Value = (object?)employeeId ?? DBNull.Value });
 
-            using var reader = await command.ExecuteReaderAsync();
-
-            if (!await reader.ReadAsync())
-            {
-                using var emptyWb = new XLWorkbook();
-                var wsEmpty = emptyWb.Worksheets.Add("Applicants");
-                using var emptyStream = new MemoryStream();
-                emptyWb.SaveAs(emptyStream);
-                return emptyStream.ToArray();
-            }
-
-            await reader.NextResultAsync();
-
-            var dt = new DataTable();
-            dt.Load(reader);
-            reader.Close();
-
-            // ---- Enrich with the full applicant-form fields from the Candidate table ----
-            // The list SP returns only a subset; the export must show all applicant-form data
-            // (Department name, personal/contact/address, govt IDs, bank, previous employment,
-            // salary breakup, references, family, qualification). Read-only side query, matched by Id.
-            if (dt.Columns.Contains("ID") && dt.Rows.Count > 0)
-            {
-                var ids = dt.Rows.Cast<DataRow>()
-                    .Select(r => r["ID"]?.ToString())
-                    .Where(s => !string.IsNullOrWhiteSpace(s) && long.TryParse(s, out _))
-                    .Distinct()
-                    .ToList();
-
-                if (ids.Count > 0)
-                {
-                    await using var enrichCmd = connection.CreateCommand();
-                    // Only the fields captured on the applicant form (i.e. that actually hold data
-                    // for applicants). Onboarding-only fields (PAN/Bank/Gender/etc.) are excluded
-                    // because they are never populated at apply time.
-                    enrichCmd.CommandText = @"
+            await using var enrichCmd = enrichConn.CreateCommand();
+            enrichCmd.CommandTimeout = 120;
+            // Only the fields captured on the applicant form (i.e. that actually hold data
+            // for applicants). Onboarding-only fields (PAN/Bank/Gender/etc.) are excluded
+            // because they are never populated at apply time.
+            enrichCmd.CommandText = @"
 SELECT c.Id,
     dept.DepartmentName                         AS [Department],
     c.[MARITIAL STATUS]                         AS [Marital Status],
@@ -2670,25 +2768,54 @@ OUTER APPLY (
     SELECT TOP 1 e.[Name of Company], e.[Position Held], e.[From], e.[To], e.[Last CTC], e.[InHand], e.[Expected_CTC]
     FROM tblExperience e WHERE e.CID = c.Id AND ISNULL(e.IsDeleted,0)=0
     ORDER BY e.ID DESC
-) xp
-WHERE c.Id IN (" + string.Join(",", ids) + ")";
+) xp";
 
-                    var extra = new DataTable();
-                    using (var er = await enrichCmd.ExecuteReaderAsync()) extra.Load(er);
+            var mainReaderTask = command.ExecuteReaderAsync();
+            var extra = new DataTable();
+            var enrichTask = Task.Run(async () =>
+            {
+                using var er = await enrichCmd.ExecuteReaderAsync();
+                extra.Load(er);
+            });
 
-                    var extraMap = new Dictionary<string, DataRow>();
-                    foreach (DataRow ex in extra.Rows) extraMap[ex["Id"].ToString()] = ex;
+            using var reader = await mainReaderTask;
 
-                    foreach (DataColumn ec in extra.Columns)
+            if (!await reader.ReadAsync())
+            {
+                await enrichTask;
+                using var emptyWb = new XLWorkbook();
+                var wsEmpty = emptyWb.Worksheets.Add("Applicants");
+                using var emptyStream = new MemoryStream();
+                emptyWb.SaveAs(emptyStream);
+                return emptyStream.ToArray();
+            }
+
+            await reader.NextResultAsync();
+
+            var dt = new DataTable();
+            dt.Load(reader);
+            reader.Close();
+
+            await enrichTask;
+
+            // ---- Enrich with the full applicant-form fields from the Candidate table ----
+            // The list SP returns only a subset; the export must show all applicant-form data
+            // (Department name, personal/contact/address, govt IDs, bank, previous employment,
+            // salary breakup, references, family, qualification). Read-only side query, matched by Id.
+            if (dt.Columns.Contains("ID") && dt.Rows.Count > 0 && extra.Rows.Count > 0)
+            {
+                var extraMap = new Dictionary<string, DataRow>();
+                foreach (DataRow ex in extra.Rows) extraMap[ex["Id"].ToString()] = ex;
+
+                foreach (DataColumn ec in extra.Columns)
+                {
+                    if (string.Equals(ec.ColumnName, "Id", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!dt.Columns.Contains(ec.ColumnName)) dt.Columns.Add(ec.ColumnName, typeof(string));
+                    foreach (DataRow dr in dt.Rows)
                     {
-                        if (string.Equals(ec.ColumnName, "Id", StringComparison.OrdinalIgnoreCase)) continue;
-                        if (!dt.Columns.Contains(ec.ColumnName)) dt.Columns.Add(ec.ColumnName, typeof(string));
-                        foreach (DataRow dr in dt.Rows)
-                        {
-                            var key = dr["ID"]?.ToString();
-                            if (key != null && extraMap.TryGetValue(key, out var src) && src[ec.ColumnName] != DBNull.Value)
-                                dr[ec.ColumnName] = src[ec.ColumnName].ToString();
-                        }
+                        var key = dr["ID"]?.ToString();
+                        if (key != null && extraMap.TryGetValue(key, out var src) && src[ec.ColumnName] != DBNull.Value)
+                            dr[ec.ColumnName] = src[ec.ColumnName].ToString();
                     }
                 }
             }
@@ -3754,52 +3881,23 @@ WHERE c.Id IN (" + string.Join(",", ids) + ")";
 
                 if (isNewEntry)
                 {
+                    // Budget freeze: block hiring into a Store+Department+SubDepartment+Designation
+                    // combo with no unfilled BGT seat.
+                    int? subDept1 = int.TryParse(candidateUpdate.subDepartmentId1, out var _sd1) ? _sd1 : (int?)null;
+                    int? subDept2 = int.TryParse(candidateUpdate.subDepartmentId2, out var _sd2) ? _sd2 : (int?)null;
+                    int? subDept3 = int.TryParse(candidateUpdate.subDepartmentId3, out var _sd3) ? _sd3 : (int?)null;
 
-                    //if (location < 1 || department < 1 || designation < 1 || salary < Convert.ToDecimal(1.00)) {
-                    //    return new Response
-                    //    {
-                    //        Status = false,
-                    //        Message = "Either Location,Department or Designation mapping is not correct, or Salary is not particularly defined in candidate data..."
-                    //    };
-                    //}
-                    //                var isAllowed = await _context.Database
-                    //.SqlQueryRaw<bool>(
-                    //    "SELECT CAST(dbo.fn_IsVacancyShorter({0}, {1}, {2}, {3}) AS BIT) AS Value",
-                    //    location, department, designation, salary)
-                    //.FirstOrDefaultAsync();
-
-                    //                if (!isAllowed)
-                    //                {
-                    //                    return new Response
-                    //                    {
-                    //                        Status = false,
-                    //                        Message = "No vacancy available or Salary Gross exceeds budgeted"
-                    //                    };
-                    //                }
-
-
-                    //if(result)
-                    // Generate new ApplicantId
-
-                    //By Gautam
-
-        //            var canCreate = await _context.Database.SqlQueryRaw<int>(
-        //@"SELECT [Value]FROM (SELECT CAST(dbo.fn_CanCreateCandidate({0},{1},{2}) AS INT) AS [Value]) s",
-        //                    candidateUpdate.location,
-        //                    candidateUpdate.department,
-        //                    candidateUpdate.designation
-        //                    ).FirstOrDefaultAsync();
-
-        //            if (canCreate == 0)
-        //            {
-        //                await trans.RollbackAsync();
-        //                return new Response
-        //                {
-        //                    Status = false,
-        //                    StatusCode = System.Net.HttpStatusCode.BadRequest,
-        //                    Message = "No vacant seat available for the selected Location, Department and Designation."
-        //                };
-        //            }
+                    var seatCheck = await CheckSeatAvailabilityAsync((int)location, (int)department, subDept1, subDept2, subDept3, (int)designation, salary, null);
+                    var seatResult = seatCheck.Data as SeatAvailabilityResultDTO;
+                    if (!seatCheck.Status || seatResult == null || !seatResult.IsAvailable)
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = System.Net.HttpStatusCode.BadRequest,
+                            Message = seatResult?.Message ?? "No budgeted seat available for the selected Location, Department, Sub-Department and Designation."
+                        };
+                    }
 
                     var lastApplicant = await _context.Candidates.AsNoTracking().AsQueryable()
                         .Where(row => row.IsActive == true && row.IsDeleted == false)

@@ -446,6 +446,174 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        // Shared validation for the two new login entry points below. Matches by Ecode only
+        // (not email) and additionally gates on whether the employee's Ecode equals their
+        // store's STCode — @wantStoreAccount = true only allows STCode-equal ("store code")
+        // accounts through; false only allows normal employee accounts through.
+        private async Task<(long EmployeeId, string FirstName, string LastName, string EmailAddress, string Role, string Ecode, string ReportHeadEcode, long Reportheadid, string LocationName, string StoreCode, string DepartmentName, string DesignationName,
+            DateTime? Joiningdate, bool IsStore, bool IsActive, string PasswordHash)> ValidateUserByAccountType(string username, bool wantStoreAccount)
+        {
+            if (string.IsNullOrEmpty(username))
+                return (0, "", "", "", "", "", "", 0, "", "NA", "NA", null, null, false, false, null);
+
+            var result = await (
+                from emp in _context.tblEmployees.AsNoTracking()
+                join empRole in _context.tblEmployeeRoles.AsNoTracking()
+                    on emp.EmployeeId equals empRole.EmployeeId into empRoles
+                from empRole in empRoles.DefaultIfEmpty()
+                join role in _context.tblRoles.AsNoTracking()
+                    on empRole.RoleId equals role.RoleId into roles
+                from role in roles.DefaultIfEmpty()
+                join reportHead in _context.tblEmployees.AsNoTracking()
+                    on emp.ReportHeadEcode equals reportHead.Ecode into reportHeads
+                from reportHead in reportHeads.DefaultIfEmpty()
+                join loc in _context.tblLocations.AsNoTracking()
+                    on emp.LocationId equals loc.LocationId into locations
+                from loc in locations.DefaultIfEmpty()
+                join dep in _context.tblDepartments.AsNoTracking()
+                    on emp.DepartmentId equals dep.DepartmentId into department
+                from dep in department.DefaultIfEmpty()
+                join des in _context.tblDesignations.AsNoTracking()
+                    on emp.DesignationId equals des.DesignationId into designation
+                from des in designation.DefaultIfEmpty()
+                where emp.Ecode == username && emp.IsActive == true
+                select new
+                {
+                    emp.EmployeeId,
+                    emp.FirstName,
+                    emp.LastName,
+                    emp.EMAIL_ADDRESS,
+                    emp.Ecode,
+                    RoleName = role != null ? role.RoleName : "Employee",
+                    emp.ReportHeadEcode,
+                    Reportheadid = reportHead != null ? reportHead.EmployeeId : 0,
+                    LocationName = loc != null ? loc.LocationName : "NA",
+                    StoreCode = loc != null ? (loc.STCode ?? "") : "",
+                    DepartmentName = dep != null ? dep.DepartmentName : "NA",
+                    DesignationName = des != null ? des.DesignationName : "NA",
+                    Joiningdate = emp.JOINING_DATE,
+                    emp.IsActive,
+                    emp.PasswordHash
+                }
+            ).SingleOrDefaultAsync();
+
+            if (result == null)
+                return (0, "", "", "", "", "", "", 0, "", "NA", "NA", null, null, false, false, null);
+
+            bool isStoreAccount = !string.IsNullOrEmpty(result.StoreCode) &&
+                string.Equals(result.Ecode?.Trim(), result.StoreCode?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+            if (isStoreAccount != wantStoreAccount)
+                return (0, "", "", "", "", "", "", 0, "", "NA", "NA", null, null, false, false, null);
+
+            return (result.EmployeeId, result.FirstName, result.LastName, result.EMAIL_ADDRESS, result.RoleName, result.Ecode, result.ReportHeadEcode, result.Reportheadid, result.LocationName, result.StoreCode, result.DepartmentName, result.DesignationName, result.Joiningdate, isStoreAccount, result.IsActive.GetValueOrDefault(), result.PasswordHash);
+        }
+
+        // New: login for normal (non-store) active ecodes only.
+        public async Task<Response> EcodeLogin(LoginDto loginDto, string ipAddress, string userAgent)
+        {
+            return await LoginByAccountType(loginDto, ipAddress, userAgent, wantStoreAccount: false);
+        }
+
+        // New: login for store-code accounts only (Ecode equals the store's STCode).
+        public async Task<Response> StoreLogin(LoginDto loginDto, string ipAddress, string userAgent)
+        {
+            return await LoginByAccountType(loginDto, ipAddress, userAgent, wantStoreAccount: true);
+        }
+
+        private async Task<Response> LoginByAccountType(LoginDto loginDto, string ipAddress, string userAgent, bool wantStoreAccount)
+        {
+            var loginHistory = new LoginHistory
+            {
+                Username = loginDto?.Username,
+                IpAddress = ipAddress,
+                UserAgent = userAgent,
+                LoginTime = DateTime.UtcNow
+            };
+
+            async Task SafeWriteHistoryAsync()
+            {
+                try
+                {
+                    await _context.LoginHistories.AddAsync(loginHistory);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception hx)
+                {
+                    _logger.LogWarning(hx, "Failed to write login history for {Username}", loginDto?.Username);
+                }
+            }
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(loginDto?.Username) || string.IsNullOrWhiteSpace(loginDto?.Password))
+                {
+                    loginHistory.Success = false;
+                    loginHistory.Message = "Username and password are required.";
+                    await SafeWriteHistoryAsync();
+                    return new Response { Status = false, Message = "Username and password are required.", StatusCode = HttpStatusCode.BadRequest };
+                }
+
+                var userDetail = await ValidateUserByAccountType(loginDto.Username, wantStoreAccount);
+                if (userDetail.EmployeeId == 0 || !userDetail.IsActive || string.IsNullOrEmpty(userDetail.PasswordHash) ||
+                    !BCrypt.Net.BCrypt.Verify(loginDto.Password, userDetail.PasswordHash))
+                {
+                    loginHistory.Success = false;
+                    loginHistory.Message = "Invalid username or password.";
+                    await SafeWriteHistoryAsync();
+                    return new Response { Status = false, Message = "Invalid username or password.", StatusCode = HttpStatusCode.Unauthorized };
+                }
+
+                var accessToken = await GenerateAccessToken(userDetail.EmailAddress, userDetail.EmployeeId, userDetail.Role, userDetail.ReportHeadEcode, userDetail.Reportheadid);
+                var refreshToken = await GenerateRefreshToken();
+
+                bool hasReports = false;
+                try { hasReports = HasReports(userDetail.Ecode); }
+                catch (Exception hrx) { _logger.LogWarning(hrx, "HasReports check failed for {Ecode}", userDetail.Ecode); }
+
+                var user = new UserWithTokens
+                {
+                    Username = userDetail.EmailAddress,
+                    Role = userDetail.Role,
+                    AccessToken = accessToken,
+                    RefreshToken = refreshToken,
+                    FirstName = userDetail.FirstName,
+                    LastName = userDetail.LastName,
+                    EmployeeId = userDetail.EmployeeId,
+                    EmailAddress = userDetail.EmailAddress,
+                    Ecode = userDetail.Ecode,
+                    ReportHeadEcode = userDetail.ReportHeadEcode,
+                    Reportheadid = userDetail.Reportheadid,
+                    StoreCode = userDetail.StoreCode ?? string.Empty,
+                    LocationName = userDetail.LocationName ?? string.Empty,
+                    DepartmentName = userDetail.DepartmentName,
+                    Joiningdate = userDetail.Joiningdate,
+                    IsStore = userDetail.IsStore,
+                    IsActive = userDetail.IsActive,
+                    HasReports = hasReports,
+                    DesignationName = userDetail.DesignationName ?? string.Empty,
+                };
+
+                loginHistory.Success = true;
+                loginHistory.Message = "Authenticated successfully.";
+                loginHistory.EmployeeId = userDetail.EmployeeId;
+                loginHistory.Role = userDetail.Role;
+                await SafeWriteHistoryAsync();
+
+                _refreshTokens[user.RefreshToken] = user.Username;
+
+                return new Response { Status = true, Message = "Authenticated successfully.", StatusCode = HttpStatusCode.OK, Data = user };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during {LoginType} login for {Username}", wantStoreAccount ? "store" : "ecode", loginDto?.Username);
+                loginHistory.Success = false;
+                loginHistory.Message = "Unhandled exception";
+                await SafeWriteHistoryAsync();
+                return new Response { Status = false, Message = "An unexpected error occurred. Please try again later.", StatusCode = HttpStatusCode.InternalServerError };
+            }
+        }
+
         public async Task<Response> AuthenticateNew(LoginDto loginDto, string ipAddress, string userAgent)
         {
             _logger.LogInformation("Authenticating user with username: {Username}", loginDto?.Username);

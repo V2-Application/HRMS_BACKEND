@@ -816,6 +816,9 @@ namespace HRMSAPI.Implementation
                 command.Parameters.Add(new SqlParameter("@MOBILE", SqlDbType.NVarChar, 20) { Value = request.Mobile });
 
                 command.Parameters.Add(new SqlParameter("@DepartmentId", SqlDbType.Int) { Value = (object?)request.DepartmentId ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId1", SqlDbType.Int) { Value = (object?)request.SubDepartmentId1 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId2", SqlDbType.Int) { Value = (object?)request.SubDepartmentId2 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId3", SqlDbType.Int) { Value = (object?)request.SubDepartmentId3 ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@DesignationId", SqlDbType.Int) { Value = (object?)request.DesignationId ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@LocationId", SqlDbType.Int) { Value = (object?)request.LocationId ?? DBNull.Value });
 
@@ -931,6 +934,9 @@ namespace HRMSAPI.Implementation
                 command.Parameters.Add(new SqlParameter("@MOBILE", SqlDbType.NVarChar, 20) { Value = request.Mobile });
 
                 command.Parameters.Add(new SqlParameter("@DepartmentId", SqlDbType.Int) { Value = (object?)request.DepartmentId ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId1", SqlDbType.Int) { Value = (object?)request.SubDepartmentId1 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId2", SqlDbType.Int) { Value = (object?)request.SubDepartmentId2 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId3", SqlDbType.Int) { Value = (object?)request.SubDepartmentId3 ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@DesignationId", SqlDbType.Int) { Value = (object?)request.DesignationId ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@LocationId", SqlDbType.Int) { Value = (object?)request.LocationId ?? DBNull.Value });
 
@@ -1125,6 +1131,9 @@ namespace HRMSAPI.Implementation
                 command.Parameters.Add(new SqlParameter("@MOBILE", SqlDbType.NVarChar, 20) { Value = (object?)request.Mobile ?? DBNull.Value });
 
                 command.Parameters.Add(new SqlParameter("@DepartmentId", SqlDbType.Int) { Value = (object?)request.DepartmentId ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId1", SqlDbType.Int) { Value = (object?)request.SubDepartmentId1 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId2", SqlDbType.Int) { Value = (object?)request.SubDepartmentId2 ?? DBNull.Value });
+                command.Parameters.Add(new SqlParameter("@SubDepartmentId3", SqlDbType.Int) { Value = (object?)request.SubDepartmentId3 ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@DesignationId", SqlDbType.Int) { Value = (object?)request.DesignationId ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@LocationId", SqlDbType.Int) { Value = (object?)request.LocationId ?? DBNull.Value });
                 command.Parameters.Add(new SqlParameter("@DOJ", SqlDbType.DateTime) { Value = (object?)request.DOJ ?? DBNull.Value });
@@ -1258,6 +1267,9 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                                     DOJ = reader.IsDBNull(reader.GetOrdinal("DOJ")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("DOJ")),
                                     IsActive = reader.IsDBNull(reader.GetOrdinal("IsActive")) ? false : reader.GetBoolean(reader.GetOrdinal("IsActive")),
                                     DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? string.Empty : reader.GetString(reader.GetOrdinal("DepartmentName")),
+                                    SubDepartmentName1 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName1")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName1")),
+                                    SubDepartmentName2 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName2")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName2")),
+                                    SubDepartmentName3 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName3")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName3")),
                                     DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? string.Empty : reader.GetString(reader.GetOrdinal("DesignationName")),
                                     //ContractorName = reader.IsDBNull(reader.GetOrdinal("ContractorName")) ? string.Empty : reader.GetString(reader.GetOrdinal("ContractorName")),
                                     ShiftName = reader.IsDBNull(reader.GetOrdinal("ShiftName")) ? string.Empty : reader.GetString(reader.GetOrdinal("ShiftName")),
@@ -1370,6 +1382,12 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                         ContractorCode = reader["ContractorCode"]?.ToString() ?? string.Empty,
                         DepartmentId = reader["DepartmentId"] != DBNull.Value ? (int?)reader["DepartmentId"] : null,
                         DepartmentName = reader["DepartmentName"]?.ToString() ?? string.Empty,
+                        SubDepartmentId1 = reader["SubDepartmentId1"] != DBNull.Value ? (int?)reader["SubDepartmentId1"] : null,
+                        SubDepartmentName1 = reader["SubDepartmentName1"]?.ToString(),
+                        SubDepartmentId2 = reader["SubDepartmentId2"] != DBNull.Value ? (int?)reader["SubDepartmentId2"] : null,
+                        SubDepartmentName2 = reader["SubDepartmentName2"]?.ToString(),
+                        SubDepartmentId3 = reader["SubDepartmentId3"] != DBNull.Value ? (int?)reader["SubDepartmentId3"] : null,
+                        SubDepartmentName3 = reader["SubDepartmentName3"]?.ToString(),
                         DesignationId = reader["DesignationId"] != DBNull.Value ? (int?)reader["DesignationId"] : null,
                         DesignationName = reader["DesignationName"]?.ToString() ?? string.Empty,
                         ContractorName = reader["ContractorName"]?.ToString() ?? string.Empty,
@@ -1455,6 +1473,9 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                                     DOJ = reader.IsDBNull(reader.GetOrdinal("DOJ")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("DOJ")),
                                     IsActive = reader.IsDBNull(reader.GetOrdinal("IsActive")) ? false : reader.GetBoolean(reader.GetOrdinal("IsActive")),
                                     DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? string.Empty : reader.GetString(reader.GetOrdinal("DepartmentName")),
+                                    SubDepartmentName1 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName1")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName1")),
+                                    SubDepartmentName2 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName2")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName2")),
+                                    SubDepartmentName3 = reader.IsDBNull(reader.GetOrdinal("SubDepartmentName3")) ? null : reader.GetString(reader.GetOrdinal("SubDepartmentName3")),
                                     DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? string.Empty : reader.GetString(reader.GetOrdinal("DesignationName")),
                                     //ContractorName = reader.IsDBNull(reader.GetOrdinal("ContractorName")) ? string.Empty : reader.GetString(reader.GetOrdinal("ContractorName")),
                                     ShiftName = reader.IsDBNull(reader.GetOrdinal("ShiftName")) ? string.Empty : reader.GetString(reader.GetOrdinal("ShiftName")),
@@ -1913,17 +1934,23 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
             var table = result.Tables[0];
 
             var expectedHeaders = new[] { "Ecode", "FirstName", "MiddleName", "LastName", "Gender", "FatherName", "SpouseName", "DOB", "Mobile", "Email", "Address", "Pincode", "WorkLocation", "Department", "Designation", "DateOfJoining", "ContractStartDate", "ContractEndDate", "Shift", "Aadhar Number", "PAN", "BasicSalary", "CCA", "DA", "ExtraAllowance", "SpecialAllowance", "HRA", "GROSS_SALARY", "monthlyGrossCTC", "annuallyNetCTC", "ContractorRatePerDay" };
+            // Older sample sheets don't have the trailing Sub-Department columns — accept both for backward compatibility.
+            var subDeptHeaders = new[] { "SubDepartment1", "SubDepartment2", "SubDepartment3" };
+            var expectedHeadersWithSubDept = expectedHeaders.Concat(subDeptHeaders).ToArray();
 
-            if (table.Columns.Count != expectedHeaders.Length)
+            bool hasSubDeptColumns = table.Columns.Count == expectedHeadersWithSubDept.Length;
+            var activeExpectedHeaders = hasSubDeptColumns ? expectedHeadersWithSubDept : expectedHeaders;
+
+            if (table.Columns.Count != activeExpectedHeaders.Length)
             {
                 throw new Exception("Headers Mismatch.");
             }
             // Validate headers
-            for (int i = 0; i < expectedHeaders.Length; i++)
+            for (int i = 0; i < activeExpectedHeaders.Length; i++)
             {
                 var cellValue = table.Columns[i].ColumnName.Trim();
-                if (!string.Equals(cellValue, expectedHeaders[i], System.StringComparison.OrdinalIgnoreCase))
-                    throw new Exception($"Header mismatch at column {i + 1}: Expected '{expectedHeaders[i]}', found '{cellValue}'");
+                if (!string.Equals(cellValue, activeExpectedHeaders[i], System.StringComparison.OrdinalIgnoreCase))
+                    throw new Exception($"Header mismatch at column {i + 1}: Expected '{activeExpectedHeaders[i]}', found '{cellValue}'");
             }
 
             if (table.Rows.Count == 0)
@@ -1984,6 +2011,40 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     "ShiftName",
                     shiftNames);
 
+                // All active sub-departments, loaded once; resolved per-row against DepartmentId + parent chain.
+                var subDeptRows = new List<(int SubDepartmentId, string SubDepartmentName, int? DepartmentId, int? ParentSubDepartmentId, int DepthLevel)>();
+                if (hasSubDeptColumns)
+                {
+                    using var subDeptCmd = connection.CreateCommand();
+                    subDeptCmd.CommandText = "SELECT SubDepartmentId, SubDepartmentName, DepartmentId, ParentSubDepartmentId, DepthLevel FROM tblSubDepartment WHERE isActive = 1 AND isDeleted = 0";
+                    using var subDeptReader = await subDeptCmd.ExecuteReaderAsync();
+                    while (await subDeptReader.ReadAsync())
+                    {
+                        subDeptRows.Add((
+                            subDeptReader.GetInt32(0),
+                            subDeptReader.GetString(1),
+                            subDeptReader.IsDBNull(2) ? (int?)null : subDeptReader.GetInt32(2),
+                            subDeptReader.IsDBNull(3) ? (int?)null : subDeptReader.GetInt32(3),
+                            Convert.ToInt32(subDeptReader.GetValue(4))
+                        ));
+                    }
+                }
+
+                int? ResolveSubDepartment(string name, int? departmentId, int? parentSubDepartmentId, int depthLevel, int rowNumber, string columnLabel)
+                {
+                    if (string.IsNullOrWhiteSpace(name)) return null;
+
+                    var match = subDeptRows.FirstOrDefault(s =>
+                        s.DepthLevel == depthLevel &&
+                        s.DepartmentId == departmentId &&
+                        s.ParentSubDepartmentId == parentSubDepartmentId &&
+                        string.Equals(s.SubDepartmentName, name, StringComparison.OrdinalIgnoreCase));
+
+                    if (match.SubDepartmentId == 0)
+                        throw new Exception($"Unknown {columnLabel} '{name}' in Row {rowNumber} for the selected Department.");
+
+                    return match.SubDepartmentId;
+                }
 
                 foreach (DataRow row in table.Rows)
                 {
@@ -2069,7 +2130,20 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     //if (shiftName != null && !shiftMap.ContainsKey(shiftName))
                     //    throw new Exception($"Unknown Shift '{shiftName}'");
 
+                    int? resolvedDeptId = deptName != null ? deptMap[deptName] : null;
+                    int rowNum = table.Rows.IndexOf(row) + 2; // +1 for header, +1 for 1-based row
 
+                    int? subDeptId1 = null, subDeptId2 = null, subDeptId3 = null;
+                    if (hasSubDeptColumns)
+                    {
+                        var subDept1Name = Clean(row["SubDepartment1"]);
+                        var subDept2Name = Clean(row["SubDepartment2"]);
+                        var subDept3Name = Clean(row["SubDepartment3"]);
+
+                        subDeptId1 = ResolveSubDepartment(subDept1Name, resolvedDeptId, null, 1, rowNum, "SubDepartment1");
+                        subDeptId2 = ResolveSubDepartment(subDept2Name, resolvedDeptId, subDeptId1, 2, rowNum, "SubDepartment2");
+                        subDeptId3 = ResolveSubDepartment(subDept3Name, resolvedDeptId, subDeptId2, 3, rowNum, "SubDepartment3");
+                    }
 
                     var emp = new VendorEmployeeRequestDTO
                     {
@@ -2084,7 +2158,10 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                         Gender = row["Gender"]?.ToString().Trim(),
                         PANNo = row["PAN"]?.ToString().Trim(),
                         AadharNo = row["Aadhar Number"]?.ToString().Trim(),
-                        DepartmentId = deptName != null ? deptMap[deptName] : null,
+                        DepartmentId = resolvedDeptId,
+                        SubDepartmentId1 = subDeptId1,
+                        SubDepartmentId2 = subDeptId2,
+                        SubDepartmentId3 = subDeptId3,
                         DesignationId = desgName != null ? desgMap[desgName] : null,
                         LocationId = locName != null ? locMap[locName] : null,
                         ShiftId = 1,

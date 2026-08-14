@@ -89,6 +89,66 @@ namespace HRMSAPI.Controllers
         }
 
 
+        // New: login for normal (non-store) active ecodes only. Rejects store-code accounts.
+        [AllowAnonymous]
+        [HttpPost("EcodeLogin")]
+        public async Task<IActionResult> EcodeLogin([FromBody] LoginDto loginDto)
+        {
+            _logger.LogInformation("Ecode login attempt for username: {Username}", loginDto?.Username);
+            try
+            {
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+                var userAgent = HttpContext.Request.Headers["User-Agent"].ToString();
+                var user = await _authService.EcodeLogin(loginDto, ipAddress, userAgent);
+
+                return StatusCode((int)user.StatusCode, new
+                {
+                    Status = user.Status,
+                    Message = user.Message,
+                    Data = user.Data
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during ecode login for username: {Username}", loginDto?.Username);
+                return BadRequest(new
+                {
+                    Status = false,
+                    Message = ex.Message
+                });
+            }
+        }
+
+        // New: login for store-code accounts only (Ecode equals the store's STCode). Rejects normal employees.
+        [AllowAnonymous]
+        [HttpPost("StoreLogin")]
+        public async Task<IActionResult> StoreLogin([FromBody] LoginDto loginDto)
+        {
+            _logger.LogInformation("Store login attempt for username: {Username}", loginDto?.Username);
+            try
+            {
+                var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+                var userAgent = HttpContext.Request.Headers["User-Agent"].ToString();
+                var user = await _authService.StoreLogin(loginDto, ipAddress, userAgent);
+
+                return StatusCode((int)user.StatusCode, new
+                {
+                    Status = user.Status,
+                    Message = user.Message,
+                    Data = user.Data
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during store login for username: {Username}", loginDto?.Username);
+                return BadRequest(new
+                {
+                    Status = false,
+                    Message = ex.Message
+                });
+            }
+        }
+
         [HttpPost("refresh")]
         public async Task<IActionResult> Refresh([FromBody] string refreshToken)
         {

@@ -249,6 +249,38 @@ namespace ASN.Controllers
             });
         }
 
+        // "Freeze the budget": is there an unfilled BGT seat for this Store + Department +
+        // Sub-Department(1/2/3) + Designation? Called while filling the candidate form (on
+        // selection change) and re-checked server-side on submit — AllowAnonymous to match
+        // Insertnewcandidate below, since candidates can apply via the public form.
+        [HttpGet]
+        [Route("CheckSeatAvailability")]
+        [AllowAnonymous]
+        public async Task<IActionResult> CheckSeatAvailability(
+            [FromQuery] int locationId,
+            [FromQuery] int departmentId,
+            [FromQuery] int? subDepartmentId1,
+            [FromQuery] int? subDepartmentId2,
+            [FromQuery] int? subDepartmentId3,
+            [FromQuery] int designationId,
+            [FromQuery] decimal? salary,
+            [FromQuery] long? excludeCandidateId)
+        {
+            try
+            {
+                var result = await _candidateService.CheckSeatAvailabilityAsync(
+                    locationId, departmentId, subDepartmentId1, subDepartmentId2, subDepartmentId3,
+                    designationId, salary, excludeCandidateId);
+
+                return StatusCode((int)result.StatusCode, result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking seat availability");
+                return StatusCode(500, new { Status = false, Message = "An error occurred while checking seat availability" });
+            }
+        }
+
         [HttpPost]
         [Route("Insertnewcandidate")]
         [AllowAnonymous]

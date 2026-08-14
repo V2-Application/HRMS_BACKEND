@@ -35,6 +35,19 @@ namespace HRMSAPI.Controllers
             return StatusCode((int)result.Code, new { Status = result.Status, Message = result.Message, Data = result.Data });
         }
 
+        // Unrestricted (any authenticated user) read for cascading dropdowns in other modules'
+        // forms — e.g. Vendor Manpower onboarding — where the caller doesn't have access to the
+        // Sub-Department master page itself. Always returns active-only.
+        [HttpGet("Dropdown")]
+        public async Task<IActionResult> GetDropdown(
+            [FromQuery] int departmentId,
+            [FromQuery] int? parentSubDepartmentId = null,
+            [FromQuery] int depthLevel = 1)
+        {
+            var result = await _service.GetAllAsync(departmentId, parentSubDepartmentId, depthLevel, onlyInactive: false, searchTerm: null);
+            return StatusCode((int)result.Code, new { Status = result.Status, Message = result.Message, Data = result.Data });
+        }
+
         [HttpPost("Upsert")]
         [RequirePageAccess("/master/sub-departments")]
         public async Task<IActionResult> Upsert([FromBody] SubDepartmentUpsertDto dto)

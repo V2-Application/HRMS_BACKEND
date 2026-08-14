@@ -58,6 +58,42 @@ namespace HRMSAPI.Controllers
                 });
             }
         }
+        [HttpGet("GetActiveEmployeesWithStoreFlag")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetActiveEmployeesWithStoreFlag()
+        {
+            var data = await (from e in _context.tblEmployees
+                               join l in _context.tblLocations on e.LocationId equals l.LocationId into locJoin
+                               from l in locJoin.DefaultIfEmpty()
+                               where e.IsActive == true
+                               select new EmployeeStoreFlagDTO
+                               {
+                                   Ecode = e.Ecode,
+                                   EmployeeName = e.FULL_NAME,
+                                   StoreCode = l.STCode,
+                                   StoreName = l.LocationName,
+                                   IsStore = (l != null && e.Ecode == l.STCode) ? 1 : 0
+                               }).ToListAsync();
+
+            return Ok(data);
+        }
+
+        [HttpGet("GetStoresWhereEcodeIsStore")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetStoresWhereEcodeIsStore()
+        {
+            var data = await (from e in _context.tblEmployees
+                               join l in _context.tblLocations on e.LocationId equals l.LocationId
+                               where e.IsActive == true && e.Ecode == l.STCode
+                               select new
+                               {
+                                   StoreCode = l.STCode,
+                                   StoreName = l.LocationName
+                               }).Distinct().ToListAsync();
+
+            return Ok(data);
+        }
+
         [HttpGet("SearchEmployee")]
         public async Task<IActionResult> SearchEmployee([FromQuery] string searchTerm = "", [FromQuery] string? email = null, [FromQuery(Name = "designation")] string? designationName = null)
         {
@@ -107,7 +143,58 @@ WHERE l.rn = 1";
                 var apNm = rdr.IsDBNull(3) ? null : rdr.GetString(3);
                 var apOn = rdr.IsDBNull(4) ? null : rdr.GetString(4);
                 if (!string.IsNullOrWhiteSpace(apNm) && apNm.Replace(" ", "").Length == 0) apNm = null;
+                // Legacy data: some historical rows have a raw typed name (not an Ecode) in
+                // LastUpdatedBy, so the self-join above can't resolve it. Fall back to showing
+                // that raw text as the approver's name rather than leaving it blank — it's
+                // still better signal than nothing, even though we can't confirm the Ecode.
+                if (apNm == null && !string.IsNullOrWhiteSpace(apEc) && !string.Equals(apEc, ec, StringComparison.OrdinalIgnoreCase))
+                {
+                    apNm = apEc;
+                    apEc = null;
+                }
                 dict[ec] = (dt, apEc, apNm, apOn);
+            }
+            return dict;
+        }
+
+        // Read-only enrichment: pulls each employee's latest resignation record's Type,
+        // Notice Period, employee/manager/HR remarks, absconding flag, and an explicit
+        // Approved/Rejected/Pending status — mirroring EmployeeSeparationService's own
+        // status derivation so the report matches what the approval screens show. No writes.
+        private async Task<Dictionary<string, (string? Type, string? Status, string? Remarks, string? ManagerRemarks, string? HRRemarks, string? NoticePeriod, string? IsAbscond)>> GetResignationDetailsMap(System.Data.Common.DbConnection conn)
+        {
+            var dict = new Dictionary<string, (string?, string?, string?, string?, string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+WITH latest AS (
+    SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.EmployeeId ORDER BY s.EmployeeSeprationId DESC) AS rn
+    FROM tblEmployeeSepration s
+)
+SELECT e.Ecode,
+       rt.ResignationTypeName,
+       CASE
+           WHEN l.IsRevoked = 1 THEN 'Revoked'
+           WHEN l.IsApprovedByManager = 1 AND l.IsApprovedByHR = 1 THEN 'Approved'
+           WHEN l.IsApprovedByManager = 0 OR l.IsApprovedByHR = 0 THEN 'Rejected'
+           ELSE 'Pending'
+       END AS Status,
+       l.Remarks,
+       l.ManagerRemarks,
+       l.HRRemarks,
+       CAST(l.NoticePeriod AS VARCHAR(20)) AS NoticePeriod,
+       CASE WHEN l.IsAbscond = 1 THEN 'Yes' ELSE 'No' END AS IsAbscond
+FROM latest l
+JOIN tblEmployee e ON e.EmployeeId = l.EmployeeId
+LEFT JOIN tblResignationType rt ON rt.ResignationTypeId = l.ResignationTypeId
+WHERE l.rn = 1";
+
+            using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var ec = rdr.IsDBNull(0) ? null : rdr.GetString(0);
+                if (string.IsNullOrEmpty(ec)) continue;
+                string? S(int i) => rdr.IsDBNull(i) ? null : rdr.GetString(i);
+                dict[ec] = (S(1), S(2), S(3), S(4), S(5), S(6), S(7));
             }
             return dict;
         }
@@ -151,125 +238,259 @@ WHERE l.rn = 1";
             return result;
         }
 
+        // Builds a map of (Ecode, AttendanceDate) -> (StoreCode, StoreName) for each employee's
+        // last punch of that day, resolved from tblAttendancePunchLocation (raw device location)
+        // via tblBiomaxAttendanceLocationMap (device -> STCode) and tblLocation (STCode -> name).
+        // Read-only. NOTE: coverage is limited to whatever date range tblAttendancePunchLocation
+        // has actually been loaded for — dates outside that range simply won't resolve.
+        private async Task<Dictionary<(string Ecode, DateTime Date), (string? StoreCode, string? StoreName)>> GetLastPunchLocationMap(System.Data.Common.DbConnection conn)
+        {
+            var result = new Dictionary<(string, DateTime), (string?, string?)>();
+            if (await ObjectMissingAsync(conn, "dbo.tblAttendancePunchLocation")) return result;
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandTimeout = 300;
+            cmd.CommandText = @"
+WITH LastOfDay AS (
+    SELECT p.ECode, p.AttendanceDate, p.PunchLocation,
+           ROW_NUMBER() OVER (PARTITION BY p.ECode, p.AttendanceDate ORDER BY p.PunchTime DESC) AS rn
+    FROM dbo.tblAttendancePunchLocation p
+)
+SELECT l.ECode, l.AttendanceDate, m.STCode, loc.LocationName
+FROM LastOfDay l
+LEFT JOIN dbo.tblBiomaxAttendanceLocationMap m ON m.IsDeleted = 0 AND m.DeviceLocation = l.PunchLocation
+LEFT JOIN dbo.tblLocation loc ON loc.STCode = m.STCode
+WHERE l.rn = 1;";
+            using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var ec = rdr["ECode"] as string;
+                if (string.IsNullOrWhiteSpace(ec)) continue;
+                if (rdr["AttendanceDate"] is not DateTime dt) continue;
+                result[(ec.Trim(), dt.Date)] = (rdr["STCode"] as string, rdr["LocationName"] as string);
+            }
+            return result;
+        }
+
+        private static async Task<bool> ObjectMissingAsync(System.Data.Common.DbConnection conn, string obj)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT CASE WHEN OBJECT_ID(@o) IS NULL THEN 1 ELSE 0 END";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "@o";
+            p.Value = obj;
+            cmd.Parameters.Add(p);
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+        }
+
+        // Runs the main export proc on its own connection and loads the result into a DataTable.
+        // Split out so it can run concurrently with the independent enrichment lookups below.
+        private async Task<DataTable> LoadEmployeeExcelDataTableAsync(SqlConnection conn, bool isActive, bool allEmployee, int companyId)
+        {
+            using var command = conn.CreateCommand();
+            //command.CommandText = "GetEmployeeDetailsforexcel";
+            command.CommandText = "GetEmployeeDetailsforexcel_Ishu";
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandTimeout = 600; // 10 min — full-tenant pulls can take minutes
+
+            command.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = isActive });
+            command.Parameters.Add(new SqlParameter("@AllEmployee", SqlDbType.Bit) { Value = allEmployee });
+            command.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.Int) { Value = companyId });
+
+            using var reader = await command.ExecuteReaderAsync();
+            var dataTable = new DataTable();
+            dataTable.Load(reader);
+            return dataTable;
+        }
+
         [HttpGet("download-excel")]
         public async Task<IActionResult> DownloadEmployeeExcel(bool isActive = true, bool allEmployee = false, int companyId = 0)
         {
             try
             {
-                using (var connection = _context.Database.GetDbConnection())
+                var connStr = _context.Database.GetConnectionString();
+
+                // The main proc pull and the 4 independent enrichment lookups used to run fully
+                // serially on one shared connection (main proc -> approver query -> resignation
+                // details -> sub-dept names -> punch location), which on a large tenant pull adds
+                // up to a single very long request — exactly the shape that trips an upstream
+                // idle/response timeout (seen in prod as a misleading "CORS error", since the
+                // connection gets killed before any response/CORS headers can be sent). None of
+                // these 5 queries depend on each other, so they now run concurrently, each on its
+                // own connection. Same proc, same side-query SQL, same output — just no longer
+                // serialized. No stored procedures or data were changed.
+                await using var mainConn = new SqlConnection(connStr);
+                await using var approverConn = new SqlConnection(connStr);
+                await using var detailsConn = new SqlConnection(connStr);
+                await using var subDeptConn = new SqlConnection(connStr);
+                await using var punchConn = new SqlConnection(connStr);
+
+                await Task.WhenAll(
+                    mainConn.OpenAsync(), approverConn.OpenAsync(), detailsConn.OpenAsync(),
+                    subDeptConn.OpenAsync(), punchConn.OpenAsync());
+
+                var dataTableTask = LoadEmployeeExcelDataTableAsync(mainConn, isActive, allEmployee, companyId);
+                var approverMapTask = GetResignationApproverMap(approverConn);
+                var resignationDetailsMapTask = GetResignationDetailsMap(detailsConn);
+                var subDeptMapTask = GetSubDeptNameMapByEcode(subDeptConn);
+                var punchLocationMapTask = GetLastPunchLocationMap(punchConn);
+
+                await Task.WhenAll(dataTableTask, approverMapTask, resignationDetailsMapTask, subDeptMapTask, punchLocationMapTask);
+
+                var dataTable = dataTableTask.Result;
+                var approverMap = approverMapTask.Result;
+                var resignationDetailsMap = resignationDetailsMapTask.Result;
+                var subDeptMap = subDeptMapTask.Result;
+                var punchLocationMap = punchLocationMapTask.Result;
+
+                // Always show Bank Name / IFSC Code / PAN No. in UPPERCASE in the export.
+                foreach (var colName in new[] { "Name of Bank", "IFSC Code", "PAN No." })
                 {
-                    await connection.OpenAsync();
-                    using (var command = connection.CreateCommand())
+                    var col = dataTable.Columns.Cast<DataColumn>()
+                        .FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+                    if (col == null || col.DataType != typeof(string)) continue;
+                    // Columns loaded from a stored proc via DataTable.Load can be marked
+                    // ReadOnly, which makes in-place assignment throw. Clear it first.
+                    col.ReadOnly = false;
+                    foreach (DataRow row in dataTable.Rows)
                     {
-                        //command.CommandText = "GetEmployeeDetailsforexcel";
-                        command.CommandText = "GetEmployeeDetailsforexcel_Ishu";
-                        command.CommandType = CommandType.StoredProcedure;
-                        command.CommandTimeout = 600; // 10 min — full-tenant pulls can take minutes
+                        var v = row[col]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(v))
+                            row[col] = v.Trim().ToUpperInvariant();
+                    }
+                }
 
-                        // Add parameters
-                        command.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = isActive });
-                        command.Parameters.Add(new SqlParameter("@AllEmployee", SqlDbType.Bit) { Value = allEmployee });
-                        command.Parameters.Add(new SqlParameter("@CompanyId", SqlDbType.Int) { Value = companyId });
-
-                        using (var reader = await command.ExecuteReaderAsync())
+                // Enrich with resignation approver columns (read-only side query, fetched above).
+                // Adds: "Resignation Approved By Ecode" + "Resignation Approved By Name".
+                // Existing "Resignation Date" column (returned by the SP) is left untouched.
+                var ecodeColumn = dataTable.Columns.Contains("Employee Code") ? "Employee Code"
+                                  : dataTable.Columns.Contains("EmployeeCode") ? "EmployeeCode"
+                                  : dataTable.Columns.Contains("Ecode") ? "Ecode" : null;
+                if (ecodeColumn != null)
+                {
+                    if (!dataTable.Columns.Contains("Resignation Approved By Ecode"))
+                        dataTable.Columns.Add("Resignation Approved By Ecode", typeof(string));
+                    if (!dataTable.Columns.Contains("Resignation Approved By Name"))
+                        dataTable.Columns.Add("Resignation Approved By Name", typeof(string));
+                    if (!dataTable.Columns.Contains("Resignation Approved On"))
+                        dataTable.Columns.Add("Resignation Approved On", typeof(string));
+                    foreach (DataRow row in dataTable.Rows)
+                    {
+                        var ec = row[ecodeColumn]?.ToString();
+                        if (!string.IsNullOrEmpty(ec) && approverMap.TryGetValue(ec, out var info))
                         {
-                            // Create a DataTable to hold the results
-                            var dataTable = new DataTable();
-                            dataTable.Load(reader);
-
-                            // Always show Bank Name / IFSC Code / PAN No. in UPPERCASE in the export.
-                            foreach (var colName in new[] { "Name of Bank", "IFSC Code", "PAN No." })
-                            {
-                                var col = dataTable.Columns.Cast<DataColumn>()
-                                    .FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
-                                if (col == null || col.DataType != typeof(string)) continue;
-                                // Columns loaded from a stored proc via DataTable.Load can be marked
-                                // ReadOnly, which makes in-place assignment throw. Clear it first.
-                                col.ReadOnly = false;
-                                foreach (DataRow row in dataTable.Rows)
-                                {
-                                    var v = row[col]?.ToString();
-                                    if (!string.IsNullOrWhiteSpace(v))
-                                        row[col] = v.Trim().ToUpperInvariant();
-                                }
-                            }
-
-                            // Enrich with resignation approver columns (read-only side query).
-                            // Adds: "Resignation Approved By Ecode" + "Resignation Approved By Name".
-                            // Existing "Resignation Date" column (returned by the SP) is left untouched.
-                            reader.Close();
-                            var approverMap = await GetResignationApproverMap(connection);
-                            var ecodeColumn = dataTable.Columns.Contains("Employee Code") ? "Employee Code"
-                                              : dataTable.Columns.Contains("EmployeeCode") ? "EmployeeCode"
-                                              : dataTable.Columns.Contains("Ecode") ? "Ecode" : null;
-                            if (ecodeColumn != null)
-                            {
-                                if (!dataTable.Columns.Contains("Resignation Approved By Ecode"))
-                                    dataTable.Columns.Add("Resignation Approved By Ecode", typeof(string));
-                                if (!dataTable.Columns.Contains("Resignation Approved By Name"))
-                                    dataTable.Columns.Add("Resignation Approved By Name", typeof(string));
-                                if (!dataTable.Columns.Contains("Resignation Approved On"))
-                                    dataTable.Columns.Add("Resignation Approved On", typeof(string));
-                                foreach (DataRow row in dataTable.Rows)
-                                {
-                                    var ec = row[ecodeColumn]?.ToString();
-                                    if (!string.IsNullOrEmpty(ec) && approverMap.TryGetValue(ec, out var info))
-                                    {
-                                        row["Resignation Approved By Ecode"] = info.Ecode ?? (object)DBNull.Value;
-                                        row["Resignation Approved By Name"] = info.Name ?? (object)DBNull.Value;
-                                        row["Resignation Approved On"] = info.ApprovedOn ?? (object)DBNull.Value;
-                                    }
-                                }
-                            }
-
-                            // Enrich with sub-department name columns (read-only side query),
-                            // resolved from tblEmployee.SubDepartmentId1/2/3 via tblSubDepartment.
-                            if (ecodeColumn != null)
-                            {
-                                var subDeptMap = await GetSubDeptNameMapByEcode(connection);
-                                if (!dataTable.Columns.Contains("Sub Department 1"))
-                                    dataTable.Columns.Add("Sub Department 1", typeof(string));
-                                if (!dataTable.Columns.Contains("Sub Department 2"))
-                                    dataTable.Columns.Add("Sub Department 2", typeof(string));
-                                if (!dataTable.Columns.Contains("Sub Department 3"))
-                                    dataTable.Columns.Add("Sub Department 3", typeof(string));
-                                foreach (DataRow row in dataTable.Rows)
-                                {
-                                    var ec = row[ecodeColumn]?.ToString();
-                                    if (!string.IsNullOrEmpty(ec) && subDeptMap.TryGetValue(ec, out var sd))
-                                    {
-                                        row["Sub Department 1"] = (object?)sd.n1 ?? DBNull.Value;
-                                        row["Sub Department 2"] = (object?)sd.n2 ?? DBNull.Value;
-                                        row["Sub Department 3"] = (object?)sd.n3 ?? DBNull.Value;
-                                    }
-                                }
-
-                                // Position the sub-department columns right after the Department column
-                                var deptCol = dataTable.Columns.Cast<DataColumn>().FirstOrDefault(c =>
-                                    c.ColumnName.IndexOf("Department", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                                    c.ColumnName.IndexOf("Sub", StringComparison.OrdinalIgnoreCase) < 0);
-                                if (deptCol != null)
-                                {
-                                    int baseOrd = deptCol.Ordinal;
-                                    int max = dataTable.Columns.Count - 1;
-                                    dataTable.Columns["Sub Department 1"].SetOrdinal(Math.Min(baseOrd + 1, max));
-                                    dataTable.Columns["Sub Department 2"].SetOrdinal(Math.Min(baseOrd + 2, max));
-                                    dataTable.Columns["Sub Department 3"].SetOrdinal(Math.Min(baseOrd + 3, max));
-                                }
-                            }
-
-                            // Build the .xlsx with a streaming OpenXML writer (SAX). For large exports
-                            // (~60k rows x 137 cols) this is dramatically faster and lighter than
-                            // ClosedXML, which holds the whole workbook in memory as objects.
-                            var content = BuildEmployeeExcelFast(dataTable);
-                            return File(
-                                content,
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                $"EmployeeDetails_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
-                            );
+                            row["Resignation Approved By Ecode"] = info.Ecode ?? (object)DBNull.Value;
+                            row["Resignation Approved By Name"] = info.Name ?? (object)DBNull.Value;
+                            row["Resignation Approved On"] = info.ApprovedOn ?? (object)DBNull.Value;
                         }
                     }
                 }
+
+                // Enrich with resignation type/status/remarks (read-only side query, fetched above).
+                // Adds: "Resignation Type", "Resignation Status", "Resignation Remarks",
+                // "Manager Remarks", "HR Remarks", "Notice Period", "Is Absconding".
+                if (ecodeColumn != null)
+                {
+                    foreach (var colName in new[] { "Resignation Type", "Resignation Status", "Resignation Remarks", "Manager Remarks", "HR Remarks", "Notice Period", "Is Absconding" })
+                    {
+                        if (!dataTable.Columns.Contains(colName))
+                            dataTable.Columns.Add(colName, typeof(string));
+                    }
+                    foreach (DataRow row in dataTable.Rows)
+                    {
+                        var ec = row[ecodeColumn]?.ToString();
+                        if (!string.IsNullOrEmpty(ec) && resignationDetailsMap.TryGetValue(ec, out var rd))
+                        {
+                            row["Resignation Type"] = rd.Type ?? (object)DBNull.Value;
+                            row["Resignation Status"] = rd.Status ?? (object)DBNull.Value;
+                            row["Resignation Remarks"] = rd.Remarks ?? (object)DBNull.Value;
+                            row["Manager Remarks"] = rd.ManagerRemarks ?? (object)DBNull.Value;
+                            row["HR Remarks"] = rd.HRRemarks ?? (object)DBNull.Value;
+                            row["Notice Period"] = rd.NoticePeriod ?? (object)DBNull.Value;
+                            row["Is Absconding"] = rd.IsAbscond ?? (object)DBNull.Value;
+                        }
+                    }
+                }
+
+                // Enrich with sub-department name columns (read-only side query, fetched above),
+                // resolved from tblEmployee.SubDepartmentId1/2/3 via tblSubDepartment.
+                if (ecodeColumn != null)
+                {
+                    if (!dataTable.Columns.Contains("Sub Department 1"))
+                        dataTable.Columns.Add("Sub Department 1", typeof(string));
+                    if (!dataTable.Columns.Contains("Sub Department 2"))
+                        dataTable.Columns.Add("Sub Department 2", typeof(string));
+                    if (!dataTable.Columns.Contains("Sub Department 3"))
+                        dataTable.Columns.Add("Sub Department 3", typeof(string));
+                    foreach (DataRow row in dataTable.Rows)
+                    {
+                        var ec = row[ecodeColumn]?.ToString();
+                        if (!string.IsNullOrEmpty(ec) && subDeptMap.TryGetValue(ec, out var sd))
+                        {
+                            row["Sub Department 1"] = (object?)sd.n1 ?? DBNull.Value;
+                            row["Sub Department 2"] = (object?)sd.n2 ?? DBNull.Value;
+                            row["Sub Department 3"] = (object?)sd.n3 ?? DBNull.Value;
+                        }
+                    }
+
+                    // Position the sub-department columns right after the Department column
+                    var deptCol = dataTable.Columns.Cast<DataColumn>().FirstOrDefault(c =>
+                        c.ColumnName.IndexOf("Department", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                        c.ColumnName.IndexOf("Sub", StringComparison.OrdinalIgnoreCase) < 0);
+                    if (deptCol != null)
+                    {
+                        int baseOrd = deptCol.Ordinal;
+                        int max = dataTable.Columns.Count - 1;
+                        dataTable.Columns["Sub Department 1"].SetOrdinal(Math.Min(baseOrd + 1, max));
+                        dataTable.Columns["Sub Department 2"].SetOrdinal(Math.Min(baseOrd + 2, max));
+                        dataTable.Columns["Sub Department 3"].SetOrdinal(Math.Min(baseOrd + 3, max));
+                    }
+                }
+
+                // Enrich with last-punch location (read-only side query, fetched above), resolved via
+                // tblAttendancePunchLocation + tblBiomaxAttendanceLocationMap + tblLocation.
+                // Adds: "Last Punch Location Code", "Last Punch Location Name" — placed
+                // right next to the existing "Last Punch Date" column.
+                var lastPunchDateCol = dataTable.Columns.Cast<DataColumn>()
+                    .FirstOrDefault(c => c.ColumnName.Equals("Last Punch Date", StringComparison.OrdinalIgnoreCase));
+                if (ecodeColumn != null && lastPunchDateCol != null)
+                {
+                    if (!dataTable.Columns.Contains("Last Punch Location Code"))
+                        dataTable.Columns.Add("Last Punch Location Code", typeof(string));
+                    if (!dataTable.Columns.Contains("Last Punch Location Name"))
+                        dataTable.Columns.Add("Last Punch Location Name", typeof(string));
+
+                    foreach (DataRow row in dataTable.Rows)
+                    {
+                        var ec = row[ecodeColumn]?.ToString();
+                        var lastPunchText = row[lastPunchDateCol]?.ToString();
+                        if (string.IsNullOrEmpty(ec) || string.IsNullOrWhiteSpace(lastPunchText)) continue;
+
+                        if (DateTime.TryParseExact(lastPunchText, "dd-MMM-yy",
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out var lastPunchDate) &&
+                            punchLocationMap.TryGetValue((ec.Trim(), lastPunchDate.Date), out var loc))
+                        {
+                            row["Last Punch Location Code"] = (object?)loc.StoreCode ?? DBNull.Value;
+                            row["Last Punch Location Name"] = (object?)loc.StoreName ?? DBNull.Value;
+                        }
+                    }
+
+                    int lastPunchOrd = lastPunchDateCol.Ordinal;
+                    int maxOrd = dataTable.Columns.Count - 1;
+                    dataTable.Columns["Last Punch Location Code"].SetOrdinal(Math.Min(lastPunchOrd + 1, maxOrd));
+                    dataTable.Columns["Last Punch Location Name"].SetOrdinal(Math.Min(lastPunchOrd + 2, maxOrd));
+                }
+
+                // Build the .xlsx with a streaming OpenXML writer (SAX). For large exports
+                // (~60k rows x 137 cols) this is dramatically faster and lighter than
+                // ClosedXML, which holds the whole workbook in memory as objects.
+                var content = BuildEmployeeExcelFast(dataTable);
+                return File(
+                    content,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    $"EmployeeDetails_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                );
             }
             catch (SqlException ex)
             {
@@ -446,6 +667,13 @@ WHERE l.rn = 1";
         {
             try
             {
+                var trimmedEcode = (ecode ?? string.Empty).Trim();
+                if (trimmedEcode.Length == 0 ||
+                    !(trimmedEcode.StartsWith("V", StringComparison.OrdinalIgnoreCase) ||
+                      trimmedEcode.StartsWith("E", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return BadRequest(new { message = $"Salary slip is not applicable for Ecode '{ecode}'." });
+                }
 
                 var result = await _uow.GetSalaryDetailsByEcode(ecode, month);
 

@@ -11,6 +11,9 @@ public class VendorEmployeeRequestDTO : IValidatableObject
     public string? Email { get; set; }
     public string Mobile { get; set; }
     public int? DepartmentId { get; set; }
+    public int? SubDepartmentId1 { get; set; }
+    public int? SubDepartmentId2 { get; set; }
+    public int? SubDepartmentId3 { get; set; }
     public int? DesignationId { get; set; }
     public int? LocationId { get; set; }
     public DateTime? DOJ { get; set; }

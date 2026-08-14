@@ -14,6 +14,9 @@ namespace HRMSAPI.DTO
         public DateTime? DOJ { get; set; }
         public bool IsActive { get; set; }
         public string? DepartmentName { get; set; }
+        public string? SubDepartmentName1 { get; set; }
+        public string? SubDepartmentName2 { get; set; }
+        public string? SubDepartmentName3 { get; set; }
         public string DesignationName { get; set; }
         //public string ContractorName { get; set; }
         public string? ShiftName { get; set; }

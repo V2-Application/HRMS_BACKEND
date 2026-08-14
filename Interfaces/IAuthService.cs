@@ -10,6 +10,12 @@ namespace HRMSAPI.Interfaces
     {
         Task<Response> Authenticate(LoginDto loginDto, string ipAddress, string userAgent);
         Task<Response> AuthenticateNew(LoginDto loginDto, string ipAddress, string userAgent);
+
+        // New, separate login entry points (additive — do not touch Authenticate/AuthenticateNew above).
+        // EcodeLogin: normal employees only (Ecode does NOT equal their store's STCode).
+        // StoreLogin: store-code accounts only (Ecode DOES equal their store's STCode).
+        Task<Response> EcodeLogin(LoginDto loginDto, string ipAddress, string userAgent);
+        Task<Response> StoreLogin(LoginDto loginDto, string ipAddress, string userAgent);
         Task<Response> RefreshToken(string refreshToken);
         Task<Response> ChangePassword(ChangePasswordDto dto, JwtLoginDetailDto userClaims);
 

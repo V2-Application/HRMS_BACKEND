@@ -29,6 +29,12 @@
         public string ContractorCode { get; set; } = string.Empty;
         public int? DepartmentId { get; set; }
         public string DepartmentName { get; set; } = string.Empty;
+        public int? SubDepartmentId1 { get; set; }
+        public string? SubDepartmentName1 { get; set; }
+        public int? SubDepartmentId2 { get; set; }
+        public string? SubDepartmentName2 { get; set; }
+        public int? SubDepartmentId3 { get; set; }
+        public string? SubDepartmentName3 { get; set; }
         public int? DesignationId { get; set; }
         public string DesignationName { get; set; } = string.Empty;
         public string ContractorName { get; set; } = string.Empty;

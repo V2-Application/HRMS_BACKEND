@@ -18,6 +18,7 @@ namespace HRMSAPI.Interfaces
                 Task<Response> GetCandidateInfo(int candidateID);
                 Task<Response> CandidateInitiate(CandidateApprovalDto obj, JwtLoginDetailDto loginDetail);
                 Task<Response> UpdateData(CandidateUpdate details, CandidateDocs candidateDocs, string updatedBy, JwtLoginDetailDto loginDetail);
+                Task<Response> CheckSeatAvailabilityAsync(int locationId, int departmentId, int? subDepartmentId1, int? subDepartmentId2, int? subDepartmentId3, int designationId, decimal? salary, long? excludeCandidateId);
                 Task<List<CandidateSearchResult>> SearchCandidatesAsync(
                       DateTime? startDate,
                       DateTime? endDate,
