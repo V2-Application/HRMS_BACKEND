@@ -174,6 +174,7 @@ namespace HRMSAPI.Implementation
                             EmployeeId = combined.er.EmployeeId,
                             Ecode = combined.emp.Ecode,
                             EmployeeName = $"{combined.emp.FirstName} {combined.emp.MiddleName} {combined.emp.LastName}".Trim(),
+                            IsActive = combined.emp.IsActive ?? false,
                             RoleId = combined.er.RoleId,
                             RoleName = role.RoleName,
                             AssignedOn = combined.er.AssignedOn,

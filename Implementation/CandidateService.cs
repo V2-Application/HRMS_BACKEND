@@ -1217,6 +1217,15 @@ namespace HRMSAPI.Implementation
                 // Budget freeze: re-check seat availability at approval time too (the seat
                 // situation may have changed since the candidate was first submitted).
                 // Excludes this candidate's own record so it doesn't count against itself.
+                //
+                // Gate on ACTUAL EMPLOYEES only, not on other pending/in-pipeline candidates
+                // for the same seat combo. Until a candidate is actually converted to an
+                // employee (ecode issued), they don't occupy a seat -- so with e.g. 3 budgeted
+                // seats and 8 candidates competing for them, hierarchy review can proceed for
+                // all 8 in parallel; only when 3 of them have actually been issued ecodes does
+                // this check start blocking the remaining ones with "No BGT available",
+                // enforcing first-come-first-served at the moment of ecode issuance rather than
+                // blocking everyone up front just because the pipeline is oversubscribed.
                 int.TryParse(candidate.LOCATION, out var apprLocId);
                 if (apprLocId > 0 && apprDeptId > 0 && apprDesigId > 0)
                 {
@@ -1224,13 +1233,38 @@ namespace HRMSAPI.Implementation
                         apprLocId, apprDeptId, candidate.SubDepartmentId1, candidate.SubDepartmentId2, candidate.SubDepartmentId3,
                         apprDesigId, candidate.GROSS_SALARY, candidate.Id);
                     var apprSeatResult = apprSeatCheck.Data as SeatAvailabilityResultDTO;
-                    if (!apprSeatCheck.Status || apprSeatResult == null || !apprSeatResult.IsAvailable)
+
+                    if (!apprSeatCheck.Status || apprSeatResult == null)
                     {
                         return new Response
                         {
                             Status = false,
                             StatusCode = HttpStatusCode.BadRequest,
                             Message = apprSeatResult?.Message ?? "No budgeted seat available for the selected Location, Department, Sub-Department and Designation."
+                        };
+                    }
+
+                    // usp_CheckCandidateSeatAvailability exempts UPC stores (IsActive=0/NULL) and
+                    // stores opened <=60 days ago by early-returning SeatBudget=0 + IsAvailable=1
+                    // with an explanatory Message -- that combination (budget 0 but flagged
+                    // available) is the only way an exemption surfaces through this DTO, since a
+                    // genuine "no budget defined" case leaves IsAvailable=0. Honor it here so
+                    // excess/unbudgeted hiring keeps working for those stores.
+                    bool isBudgetExempt = apprSeatResult.IsAvailable && apprSeatResult.SeatBudget == 0;
+
+                    bool seatsFilledByEmployees = !isBudgetExempt && apprSeatResult.FilledByEmployees >= apprSeatResult.SeatBudget;
+                    bool salaryExceedsBudget = !isBudgetExempt && candidate.GROSS_SALARY.HasValue && apprSeatResult.MaxBudgetedSalary.HasValue &&
+                        candidate.GROSS_SALARY.Value > apprSeatResult.MaxBudgetedSalary.Value;
+
+                    if (seatsFilledByEmployees || salaryExceedsBudget)
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.BadRequest,
+                            Message = seatsFilledByEmployees
+                                ? "All budgeted BGT seats for this Store / Department / Sub-Department / Designation are already filled by active employees. Please increase the budget (BGT Seat Master) before issuing another ecode."
+                                : apprSeatResult.Message ?? "Offered gross salary exceeds the budgeted salary for this seat."
                         };
                     }
                 }
@@ -1467,8 +1501,67 @@ namespace HRMSAPI.Implementation
 
                 _context.tblNewCandidateApprovals.Update(candidateApproval);
 
+                // Any-reject-wins: if ANY hierarchy level (Cluster/Audit/HR) is Rejected, the
+                // candidate's overall status must become Rejected, regardless of the other
+                // levels' state. If a previously-rejected level is later flipped back to
+                // Approved (and no other level is currently Rejected), resume the pipeline by
+                // reverting the overall status back to Pending so it can progress again.
+                const int rejectedStatusId = 2;
+                const int pendingStatusId = 4;
+
+                bool anyLevelRejected =
+                    candidateApproval.ClusterManagerApprovalStatus == rejectedStatusId ||
+                    candidateApproval.AuditApprovalStatus == rejectedStatusId ||
+                    candidateApproval.HRApprovalStatus == rejectedStatusId;
+
+                var candidateForStatusCascade = await _context.Candidates
+                    .FirstOrDefaultAsync(c => c.Id == obj.CandidateId);
+
+                if (candidateForStatusCascade != null)
+                {
+                    var statusBeforeCascade = candidateForStatusCascade.StatusId;
+
+                    if (anyLevelRejected && candidateForStatusCascade.StatusId != rejectedStatusId)
+                    {
+                        candidateForStatusCascade.StatusId = rejectedStatusId;
+                        candidateForStatusCascade.UpdatedOn = DateTime.UtcNow;
+                        candidateForStatusCascade.UpdatedBy = loginDetail.EmployeeId;
+                        _context.Candidates.Update(candidateForStatusCascade);
+
+                        _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                        {
+                            ApplicantId = (int)obj.CandidateId,
+                            OldStatusId = statusBeforeCascade,
+                            OldStatusName = statusBeforeCascade == pendingStatusId ? "Pending" : statusBeforeCascade.ToString(),
+                            NewStatusId = rejectedStatusId,
+                            NewStatusName = "Rejected",
+                            CreatedDate = DateTime.Now,
+                            CreatedBy = loginDetail.EmployeeId
+                        });
+                    }
+                    else if (!anyLevelRejected && candidateForStatusCascade.StatusId == rejectedStatusId)
+                    {
+                        candidateForStatusCascade.StatusId = pendingStatusId;
+                        candidateForStatusCascade.UpdatedOn = DateTime.UtcNow;
+                        candidateForStatusCascade.UpdatedBy = loginDetail.EmployeeId;
+                        _context.Candidates.Update(candidateForStatusCascade);
+
+                        _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                        {
+                            ApplicantId = (int)obj.CandidateId,
+                            OldStatusId = rejectedStatusId,
+                            OldStatusName = "Rejected",
+                            NewStatusId = pendingStatusId,
+                            NewStatusName = "Pending",
+                            CreatedDate = DateTime.Now,
+                            CreatedBy = loginDetail.EmployeeId
+                        });
+                    }
+                }
+
                 // Create employee when all three approvals are received (StatusId = 1)
-                if (candidateApproval.ClusterManagerApprovalStatus == approvedStatusId &&
+                if (!anyLevelRejected &&
+                    candidateApproval.ClusterManagerApprovalStatus == approvedStatusId &&
                     candidateApproval.AuditApprovalStatus == approvedStatusId &&
                     candidateApproval.HRApprovalStatus == approvedStatusId)
                 {
@@ -3849,7 +3942,9 @@ OUTER APPLY (
                                   .Select(r => r.Ecode)
                                   .FirstOrDefault() ?? "";
                 long location = Convert.ToInt64(candidateUpdate.location);
-                long department = Convert.ToInt64(candidateUpdate.department);
+                // Department is optional (e.g. store-code logins submit no department at all) —
+                // tolerate blank/missing instead of throwing, and treat 0 as "not provided" below.
+                long department = long.TryParse(candidateUpdate.department, out var _dept) ? _dept : 0;
                 long designation = Convert.ToInt64(candidateUpdate.designation);
                 decimal salary = Convert.ToDecimal(candidateUpdate.grossSalary);
                 // Input validation
@@ -3865,7 +3960,9 @@ OUTER APPLY (
                 }
 
                 // Active-only enforcement: reject inactive department/designation.
-                var (deptDesigOk, deptDesigErr) = await ValidateDeptDesigActiveAsync((int)department, (int)designation);
+                // Department check is skipped when no department was submitted (e.g. store logins).
+                var (deptDesigOk, deptDesigErr) = await ValidateDeptDesigActiveAsync(
+                    department > 0 ? (int?)department : null, (int)designation);
                 if (!deptDesigOk)
                 {
                     return new Response
@@ -3887,16 +3984,21 @@ OUTER APPLY (
                     int? subDept2 = int.TryParse(candidateUpdate.subDepartmentId2, out var _sd2) ? _sd2 : (int?)null;
                     int? subDept3 = int.TryParse(candidateUpdate.subDepartmentId3, out var _sd3) ? _sd3 : (int?)null;
 
-                    var seatCheck = await CheckSeatAvailabilityAsync((int)location, (int)department, subDept1, subDept2, subDept3, (int)designation, salary, null);
-                    var seatResult = seatCheck.Data as SeatAvailabilityResultDTO;
-                    if (!seatCheck.Status || seatResult == null || !seatResult.IsAvailable)
+                    // Skipped when no department was submitted (e.g. store logins) — there's
+                    // nothing to check a BGT seat against without a department.
+                    if (location > 0 && department > 0 && designation > 0)
                     {
-                        return new Response
+                        var seatCheck = await CheckSeatAvailabilityAsync((int)location, (int)department, subDept1, subDept2, subDept3, (int)designation, salary, null);
+                        var seatResult = seatCheck.Data as SeatAvailabilityResultDTO;
+                        if (!seatCheck.Status || seatResult == null || !seatResult.IsAvailable)
                         {
-                            Status = false,
-                            StatusCode = System.Net.HttpStatusCode.BadRequest,
-                            Message = seatResult?.Message ?? "No budgeted seat available for the selected Location, Department, Sub-Department and Designation."
-                        };
+                            return new Response
+                            {
+                                Status = false,
+                                StatusCode = System.Net.HttpStatusCode.BadRequest,
+                                Message = seatResult?.Message ?? "No budgeted seat available for the selected Location, Department, Sub-Department and Designation."
+                            };
+                        }
                     }
 
                     var lastApplicant = await _context.Candidates.AsNoTracking().AsQueryable()

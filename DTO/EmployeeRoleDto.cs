@@ -31,6 +31,7 @@ namespace HRMSAPI.DTO
         public long EmployeeId { get; set; }
         public string Ecode { get; set; }
         public string EmployeeName { get; set; }
+        public bool IsActive { get; set; }
         public int RoleId { get; set; }
         public string RoleName { get; set; }
         public DateTime? AssignedOn { get; set; }
