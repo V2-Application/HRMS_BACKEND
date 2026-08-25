@@ -90,8 +90,13 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IDesignationService, DesignationService>();
             services.AddScoped<ISubDepartmentService, SubDepartmentService>();
-            services.AddHostedService<Backgroundservices>();
-            services.AddHostedService<ScheduledShiftApplicationService>();
+            // These jobs write on a timer (TRUNCATE TempEmployeePunches / TempEmpAttendance,
+            // scheduled shift application). Gated so they stay off when pointed at prod.
+            if (configuration.GetValue("BackgroundJobs:Enabled", true))
+            {
+                services.AddHostedService<Backgroundservices>();
+                services.AddHostedService<ScheduledShiftApplicationService>();
+            }
             services.AddHttpContextAccessor();
             services.Configure<EmailSettings>(configuration.GetSection("EmailSettings"));
             services.AddScoped<IEmailService, EmailService>();
