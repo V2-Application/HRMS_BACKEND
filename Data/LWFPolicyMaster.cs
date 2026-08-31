@@ -19,5 +19,10 @@ public partial class LWFPolicyMaster
 
     public decimal? EmployeerMax { get; set; }
 
+    // "Flat" (rupee amount) or "Percent" (percentage of gross, capped by the Max
+    // columns). Added 2026-08-26 so the LWF policy page can express Haryana's
+    // 0.2%/0.4% rule instead of it being hardcoded in the payroll proc.
+    public string CalcType { get; set; }
+
     public int Id { get; set; }
 }

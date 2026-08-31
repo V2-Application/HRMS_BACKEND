@@ -590,6 +590,183 @@ VALUES ('BGTSEATMaster', @pk, NULL, @by, @details, @ecode, GETDATE(), @ct);";
 			}
 		}
 
+		// Shared shape for the department delete: builds "DEPT_SNO IN (...)" and, when stores were
+		// picked, "AND LOC_CODE IN (...)". No stores picked = pan-India for those departments.
+		// Returns the WHERE body (without the WHERE keyword) plus a parameter binder.
+		private static (string where, Action<SqlCommand> bind, List<int> depts, List<string> codes)
+			BuildDeptDeleteFilter(List<int> deptSnos, List<string> locCodes)
+		{
+			var depts = (deptSnos ?? new List<int>()).Where(d => d > 0).Distinct().ToList();
+			var codes = (locCodes ?? new List<string>())
+				.Where(s => !string.IsNullOrWhiteSpace(s))
+				.Select(s => s.Trim())
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			var deptParams = depts.Select((_, i) => "@d" + i).ToList();
+			var where = $"DEPT_SNO IN ({string.Join(",", deptParams)})";
+
+			var codeParams = codes.Select((_, i) => "@s" + i).ToList();
+			if (codes.Count > 0)
+				where += $" AND LOC_CODE IN ({string.Join(",", codeParams)})";
+
+			void Bind(SqlCommand cmd)
+			{
+				for (int i = 0; i < depts.Count; i++)
+					cmd.Parameters.Add(new SqlParameter(deptParams[i], SqlDbType.Int) { Value = depts[i] });
+				for (int i = 0; i < codes.Count; i++)
+					cmd.Parameters.Add(new SqlParameter(codeParams[i], SqlDbType.VarChar, 50) { Value = codes[i] });
+			}
+
+			return (where, Bind, depts, codes);
+		}
+
+		// Counts what a department delete would remove, broken down per department, WITHOUT
+		// touching anything. The UI calls this first so the confirmation shows a real number.
+		public async Task<FetchAndResponse> PreviewDeleteSeatsByDepartmentAsync(List<int> deptSnos, List<string> locCodes)
+		{
+			var (where, bind, depts, codes) = BuildDeptDeleteFilter(deptSnos, locCodes);
+			if (depts.Count == 0)
+				return BuildFetchErrorResponse("At least one department is required.", HttpStatusCode.BadRequest);
+
+			var preview = new BgtSeatDeleteByDeptPreview
+			{
+				PanIndia = codes.Count == 0,
+				StoreCount = codes.Count
+			};
+
+			using (var conn = _context.Database.GetDbConnection())
+			{
+				await conn.OpenAsync();
+				try
+				{
+					using var cmd = (SqlCommand)conn.CreateCommand();
+					cmd.CommandText = $@"
+SELECT  b.DEPT_SNO,
+        MAX(ISNULL(d.DepartmentName, '')) AS DepartmentName,
+        COUNT(*)                          AS Rows,
+        COUNT(DISTINCT b.LOC_CODE)        AS Stores
+FROM    dbo.BGTSEATMaster b WITH (NOLOCK)
+LEFT JOIN dbo.tblDepartment d WITH (NOLOCK) ON d.DepartmentId = b.DEPT_SNO
+WHERE   {where}
+GROUP BY b.DEPT_SNO
+ORDER BY MAX(ISNULL(d.DepartmentName, ''))";
+					bind(cmd);
+
+					using var rdr = await cmd.ExecuteReaderAsync();
+					while (await rdr.ReadAsync())
+					{
+						var line = new BgtSeatDeleteByDeptPreviewLine
+						{
+							DeptSno = rdr.GetInt32(0),
+							DepartmentName = rdr.GetString(1),
+							Rows = rdr.GetInt32(2),
+							Stores = rdr.GetInt32(3)
+						};
+						preview.Lines.Add(line);
+						preview.TotalRows += line.Rows;
+					}
+				}
+				catch (Exception ex)
+				{
+					return BuildFetchErrorResponse($"Error previewing department delete: {ex.Message}", HttpStatusCode.InternalServerError);
+				}
+				finally
+				{
+					if (conn.State == ConnectionState.Open)
+						await conn.CloseAsync();
+				}
+			}
+
+			return BuildFetchSuccessResponse(
+				preview.TotalRows == 0 ? "No budget seats match this selection." : "Preview generated.",
+				preview);
+		}
+
+		// Delete budget seats for one or more departments. When no store is supplied this is a
+		// pan-India delete for those departments; supplying stores narrows it to those stores.
+		// Affected rows are copied to a timestamped backup table inside the same transaction.
+		public async Task<ExecuteAndReponse> DeleteSeatsByDepartmentAsync(List<int> deptSnos, List<string> locCodes, string? deletedBy = null)
+		{
+			var (where, bind, depts, codes) = BuildDeptDeleteFilter(deptSnos, locCodes);
+			if (depts.Count == 0)
+				return BuildExecuteErrorResponse("At least one department is required.", HttpStatusCode.BadRequest);
+
+			var scope = codes.Count == 0 ? "PanIndia" : $"Stores{codes.Count}";
+			var bak = $"BGTSEATMaster_DelBak_{DateTime.Now:yyyyMMdd_HHmmss}_Depts{depts.Count}_{scope}";
+
+			using (var conn = _context.Database.GetDbConnection())
+			{
+				await conn.OpenAsync();
+				using var tx = conn.BeginTransaction();
+				try
+				{
+					int cnt;
+					using (var c0 = (SqlCommand)conn.CreateCommand())
+					{
+						c0.Transaction = (SqlTransaction)tx;
+						c0.CommandText = $"SELECT COUNT(*) FROM dbo.BGTSEATMaster WHERE {where}";
+						bind(c0);
+						cnt = Convert.ToInt32(await c0.ExecuteScalarAsync());
+					}
+					if (cnt == 0)
+					{
+						tx.Rollback();
+						var scopeText = codes.Count == 0
+							? "across all stores"
+							: $"in store(s): {string.Join(", ", codes)}";
+						return BuildExecuteErrorResponse(
+							$"No budget seats found for the selected department(s) {scopeText}.", HttpStatusCode.NotFound);
+					}
+
+					using (var cb = (SqlCommand)conn.CreateCommand())
+					{
+						cb.Transaction = (SqlTransaction)tx;
+						cb.CommandText = $"SELECT * INTO dbo.[{bak}] FROM dbo.BGTSEATMaster WHERE {where}";
+						bind(cb);
+						await cb.ExecuteNonQueryAsync();
+					}
+
+					int del;
+					using (var cd = (SqlCommand)conn.CreateCommand())
+					{
+						cd.Transaction = (SqlTransaction)tx;
+						cd.CommandText = $"DELETE FROM dbo.BGTSEATMaster WHERE {where}";
+						bind(cd);
+						del = await cd.ExecuteNonQueryAsync();
+					}
+
+					var key = $"Depts: {string.Join(", ", depts)}" +
+							  (codes.Count == 0 ? " | Stores: ALL (pan-India)" : $" | Stores: {string.Join(", ", codes)}");
+					await WriteBgtDeleteAuditAsync(conn, tx, "DELETE_BY_DEPARTMENT", deletedBy,
+						key, $"Deleted {del} row(s). Backup={bak}");
+
+					tx.Commit();
+
+					var where2 = codes.Count == 0
+						? "across ALL stores (pan-India)"
+						: $"in {codes.Count} store(s): {string.Join(", ", codes)}";
+					return BuildExecuteSuccessResponse(
+						$"Deleted {del} budget seat(s) for {depts.Count} department(s) {where2}. Backup saved as dbo.{bak}.");
+				}
+				catch (SqlException ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+				}
+				catch (Exception ex)
+				{
+					try { tx.Rollback(); } catch { }
+					return BuildExecuteErrorResponse($"Error deleting seats for selected department(s): {ex.Message}", HttpStatusCode.InternalServerError);
+				}
+				finally
+				{
+					if (conn.State == ConnectionState.Open)
+						await conn.CloseAsync();
+				}
+			}
+		}
+
 		// Delete EVERY budget seat (whole table). Backs up the FULL table to a timestamped table
 		// first, then deletes all rows. Backup + delete run in one transaction (atomic).
 		public async Task<ExecuteAndReponse> DeleteAllSeatsAsync(string? deletedBy = null)

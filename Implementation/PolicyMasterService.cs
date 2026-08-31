@@ -191,6 +191,13 @@ SELECT @@ROWCOUNT;";
                     return BuildFetchErrorResponse($"Header mismatch at column {i + 1}: expected '{expected[i]}', found '{h}'", HttpStatusCode.BadRequest);
             }
 
+            // "Calc Type" (column 7) is OPTIONAL so a sheet saved before the column existed
+            // still uploads. When it is absent, each row keeps its current CalcType.
+            var calcTypeHeader = ws.Cell(1, expected.Length + 1).GetValue<string>().Trim();
+            bool hasCalcType = calcTypeHeader.Length > 0;
+            if (hasCalcType && !string.Equals(calcTypeHeader, "Calc Type", StringComparison.OrdinalIgnoreCase))
+                return BuildFetchErrorResponse($"Header mismatch at column {expected.Length + 1}: expected 'Calc Type', found '{calcTypeHeader}'", HttpStatusCode.BadRequest);
+
             var rows = ws.RowsUsed().Skip(1).ToList();
             if (rows.Count == 0)
                 return BuildFetchErrorResponse("No data rows found", HttpStatusCode.BadRequest);
@@ -217,14 +224,29 @@ SELECT @@ROWCOUNT;";
                     var empr = ParseDec(r.Cell(5).GetValue<string>());
                     var emprMax = ParseDec(r.Cell(6).GetValue<string>());
 
+                    string calcType = null;
+                    if (hasCalcType)
+                    {
+                        var (ctOk, ct) = NormalizeCalcType(r.Cell(7).GetValue<string>());
+                        if (!ctOk)
+                            return Rollback(tx, $"Row {i + 2}: Calc Type must be 'Flat' or 'Percent', found '{r.Cell(7).GetValue<string>()}'.");
+                        calcType = ct;
+                    }
+
                     // UPDATE-ONLY: never insert. Match existing row by State + Frequency.
+                    // CalcType is only written when the sheet supplied the column.
                     await using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = tx;
-                        cmd.CommandText = @"
+                        cmd.CommandText = hasCalcType ? @"
+UPDATE dbo.LWFPolicyMaster SET Employee=@emp, EmployeeMax=@empMax, Employeer=@empr, EmployeerMax=@emprMax, CalcType=@calcType
+ WHERE State=@state AND ISNULL(Frequency,'')=ISNULL(@freq,'');
+SELECT @@ROWCOUNT;" : @"
 UPDATE dbo.LWFPolicyMaster SET Employee=@emp, EmployeeMax=@empMax, Employeer=@empr, EmployeerMax=@emprMax
  WHERE State=@state AND ISNULL(Frequency,'')=ISNULL(@freq,'');
 SELECT @@ROWCOUNT;";
+                        if (hasCalcType)
+                            cmd.Parameters.Add(new SqlParameter("@calcType", SqlDbType.NVarChar, 10) { Value = calcType });
                         cmd.Parameters.Add(new SqlParameter("@state", SqlDbType.NVarChar, 200) { Value = state });
                         cmd.Parameters.Add(new SqlParameter("@freq", SqlDbType.NVarChar, 200) { Value = (object)freq ?? DBNull.Value });
                         cmd.Parameters.Add(new SqlParameter("@emp", SqlDbType.Decimal) { Value = (object)emp ?? DBNull.Value });
@@ -260,7 +282,9 @@ SELECT @@ROWCOUNT;";
                 {
                     await conn.OpenAsync();
                     await using var cmd = conn.CreateCommand();
-                    cmd.CommandText = "SELECT Id, State, Frequency, Employee, EmployeeMax, Employeer, EmployeerMax FROM dbo.LWFPolicyMaster ORDER BY State, Frequency";
+                    // CalcType tells payroll whether Employee/Employeer are flat rupees or a
+                    // percentage of gross. ISNULL(...,'Flat') so a blank never reaches the UI.
+                    cmd.CommandText = "SELECT Id, State, Frequency, Employee, EmployeeMax, Employeer, EmployeerMax, ISNULL(CalcType,'Flat') AS CalcType FROM dbo.LWFPolicyMaster ORDER BY State, Frequency";
                     if (!isExcel)
                     {
                         await using var rdr = await cmd.ExecuteReaderAsync();
@@ -275,6 +299,7 @@ SELECT @@ROWCOUNT;";
                                 employeeMax = rdr["EmployeeMax"] == DBNull.Value ? (decimal?)null : Convert.ToDecimal(rdr["EmployeeMax"]),
                                 employer = rdr["Employeer"] == DBNull.Value ? (decimal?)null : Convert.ToDecimal(rdr["Employeer"]),
                                 employerMax = rdr["EmployeerMax"] == DBNull.Value ? (decimal?)null : Convert.ToDecimal(rdr["EmployeerMax"]),
+                                calcType = rdr["CalcType"] as string,
                             });
                         }
                         return BuildFetchSuccessResponse("Fetched LWF policy", list);
@@ -285,7 +310,7 @@ SELECT @@ROWCOUNT;";
 
                 using var book = new XLWorkbook();
                 var sheet = book.Worksheets.Add("LWFPolicyMaster");
-                var headers = new[] { "State", "Frequency", "Employee", "Employee Max", "Employer", "Employer Max" };
+                var headers = new[] { "State", "Frequency", "Employee", "Employee Max", "Employer", "Employer Max", "Calc Type" };
                 for (int i = 0; i < headers.Length; i++) { var c = sheet.Cell(1, i + 1); c.Value = headers[i]; c.Style.Font.Bold = true; }
                 for (int i = 0; i < dt.Rows.Count; i++)
                 {
@@ -296,6 +321,7 @@ SELECT @@ROWCOUNT;";
                     sheet.Cell(i + 2, 4).Value = row["EmployeeMax"] == DBNull.Value ? "" : row["EmployeeMax"].ToString();
                     sheet.Cell(i + 2, 5).Value = row["Employeer"] == DBNull.Value ? "" : row["Employeer"].ToString();
                     sheet.Cell(i + 2, 6).Value = row["EmployeerMax"] == DBNull.Value ? "" : row["EmployeerMax"].ToString();
+                    sheet.Cell(i + 2, 7).Value = row["CalcType"] == DBNull.Value ? "Flat" : row["CalcType"].ToString();
                 }
                 sheet.Columns().AdjustToContents();
                 using var ms = new MemoryStream();
@@ -356,13 +382,16 @@ SELECT @@ROWCOUNT;";
                 return BuildExecuteErrorResponse("State is required.", HttpStatusCode.BadRequest);
             if (string.IsNullOrWhiteSpace(dto.Frequency))
                 return BuildExecuteErrorResponse("Frequency is required.", HttpStatusCode.BadRequest);
+            var (calcTypeOk, calcType) = NormalizeCalcType(dto.CalcType);
+            if (!calcTypeOk)
+                return BuildExecuteErrorResponse("Calc Type must be 'Flat' or 'Percent'.", HttpStatusCode.BadRequest);
             try
             {
                 await using var conn = new SqlConnection(ConnStr);
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
                 cmd.CommandText = @"UPDATE dbo.LWFPolicyMaster
-                    SET State=@state, Frequency=@freq, Employee=@emp, EmployeeMax=@empMax, Employeer=@empr, EmployeerMax=@emprMax
+                    SET State=@state, Frequency=@freq, Employee=@emp, EmployeeMax=@empMax, Employeer=@empr, EmployeerMax=@emprMax, CalcType=@calcType
                     WHERE Id=@id";
                 cmd.Parameters.Add(new SqlParameter("@id", SqlDbType.Int) { Value = dto.Id });
                 cmd.Parameters.Add(new SqlParameter("@state", SqlDbType.NVarChar, 200) { Value = dto.State.Trim() });
@@ -371,6 +400,7 @@ SELECT @@ROWCOUNT;";
                 cmd.Parameters.Add(new SqlParameter("@empMax", SqlDbType.Decimal) { Value = (object)dto.EmployeeMax ?? DBNull.Value });
                 cmd.Parameters.Add(new SqlParameter("@empr", SqlDbType.Decimal) { Value = (object)dto.Employer ?? DBNull.Value });
                 cmd.Parameters.Add(new SqlParameter("@emprMax", SqlDbType.Decimal) { Value = (object)dto.EmployerMax ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@calcType", SqlDbType.NVarChar, 10) { Value = calcType });
                 var n = await cmd.ExecuteNonQueryAsync();
                 if (n == 0) return BuildExecuteErrorResponse($"No LWF row found with Id {dto.Id}.", HttpStatusCode.NotFound);
                 return BuildExecuteSuccessResponse("LWF row updated successfully.");
@@ -422,19 +452,23 @@ SELECT @@ROWCOUNT;";
                 return BuildExecuteErrorResponse("State is required.", HttpStatusCode.BadRequest);
             if (string.IsNullOrWhiteSpace(dto.Frequency))
                 return BuildExecuteErrorResponse("Frequency is required.", HttpStatusCode.BadRequest);
+            var (calcTypeOk, calcType) = NormalizeCalcType(dto.CalcType);
+            if (!calcTypeOk)
+                return BuildExecuteErrorResponse("Calc Type must be 'Flat' or 'Percent'.", HttpStatusCode.BadRequest);
             try
             {
                 await using var conn = new SqlConnection(ConnStr);
                 await conn.OpenAsync();
                 await using var cmd = conn.CreateCommand();
-                cmd.CommandText = @"INSERT INTO dbo.LWFPolicyMaster (State, Frequency, Employee, EmployeeMax, Employeer, EmployeerMax)
-                                    VALUES (@state, @freq, @emp, @empMax, @empr, @emprMax);";
+                cmd.CommandText = @"INSERT INTO dbo.LWFPolicyMaster (State, Frequency, Employee, EmployeeMax, Employeer, EmployeerMax, CalcType)
+                                    VALUES (@state, @freq, @emp, @empMax, @empr, @emprMax, @calcType);";
                 cmd.Parameters.Add(new SqlParameter("@state", SqlDbType.NVarChar, 200) { Value = dto.State.Trim() });
                 cmd.Parameters.Add(new SqlParameter("@freq", SqlDbType.NVarChar, 200) { Value = dto.Frequency.Trim() });
                 cmd.Parameters.Add(new SqlParameter("@emp", SqlDbType.Decimal) { Value = (object)dto.Employee ?? DBNull.Value });
                 cmd.Parameters.Add(new SqlParameter("@empMax", SqlDbType.Decimal) { Value = (object)dto.EmployeeMax ?? DBNull.Value });
                 cmd.Parameters.Add(new SqlParameter("@empr", SqlDbType.Decimal) { Value = (object)dto.Employer ?? DBNull.Value });
                 cmd.Parameters.Add(new SqlParameter("@emprMax", SqlDbType.Decimal) { Value = (object)dto.EmployerMax ?? DBNull.Value });
+                cmd.Parameters.Add(new SqlParameter("@calcType", SqlDbType.NVarChar, 10) { Value = calcType });
                 await cmd.ExecuteNonQueryAsync();
                 return BuildExecuteSuccessResponse("LWF entry added successfully.");
             }
@@ -442,6 +476,24 @@ SELECT @@ROWCOUNT;";
             {
                 return BuildExecuteErrorResponse($"Error adding LWF entry: {ex.Message}", HttpStatusCode.BadRequest);
             }
+        }
+
+        // LWF CalcType accepts only "Flat" or "Percent" (case/space insensitive). Blank means
+        // "Flat", which is how every state behaved before the column existed, so an older
+        // client or a sheet without the column keeps working unchanged.
+        //   Flat    -> Employee/Employer are rupee amounts
+        //   Percent -> Employee/Employer are percentages of gross, capped by the Max
+        //              (Haryana: 0.2% capped at 35, 0.4% capped at 70)
+        private static (bool ok, string value) NormalizeCalcType(string raw)
+        {
+            var t = (raw ?? string.Empty).Trim();
+            if (t.Length == 0) return (true, "Flat");
+            if (string.Equals(t, "Flat", StringComparison.OrdinalIgnoreCase)) return (true, "Flat");
+            if (string.Equals(t, "Percent", StringComparison.OrdinalIgnoreCase)) return (true, "Percent");
+            // Tolerate the obvious near-misses rather than rejecting a whole upload.
+            if (string.Equals(t, "Percentage", StringComparison.OrdinalIgnoreCase) || t == "%") return (true, "Percent");
+            if (string.Equals(t, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(t, "Fixed", StringComparison.OrdinalIgnoreCase)) return (true, "Flat");
+            return (false, "Flat");
         }
 
         private FetchAndResponse Rollback(SqlTransaction tx, string message)

@@ -25,5 +25,12 @@ namespace HRMSAPI.DTO
         public decimal? EmployeeMax { get; set; }
         public decimal? Employer { get; set; }      // maps to DB column Employeer
         public decimal? EmployerMax { get; set; }   // maps to DB column EmployeerMax
+
+        // How payroll must READ the Employee / Employer figures above:
+        //   "Flat"    -> a rupee amount per Frequency (Punjab 5/20, Goa 10/30, ...)
+        //   "Percent" -> a percentage of earned gross, capped by the Max
+        //                (Haryana 0.2% capped at 35 / 0.4% capped at 70)
+        // Blank is treated as "Flat" so existing rows keep behaving as before.
+        public string? CalcType { get; set; }
     }
 }

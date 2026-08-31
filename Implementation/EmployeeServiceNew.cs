@@ -21,6 +21,7 @@ using Roomsy.DTOS.GenericsResponses;
 using System;
 using System.Data;
 using System.Net;
+using System.Globalization;
 using System.Net.Mail;
 using System.Reflection;
 using GetEmployeeDetailsResult = HRMSAPI.DTO.GetEmployeeDetailsResultNew;
@@ -193,6 +194,38 @@ namespace HRMSAPI.Implementation
                 map[$"{sdept}|{sparent}|{slvl}|{snm.ToLowerInvariant()}"] = (sid, snm);
             }
             return map;
+        }
+
+        // Reads a date out of an uploaded sheet. A real Excel date cell is taken as-is; text is
+        // read day-first, because the sample sheet shows dates as DD-MM-YYYY and a plain
+        // DateTime.TryParse under a US culture would silently turn 05-08-2026 into 8 May.
+        // Returns false for blank or unreadable cells; the caller reports those to the user.
+        private static bool TryReadSheetDate(IXLCell cell, out DateTime value)
+        {
+            value = default;
+            if (cell == null) return false;
+
+            if (cell.DataType == XLDataType.DateTime && cell.TryGetValue(out DateTime cellDate))
+            {
+                value = cellDate;
+                return true;
+            }
+
+            var raw = cell.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+
+            string[] dayFirstFormats =
+            {
+                "dd-MM-yyyy", "d-M-yyyy", "dd/MM/yyyy", "d/M/yyyy", "dd.MM.yyyy", "d.M.yyyy",
+                "yyyy-MM-dd", "yyyy/MM/dd",
+                "dd-MMM-yyyy", "d-MMM-yyyy", "dd MMM yyyy", "d MMM yyyy"
+            };
+            if (DateTime.TryParseExact(raw, dayFirstFormats, CultureInfo.InvariantCulture,
+                                       DateTimeStyles.None, out value))
+                return true;
+
+            // Last resort for anything with a time component or a spelled-out month.
+            return DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out value);
         }
 
         // Resolves a sub-department name chain (sub1 -> sub2 -> sub3) under a department to ids.
@@ -1310,12 +1343,23 @@ namespace HRMSAPI.Implementation
                     };
                     // Sub-department columns are OPTIONAL and appended after the base columns.
                     string[] subDeptHeaders = new[] { "Sub-Department 1", "Sub-Department 2", "Sub-Department 3" };
+                    // "Last Working Day" is OPTIONAL too and always sits in the LAST column, so an
+                    // existing file (with or without sub-departments) keeps uploading unchanged.
+                    const string lastWorkingDayHeader = "Last Working Day";
                     var headerRow = worksheet.Row(1);
                     int cellCount = headerRow.CellsUsed().Count();
-                    bool hasSubDept = cellCount == expectedHeaders.Length + subDeptHeaders.Length;
-                    if (cellCount != expectedHeaders.Length && !hasSubDept)
+                    int baseCols = expectedHeaders.Length;
+                    int subDeptCols = subDeptHeaders.Length;
+
+                    bool hasSubDept = cellCount == baseCols + subDeptCols || cellCount == baseCols + subDeptCols + 1;
+                    int lastWorkingDayCol =
+                          cellCount == baseCols + 1                 ? baseCols + 1                  // base + LWD
+                        : cellCount == baseCols + subDeptCols + 1   ? baseCols + subDeptCols + 1    // base + sub-dept + LWD
+                        : 0;                                                                        // not supplied
+
+                    if (cellCount != baseCols && !hasSubDept && lastWorkingDayCol == 0)
                     {
-                        return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns (or {expectedHeaders.Length + subDeptHeaders.Length} with sub-departments), found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
+                        return BuildExecuteErrorResponse($"Column count mismatch: Expected {baseCols} columns, or {baseCols + 1} with '{lastWorkingDayHeader}', or {baseCols + subDeptCols} with sub-departments, or {baseCols + subDeptCols + 1} with both, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
                     }
                     for (int i = 0; i < expectedHeaders.Length; i++)
                     {
@@ -1334,8 +1378,15 @@ namespace HRMSAPI.Implementation
                                 return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
                         }
                     }
+                    if (lastWorkingDayCol > 0)
+                    {
+                        var lwdHeader = headerRow.Cell(lastWorkingDayCol).GetValue<string>().Trim();
+                        if (!string.Equals(lwdHeader, lastWorkingDayHeader, StringComparison.OrdinalIgnoreCase))
+                            return BuildExecuteErrorResponse($"Header mismatch at column {lastWorkingDayCol}: Expected '{lastWorkingDayHeader}', found '{lwdHeader}'", HttpStatusCode.BadRequest);
+                    }
                     var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
                     var subDeptErrors = new List<string>();
+                    var dateErrors = new List<string>();
                     int excelRowNo = 1; // header is row 1; first data row = 2
                     var rows = worksheet.RowsUsed().Skip(1); // Skip header row
 
@@ -1421,9 +1472,16 @@ namespace HRMSAPI.Implementation
                         if (DateTime.TryParse(row.Cell(14).GetValue<string>(), out DateTime dob))
                             employee.DOB = dob;
 
-                        // Column 15: Date of Joining
-                        if (DateTime.TryParse(row.Cell(15).GetValue<string>(), out DateTime joiningDate))
-                            employee.DOJ = joiningDate;
+                        // Column 15: Date of Joining. Blank leaves the existing value alone;
+                        // an unreadable value is reported rather than silently skipped.
+                        var dojRaw = row.Cell(15).GetValue<string>();
+                        if (!string.IsNullOrWhiteSpace(dojRaw))
+                        {
+                            if (TryReadSheetDate(row.Cell(15), out DateTime joiningDate))
+                                employee.DOJ = joiningDate;
+                            else
+                                dateErrors.Add($"Row {excelRowNo} ({empCode}): '{dojRaw}' is not a valid Date of Joining");
+                        }
 
                         // Column 16: Basic Salary
                         if (decimal.TryParse(row.Cell(16).GetValue<string>(), out decimal basicSalary))
@@ -1636,6 +1694,30 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
+                        // Last column (optional): Last Working Day -> tblEmployee.DateOfLeft.
+                        // Blank leaves the existing value alone, like every other column here.
+                        // Setting it records the date only; it does not deactivate the employee or
+                        // create a separation record — those stay with the separation flow.
+                        if (lastWorkingDayCol > 0)
+                        {
+                            var lwdRaw = row.Cell(lastWorkingDayCol).GetValue<string>();
+                            if (!string.IsNullOrWhiteSpace(lwdRaw))
+                            {
+                                if (TryReadSheetDate(row.Cell(lastWorkingDayCol), out DateTime lastWorkingDay))
+                                {
+                                    // CK_tblEmployee_DateOfLeft requires DateOfLeft >= DOJ. Catch it
+                                    // here so one bad row is reported instead of failing the whole
+                                    // batch on SaveChanges. DOJ may have just been set above.
+                                    if (employee.DOJ.HasValue && lastWorkingDay.Date < employee.DOJ.Value.Date)
+                                        dateErrors.Add($"Row {excelRowNo} ({empCode}): Last Working Day {lastWorkingDay:dd-MM-yyyy} is before the Date of Joining {employee.DOJ.Value:dd-MM-yyyy}");
+                                    else
+                                        employee.DateOfLeft = lastWorkingDay;
+                                }
+                                else
+                                    dateErrors.Add($"Row {excelRowNo} ({empCode}): '{lwdRaw}' is not a valid Last Working Day");
+                            }
+                        }
+
                         // Update audit fields - keep UpdatedBy and LastUpdatedBy in sync.
                         employee.UpdatedBy = updatedBy;
                         employee.LastUpdatedBy = updatedBy;
@@ -1648,6 +1730,8 @@ namespace HRMSAPI.Implementation
                     var updMsg = "Employee records updated successfully";
                     if (subDeptErrors.Count > 0)
                         updMsg += $". Note: {subDeptErrors.Count} sub-department value(s) could not be applied: {string.Join(" | ", subDeptErrors.Take(20))}";
+                    if (dateErrors.Count > 0)
+                        updMsg += $". Note: {dateErrors.Count} date value(s) could not be applied: {string.Join(" | ", dateErrors.Take(20))}";
                     return BuildExecuteSuccessResponse(updMsg);
                 }
             }
@@ -1694,11 +1778,21 @@ namespace HRMSAPI.Implementation
 
                 // Sub-department columns are OPTIONAL and appended after the base columns.
                 string[] subDeptHeaders = new[] { "Sub-Department 1", "Sub-Department 2", "Sub-Department 3" };
+                // "Last Working Day" is OPTIONAL and always the LAST column (see UpdateEmployeeWithExcel).
+                const string lastWorkingDayHeader = "Last Working Day";
                 var headerRow = worksheet.Row(1);
                 int cellCount = headerRow.CellsUsed().Count();
-                bool hasSubDept = cellCount == expectedHeaders.Length + subDeptHeaders.Length;
-                if (cellCount != expectedHeaders.Length && !hasSubDept)
-                    return BuildExecuteErrorResponse($"Column count mismatch: Expected {expectedHeaders.Length} columns (or {expectedHeaders.Length + subDeptHeaders.Length} with sub-departments), found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
+                int baseCols = expectedHeaders.Length;
+                int subDeptCols = subDeptHeaders.Length;
+
+                bool hasSubDept = cellCount == baseCols + subDeptCols || cellCount == baseCols + subDeptCols + 1;
+                int lastWorkingDayCol =
+                      cellCount == baseCols + 1                 ? baseCols + 1
+                    : cellCount == baseCols + subDeptCols + 1   ? baseCols + subDeptCols + 1
+                    : 0;
+
+                if (cellCount != baseCols && !hasSubDept && lastWorkingDayCol == 0)
+                    return BuildExecuteErrorResponse($"Column count mismatch: Expected {baseCols} columns, or {baseCols + 1} with '{lastWorkingDayHeader}', or {baseCols + subDeptCols} with sub-departments, or {baseCols + subDeptCols + 1} with both, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
 
                 for (int i = 0; i < expectedHeaders.Length; i++)
                 {
@@ -1714,6 +1808,12 @@ namespace HRMSAPI.Implementation
                         if (!string.Equals(cv, subDeptHeaders[i], StringComparison.OrdinalIgnoreCase))
                             return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
                     }
+                }
+                if (lastWorkingDayCol > 0)
+                {
+                    var lwdHeader = headerRow.Cell(lastWorkingDayCol).GetValue<string>().Trim();
+                    if (!string.Equals(lwdHeader, lastWorkingDayHeader, StringComparison.OrdinalIgnoreCase))
+                        return BuildExecuteErrorResponse($"Header mismatch at column {lastWorkingDayCol}: Expected '{lastWorkingDayHeader}', found '{lwdHeader}'", HttpStatusCode.BadRequest);
                 }
                 var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
 
@@ -1857,10 +1957,20 @@ namespace HRMSAPI.Implementation
                         // Date fields
                         if (DateTime.TryParse(row.Cell(14).GetValue<string>(), out DateTime dob))
                             emp.DOB = dob;
-                        if (DateTime.TryParse(row.Cell(15).GetValue<string>(), out DateTime doj))
+                        // Column 15: Date of Joining. Defaults to today when blank, as before, but a
+                        // value that is present and unreadable is reported instead of silently
+                        // becoming today's date.
+                        var dojRaw = row.Cell(15).GetValue<string>();
+                        if (TryReadSheetDate(row.Cell(15), out DateTime doj))
+                        {
                             emp.DOJ = doj;
+                        }
                         else
+                        {
+                            if (!string.IsNullOrWhiteSpace(dojRaw))
+                                errors.Add($"Row {rowNum}: '{dojRaw}' is not a valid Date of Joining - defaulted to today");
                             emp.DOJ = DateTime.Now;
+                        }
 
                         // Decimal fields
                         if (decimal.TryParse(row.Cell(16).GetValue<string>(), out decimal basicSalary)) emp.BasicSalary = basicSalary;
@@ -1934,6 +2044,27 @@ namespace HRMSAPI.Implementation
                             emp.SubDepartmentId1 = sd1;
                             emp.SubDepartmentId2 = sd2;
                             emp.SubDepartmentId3 = sd3;
+                        }
+
+                        // Last column (optional): Last Working Day -> tblEmployee.DateOfLeft.
+                        // Records the date only; it does not deactivate the employee or create a
+                        // separation record.
+                        if (lastWorkingDayCol > 0)
+                        {
+                            var lwdRaw = row.Cell(lastWorkingDayCol).GetValue<string>();
+                            if (!string.IsNullOrWhiteSpace(lwdRaw))
+                            {
+                                if (TryReadSheetDate(row.Cell(lastWorkingDayCol), out DateTime lastWorkingDay))
+                                {
+                                    // CK_tblEmployee_DateOfLeft requires DateOfLeft >= DOJ.
+                                    if (emp.DOJ.HasValue && lastWorkingDay.Date < emp.DOJ.Value.Date)
+                                        errors.Add($"Row {rowNum}: Last Working Day {lastWorkingDay:dd-MM-yyyy} is before the Date of Joining {emp.DOJ.Value:dd-MM-yyyy}");
+                                    else
+                                        emp.DateOfLeft = lastWorkingDay;
+                                }
+                                else
+                                    errors.Add($"Row {rowNum}: '{lwdRaw}' is not a valid Last Working Day");
+                            }
                         }
 
                         // Active-only enforcement: skip (no ecode/insert) if dept/designation is inactive.

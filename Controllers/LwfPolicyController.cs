@@ -37,7 +37,9 @@ namespace HRMSAPI.Controllers
         public IActionResult DownloadTemplate()
         {
             if (!IsItSuperAdmin()) return ForbidItSuperAdmin();
-            var headers = new[] { "State", "Frequency", "Employee", "Employee Max", "Employer", "Employer Max" };
+            // "Calc Type" says how Employee/Employer must be read: Flat = rupee amount,
+            // Percent = percentage of gross capped by the Max column.
+            var headers = new[] { "State", "Frequency", "Employee", "Employee Max", "Employer", "Employer Max", "Calc Type" };
             using var wb = new XLWorkbook();
             var ws = wb.Worksheets.Add("LWFPolicyMaster");
             for (int i = 0; i < headers.Length; i++)
@@ -46,13 +48,22 @@ namespace HRMSAPI.Controllers
                 c.Value = headers[i];
                 c.Style.Font.Bold = true;
             }
-            // sample row
+            // sample row - a flat amount
             ws.Cell(2, 1).Value = "Maharashtra";
             ws.Cell(2, 2).Value = "Half Yearly";
             ws.Cell(2, 3).Value = "25";
             ws.Cell(2, 4).Value = "25";
             ws.Cell(2, 5).Value = "75";
             ws.Cell(2, 6).Value = "75";
+            ws.Cell(2, 7).Value = "Flat";
+            // sample row - a percentage of gross, capped (this is how Haryana works)
+            ws.Cell(3, 1).Value = "Haryana";
+            ws.Cell(3, 2).Value = "Monthly";
+            ws.Cell(3, 3).Value = "0.2";
+            ws.Cell(3, 4).Value = "35";
+            ws.Cell(3, 5).Value = "0.4";
+            ws.Cell(3, 6).Value = "70";
+            ws.Cell(3, 7).Value = "Percent";
             ws.Columns().AdjustToContents();
             using var ms = new MemoryStream();
             wb.SaveAs(ms);

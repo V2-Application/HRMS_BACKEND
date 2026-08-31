@@ -122,6 +122,35 @@ namespace HRMSAPI.Controllers
 			});
 		}
 
+		// How many seats a department delete would remove. Read-only - nothing is deleted here.
+		[HttpPost("PreviewDeleteByDepartment")]
+		public async Task<IActionResult> PreviewDeleteByDepartment([FromBody] HRMSAPI.DTO.BgtSeatDeleteByDeptRequest request)
+		{
+			var result = await _service.PreviewDeleteSeatsByDepartmentAsync(
+				request?.DeptSnos, request?.LocCodes);
+			return StatusCode((int)result.Code, new ApiFetchAndResponse
+			{
+				Status = result.Status,
+				Message = result.Message,
+				Data = result.Data
+			});
+		}
+
+		// Delete budget seats by department. Store list is optional: leave it empty to delete the
+		// department's seats pan-India, or pass stores to restrict the delete to those stores.
+		// Backs up the affected rows first.
+		[HttpPost("DeleteByDepartment")]
+		public async Task<IActionResult> DeleteByDepartment([FromBody] HRMSAPI.DTO.BgtSeatDeleteByDeptRequest request)
+		{
+			var result = await _service.DeleteSeatsByDepartmentAsync(
+				request?.DeptSnos, request?.LocCodes, CurrentEcode());
+			return StatusCode((int)result.Code, new ApiExecuteAndReponse
+			{
+				Status = result.Status,
+				Message = result.Message
+			});
+		}
+
 		// Delete EVERY budget seat (whole table). Requires confirm=DELETEALL. Backs up the full table first.
 		[HttpPost("DeleteAll")]
 		public async Task<IActionResult> DeleteAll([FromQuery] string confirm)

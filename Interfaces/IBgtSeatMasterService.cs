@@ -15,6 +15,11 @@ namespace HRMSAPI.Interfaces
         Task<ExecuteAndReponse> DeleteSeatsAsync(List<BgtSeatDeleteItem> items, string? deletedBy = null);
         // Delete ALL budget seats for one or more stores (LOC_CODE). Backs up the affected rows first.
         Task<ExecuteAndReponse> DeleteSeatsByStoreAsync(List<string> locCodes, string? deletedBy = null);
+        // Counts what a department delete would remove (per department), without deleting anything.
+        Task<FetchAndResponse> PreviewDeleteSeatsByDepartmentAsync(List<int> deptSnos, List<string> locCodes);
+        // Delete budget seats by department; no store = pan-India, stores = only those stores.
+        // Both lists accept multiple values. Backs up the affected rows first.
+        Task<ExecuteAndReponse> DeleteSeatsByDepartmentAsync(List<int> deptSnos, List<string> locCodes, string? deletedBy = null);
         // Delete EVERY budget seat (whole table). Backs up the full table first. Requires explicit confirm.
         Task<ExecuteAndReponse> DeleteAllSeatsAsync(string? deletedBy = null);
     }

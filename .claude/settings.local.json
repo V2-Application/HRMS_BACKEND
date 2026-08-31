@@ -105,7 +105,14 @@
       "Bash(echo \"EXIT=$?\")",
       "Bash(sqlcmd -S '192.168.151.27\\\\KARMA' -d HRMS -U nikhil -P 'Vrl@12345' -i \"C:\\\\\\\\Users\\\\\\\\Administrator\\\\\\\\Desktop\\\\\\\\HRMS_BACKEND\\\\\\\\Scripts\\\\\\\\_PROD_Update_usp_Incentive_AddCreatedByFilter.sql\")",
       "Bash(sqlcmd -S \"192.168.151.28\\\\hrms\" -U sa_hrms -P \"CIHTY5pBmRRwjAw\" -d HRMS -C -Q \"SELECT cc.name, cc.definition FROM sys.check_constraints cc WHERE cc.name = 'CK_tblEmployee_DateOfLeft';\")",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\v41797\\\\Desktop\\\\HRMS_FRONTEND\" | ForEach-Object { $_.Name })"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\v41797\\\\Desktop\\\\HRMS_FRONTEND\" | ForEach-Object { $_.Name })",
+      "Bash(export SQLCMDPASSWORD=\"CIHTY5pBmRRwjAw\")",
+      "Bash('/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd' -S '192.168.151.28\\\\hrms' -U sa_hrms -d HRMS -C -W -s ' | ' -i '__TRACKED_VAR__\\\\q90.sql')",
+      "Bash('/c/Program Files/Microsoft SQL Server/Client SDK/ODBC/170/Tools/Binn/sqlcmd' -S '192.168.151.28\\\\hrms' -U sa_hrms -d HRMS -C -y 0 -i '__TRACKED_VAR__\\\\q92.sql')",
+      "Read(//c/Users/V41797/AppData/Local/Temp/claude/c--Users-V41797-Desktop-New-folder-HRMS-BACKEND/14203286-ef6f-4d97-ac9c-7a417ace97c7/scratchpad/**)",
+      "Bash(SP=\"/c/Users/V41797/AppData/Local/Temp/claude/c--Users-V41797-Desktop-New-folder-HRMS-BACKEND/14203286-ef6f-4d97-ac9c-7a417ace97c7/scratchpad\"; sed -n '1,120p' \"$SP/prc_daily.sql\")",
+      "Bash(SP=\"/c/Users/V41797/AppData/Local/Temp/claude/c--Users-V41797-Desktop-New-folder-HRMS-BACKEND/14203286-ef6f-4d97-ac9c-7a417ace97c7/scratchpad\"; sed -n '120,200p' \"$SP/prc_daily.sql\")",
+      "Bash(sqlcmd -S '192.168.151.27\\\\KARMA' -U nikhil -P Vrl@12345 -d HRMS -C -W -Q ' *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Administrator\\Desktop\\HRMS_BACKEND\\Scripts"
