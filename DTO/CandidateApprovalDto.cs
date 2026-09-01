@@ -81,6 +81,9 @@
         public string Phone { get; set; }
         public string Email { get; set; }
         public string Designation { get; set; }
+        // Department id from Candidate.DEPARTMENT (stored as a string). Resolved to a
+        // name on the client via the Department dropdown master, same as Designation.
+        public string Department { get; set; }
         public DateTime? DOB { get; set; }
       
         public int StatusId { get; set; }

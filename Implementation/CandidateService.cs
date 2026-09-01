@@ -2854,14 +2854,27 @@ SELECT c.Id,
     xp.[To]                                     AS [Prev To],
     xp.[Last CTC]                               AS [Current Salary],
     xp.[InHand]                                 AS [Prev In Hand],
-    xp.[Expected_CTC]                           AS [Expected CTC]
+    xp.[Expected_CTC]                           AS [Expected CTC],
+    docs.[AttachmentCount]                      AS [Attachment Count],
+    docs.[AttachmentList]                       AS [Attachments]
 FROM Candidate c
 LEFT JOIN tblDepartment dept ON TRY_CAST(c.DEPARTMENT AS INT) = dept.DepartmentId
 OUTER APPLY (
     SELECT TOP 1 e.[Name of Company], e.[Position Held], e.[From], e.[To], e.[Last CTC], e.[InHand], e.[Expected_CTC]
     FROM tblExperience e WHERE e.CID = c.Id AND ISNULL(e.IsDeleted,0)=0
     ORDER BY e.ID DESC
-) xp";
+) xp
+-- All uploaded documents for the candidate (resume, Aadhar, PAN, education, ...).
+-- Emitted as 'FileType=FilePath' pairs separated by '|'; the export turns each
+-- path into a full URL against the configured Reports:ResumeBaseUrl.
+OUTER APPLY (
+    SELECT COUNT(*) AS [AttachmentCount],
+           STRING_AGG(CONCAT(ISNULL(NULLIF(d.FileType,''),'Document'), '=', d.FilePath), '|') AS [AttachmentList]
+    FROM CanidateDocs d
+    WHERE d.CId = c.Id
+      AND ISNULL(d.IsDeleted,0) = 0
+      AND NULLIF(LTRIM(RTRIM(d.FilePath)),'') IS NOT NULL
+) docs";
 
             var mainReaderTask = command.ExecuteReaderAsync();
             var extra = new DataTable();
@@ -2957,6 +2970,19 @@ OUTER APPLY (
                 IdxOf("HrActionedOn"),
             };
 
+            var attachmentsColIdx = IdxOf("Attachments");
+
+            // DB stores Windows-style relative paths ("92975_user@x.com\Resume\foo.pdf").
+            // Normalize separators, URL-encode each segment, prepend the production base
+            // URL (where the files actually live). Shared by the resume/offer-letter
+            // columns and the attachment list.
+            string ToFileUrl(string rawPath)
+            {
+                var normalized = rawPath.Replace('\\', '/').TrimStart('/');
+                var encoded = string.Join("/", normalized.Split('/').Select(Uri.EscapeDataString));
+                return baseUrl.TrimEnd('/') + "/" + encoded;
+            }
+
             string ApprovalStatusText(object raw)
             {
                 if (raw == null || raw == DBNull.Value) return "Pending";
@@ -2999,6 +3025,44 @@ OUTER APPLY (
                         continue;
                     }
 
+                    if (col == attachmentsColIdx)
+                    {
+                        // 'FileType=FilePath' pairs joined by '|' -> one "Type: url" per
+                        // line. A cell can hold only one hyperlink, so with several
+                        // documents the URLs are written as text (still copy/pasteable);
+                        // a single attachment gets a real clickable link.
+                        var raw = value.ToString();
+                        if (string.IsNullOrWhiteSpace(raw))
+                        {
+                            cell.Value = string.Empty;
+                            continue;
+                        }
+
+                        var entries = raw.Split('|', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(pair =>
+                            {
+                                var sep = pair.IndexOf('=');
+                                var type = sep > 0 ? pair.Substring(0, sep) : "Document";
+                                var path = sep > 0 ? pair.Substring(sep + 1) : pair;
+                                return (Type: type, Url: ToFileUrl(path));
+                            })
+                            .ToList();
+
+                        if (entries.Count == 1)
+                        {
+                            cell.Value = entries[0].Type;
+                            cell.SetHyperlink(new XLHyperlink(entries[0].Url));
+                            cell.Style.Font.FontColor = XLColor.Blue;
+                            cell.Style.Font.Underline = XLFontUnderlineValues.Single;
+                        }
+                        else
+                        {
+                            cell.Value = string.Join("\n", entries.Select(e => $"{e.Type}: {e.Url}"));
+                            cell.Style.Alignment.WrapText = true;
+                        }
+                        continue;
+                    }
+
                     if (col == resumeColIdx || col == offerLetterColIdx)
                     {
                         var rawPath = value.ToString();
@@ -3008,14 +3072,7 @@ OUTER APPLY (
                             continue;
                         }
 
-                        // DB stores Windows-style relative paths
-                        // ("92975_user@x.com\Resume\18052026_foo.pdf"). Convert to a
-                        // URL: normalize separators, URL-encode each segment, prepend
-                        // the production base URL (where the file actually exists).
-                        var normalized = rawPath.Replace('\\', '/').TrimStart('/');
-                        var encoded = string.Join("/",
-                            normalized.Split('/').Select(Uri.EscapeDataString));
-                        var url = baseUrl.TrimEnd('/') + "/" + encoded;
+                        var url = ToFileUrl(rawPath);
 
                         var displayName = Path.GetFileName(rawPath.Replace('\\', '/'));
                         if (string.IsNullOrEmpty(displayName)) displayName = url;
@@ -3809,6 +3866,13 @@ OUTER APPLY (
                     // Second result set: applicants
                     if (await reader.NextResultAsync())
                     {
+                        // sp_GetApplicantListNew01 does not return every optional column on
+                        // all deployments, so probe the result shape once and read the
+                        // optional ones defensively — a missing column must not throw.
+                        var availableColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        for (int i = 0; i < reader.FieldCount; i++)
+                            availableColumns.Add(reader.GetName(i));
+
                         while (await reader.ReadAsync())
                         {
                             var dto = new ApplicantDetailDto
@@ -3821,6 +3885,9 @@ OUTER APPLY (
                                 Email = reader["Email"]?.ToString(),
                                 IsReopenAllowed = reader["IsReopenAllowed"] != DBNull.Value ? Convert.ToBoolean(reader["IsReopenAllowed"]) : (bool?)null,
                                 Designation = reader["Designation"]?.ToString(),
+                                Department = availableColumns.Contains("DEPARTMENT") && reader["DEPARTMENT"] != DBNull.Value
+                                    ? reader["DEPARTMENT"].ToString()
+                                    : null,
                                 DOB = reader["DOB"] != DBNull.Value ? (DateTime?)reader["DOB"] : null,
                                 StatusId = reader["StatusId"] != DBNull.Value ? Convert.ToInt32(reader["StatusId"]) : 0,
                                 DesignationName = reader["DesignationName"]?.ToString(),
@@ -4398,6 +4465,13 @@ OUTER APPLY (
             data.Source = update.Source ?? data.Source;
             data.CurrentLocation = update.CurrentLocation ?? data.CurrentLocation;
             data.PreferredLocation = update.PreferredLocation ?? data.PreferredLocation;
+
+            // Current employment. Previously the applicant form posted these under names
+            // the DTO did not declare, so model binding dropped them silently and the
+            // columns stayed empty in both the grid and the Excel export.
+            data.COMPANY_1 = update.company1 ?? data.COMPANY_1;
+            data.POSITION_HELD_IN_PREVIOUS_COMPANY = update.positionHeldInPreviousCompany ?? data.POSITION_HELD_IN_PREVIOUS_COMPANY;
+            data.LAST_CTC_ANNUAL_ = update.lastCtcAnnual ?? data.LAST_CTC_ANNUAL_;
 
         }
         private void UpdateDocumentFlags(HRMSAPI.Data.Candidate data, bool isPassportUploaded, bool isLast3Slips,

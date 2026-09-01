@@ -59,6 +59,15 @@ namespace HRMSAPI.Models.Candidate
         public string? CurrentLocation { get; set; }
         public decimal? NoticePeriod { get; set; }
 
+        // Current employment as captured on the applicant form. These write the
+        // Candidate columns the applicant grid/list SP reads ([COMPANY 1],
+        // [POSITION HELD IN PREVIOUS COMPANY], [LAST CTC(ANNUAL)]). The form also
+        // posts the same values via experienceList, which persists to tblExperience
+        // for the Excel export — both views are fed so they agree.
+        public string? company1 { get; set; }
+        public string? positionHeldInPreviousCompany { get; set; }
+        public string? lastCtcAnnual { get; set; }
+
     }
     public class CandidateUpdateFamilyMember
     {
@@ -72,11 +81,18 @@ namespace HRMSAPI.Models.Candidate
     }
     public class CandidateUpdateExperience
     {
-        public string nameOfCompany { get; set; }
-        public string workLocation { get; set; }
-        public string positionHeld { get; set; }
-        public DateTime from { get; set; }
-        public DateTime to { get; set; }
+        // Nullable: the applicant form captures only company / position / last CTC.
+        // As non-nullable reference types these were implicitly required, so posting a
+        // partial experience row failed model validation with a 400.
+        public string? nameOfCompany { get; set; }
+        public string? workLocation { get; set; }
+        public string? positionHeld { get; set; }
+        // Nullable to match tblExperience.From/To (both DateTime?). As non-nullable
+        // DateTime, a JSON "from":null threw inside DeserializeList, which swallows
+        // JsonException and returns an EMPTY list — so one blank date silently
+        // discarded every experience row for that candidate.
+        public DateTime? from { get; set; }
+        public DateTime? to { get; set; }
         public decimal? lastCtc { get; set; }
         public decimal? inHand { get; set; } // Add this property
     }
