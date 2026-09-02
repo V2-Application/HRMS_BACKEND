@@ -201,8 +201,32 @@ namespace HRMSAPI.Implementation
                 emp.DeletedBy = deletedBy;
                 emp.DeletedOn = DateTime.Now;
 
+                // This employee may still be the reporting manager for others. Leaving the
+                // link in place gives those employees a manager who can no longer approve
+                // anything (regularisation, geo attendance, separations). Clear it on the
+                // ACTIVE reports only so HR is prompted to reassign; rows for inactive
+                // employees are left untouched so their history stays intact.
+                var reportsToClear = await _context.tblEmployees
+                    .Where(r => r.ReportHeadEcode == emp.Ecode
+                                && r.EmployeeId != emp.EmployeeId
+                                && r.IsActive == true
+                                && r.IsDeleted != true
+                                && r.DateOfLeft == null)
+                    .ToListAsync();
+
+                foreach (var report in reportsToClear)
+                {
+                    report.ReportHeadEcode = null;
+                    report.UpdatedBy = deletedBy;
+                    report.UpdatedOn = DateTime.Now;
+                }
+
                 await _context.SaveChangesAsync();
-                return (true, "Employee deleted successfully!");
+
+                var message = reportsToClear.Count > 0
+                    ? $"Employee deleted successfully! Reporting manager cleared for {reportsToClear.Count} active employee(s) - please reassign."
+                    : "Employee deleted successfully!";
+                return (true, message);
             }
             catch (Exception ex)
             {

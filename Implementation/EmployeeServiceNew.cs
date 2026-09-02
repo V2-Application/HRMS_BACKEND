@@ -595,17 +595,24 @@ namespace HRMSAPI.Implementation
                     candidate.IsUANRegistered = employeeEntity.IsUANRegistered ?? false;
                     candidate.PreferredLocation = employeeEntity.PreferredLocation ?? "";
                     candidate.AoCode = employeeEntity.AOCode ?? "";
+                    // Only resolve a manager who is still active. A separated/inactive
+                    // manager must present as unassigned so the Reporting Manager field
+                    // comes back blank and HR is prompted to reassign. The stored
+                    // ReportHeadEcode is left untouched for history.
                     var reportingHeadId = _context.tblEmployees
-                   .Where(e => e.Ecode == employeeEntity.ReportHeadEcode)
+                   .Where(e => e.Ecode == employeeEntity.ReportHeadEcode
+                               && e.IsActive == true
+                               && e.IsDeleted != true
+                               && e.DateOfLeft == null)
                    .Select(a => (int?)a.EmployeeId)
                     .FirstOrDefault();
                     candidate.reportingHeadId = reportingHeadId ?? 0; // or null if reportingHeadId is nullable
-                    var reportingheadname = _context.tblEmployees
+                    var reportingheadname = reportingHeadId == null ? null : _context.tblEmployees
                                           .Where(e => e.EmployeeId == reportingHeadId)
                                           .Select(a => a.FirstName ?? a.FULL_NAME)
                                           .FirstOrDefault();
                     candidate.reportingHeadName = reportingheadname ?? string.Empty;
-                    var reportingheadecode = _context.tblEmployees
+                    var reportingheadecode = reportingHeadId == null ? null : _context.tblEmployees
                                           .Where(e => e.EmployeeId == reportingHeadId)
                                           .Select(a =>a.Ecode)
                                           .FirstOrDefault();

@@ -58,13 +58,19 @@ SELECT
     e.GENDER                                                                           AS sex,
     e.MOBILE                                                                           AS mobileNumber,
     e.[EMAIL ADDRESS]                                                                  AS emailId,
-    e.ReportHeadEcode                                                                  AS reportingHeadEcode,
+    -- blank when the manager is no longer active (rh join above filters those out)
+    CASE WHEN rh.Ecode IS NULL THEN NULL ELSE e.ReportHeadEcode END                    AS reportingHeadEcode,
     LTRIM(RTRIM(CONCAT_WS(' ', rh.FirstName, rh.MiddleName, rh.LastName)))             AS reportingHeadName
 FROM dbo.tblEmployee e
 LEFT JOIN dbo.tblDepartment  d  ON d.DepartmentId  = e.DepartmentId
 LEFT JOIN dbo.tblDesignation g  ON g.DesignationId = e.DesignationId
 LEFT JOIN dbo.tblLocation    l  ON l.LocationId    = e.LocationId
+-- Only join a manager who is still active: a separated/inactive manager must show
+-- as blank so the employee gets reassigned. e.ReportHeadEcode is left as stored.
 LEFT JOIN dbo.tblEmployee    rh ON rh.Ecode        = e.ReportHeadEcode
+                               AND rh.IsActive     = 1
+                               AND ISNULL(rh.IsDeleted, 0) = 0
+                               AND rh.DateOfLeft IS NULL
 WHERE e.IsActive = 1
 ORDER BY e.Ecode;
 ";

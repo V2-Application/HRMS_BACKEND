@@ -340,6 +340,26 @@ namespace HRMSAPI.Implementation
                     }
                 }
 
+                // A manager who has gone inactive or separated must not be presented as the
+                // reporting manager: the code stays on tblEmployee for history, but every
+                // consumer sees the field as unassigned so the employee gets reassigned.
+                bool reportHeadUsable =
+                    reportHead != null
+                    && reportHead.IsActive == true
+                    && reportHead.IsDeleted != true
+                    && reportHead.DateOfLeft == null;
+
+                if (!reportHeadUsable)
+                {
+                    if (reportHead != null)
+                    {
+                        _logger.LogInformation(
+                            "Report head {ReportHeadEcode} for {Ecode} is inactive/separated - presenting reporting manager as unassigned.",
+                            userDetail.ReportHeadEcode, userDetail.Ecode);
+                    }
+                    reportHead = null;
+                }
+
                 // 4) Role (isolated, with default)
                 string roleName = "Employee";
                 try
@@ -396,9 +416,13 @@ namespace HRMSAPI.Implementation
                     EmployeeId = userDetail.EmployeeId,
                     EmailAddress = userDetail.EmailAddress,
                     Ecode = userDetail.Ecode,
-                    ReportHeadEcode = userDetail.ReportHeadEcode,
-                    Reportheadid = userDetail.Reportheadid,
-                    ReportHeadName = $"{reportHead?.FirstName} {reportHead?.LastName}".Trim(),
+                    // Blanked when the stored manager is inactive/separated, so the client
+                    // shows "no reporting manager" and prompts for reassignment.
+                    ReportHeadEcode = reportHeadUsable ? userDetail.ReportHeadEcode : string.Empty,
+                    Reportheadid = reportHeadUsable ? userDetail.Reportheadid : 0,
+                    ReportHeadName = reportHeadUsable
+                        ? $"{reportHead?.FirstName} {reportHead?.LastName}".Trim()
+                        : string.Empty,
                     StoreCode = userDetail.StoreCode ?? string.Empty,
                     LocationName = userDetail.LocationName ?? string.Empty,
                     DepartmentName = userDetail.DepartmentName,
@@ -674,6 +698,26 @@ namespace HRMSAPI.Implementation
                         .FirstOrDefaultAsync();
                 }
 
+                // A manager who has gone inactive or separated must not be presented as the
+                // reporting manager: the code stays on tblEmployee for history, but every
+                // consumer sees the field as unassigned so the employee gets reassigned.
+                bool reportHeadUsable =
+                    reportHead != null
+                    && reportHead.IsActive == true
+                    && reportHead.IsDeleted != true
+                    && reportHead.DateOfLeft == null;
+
+                if (!reportHeadUsable)
+                {
+                    if (reportHead != null && !string.IsNullOrEmpty(reportHead.Ecode))
+                    {
+                        _logger.LogInformation(
+                            "Report head {ReportHeadEcode} for {Ecode} is inactive/separated - presenting reporting manager as unassigned.",
+                            userDetail.ReportHeadEcode, userDetail.Ecode);
+                    }
+                    reportHead = null;
+                }
+
                 // Role
                 var role = _context.tblEmployeeRoles
                     .Where(a => a.EmployeeId == userDetail.EmployeeId)
@@ -778,9 +822,13 @@ namespace HRMSAPI.Implementation
                     EmployeeId = userDetail.EmployeeId,
                     EmailAddress = userDetail.EmailAddress,
                     Ecode = userDetail.Ecode,
-                    ReportHeadEcode = userDetail.ReportHeadEcode,
-                    Reportheadid = userDetail.Reportheadid,
-                    ReportHeadName = reportHead?.FirstName + " " + reportHead?.LastName,
+                    // Blanked when the stored manager is inactive/separated, so the client
+                    // shows "no reporting manager" and prompts for reassignment.
+                    ReportHeadEcode = reportHeadUsable ? userDetail.ReportHeadEcode : string.Empty,
+                    Reportheadid = reportHeadUsable ? userDetail.Reportheadid : 0,
+                    ReportHeadName = reportHeadUsable
+                        ? $"{reportHead?.FirstName} {reportHead?.LastName}".Trim()
+                        : string.Empty,
                     StoreCode = userDetail.StoreCode ?? "",
                     LocationName = userDetail.LocationName ?? "",
                     DepartmentName = userDetail.DepartmentName,
