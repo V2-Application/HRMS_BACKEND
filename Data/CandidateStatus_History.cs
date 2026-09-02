@@ -22,4 +22,9 @@ public partial class CandidateStatus_History
     public DateTime CreatedDate { get; set; }
 
     public string CreatedBy { get; set; }
+
+    // Why the status was changed. Added 2026-09-02: the Reopen action on the
+    // Applicant list makes remarks mandatory in the UI, but there was nowhere
+    // to store them, so every reason typed was silently discarded.
+    public string Remarks { get; set; }
 }

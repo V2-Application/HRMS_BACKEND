@@ -1,0 +1,23 @@
+{
+  "name": "Delete with Invalid ID (Validation Error)",
+  "description": "Test case for validation error when ID is empty GUID",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "id": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+  "expectedResponse": {
+    "status": false,
+    "message": "Valid Id is required",
+    "code": 400
+  },
+  "notes": "This test case validates that the API returns an error when ID is an empty GUID."
+}
+

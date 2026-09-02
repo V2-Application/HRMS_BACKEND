@@ -1,0 +1,24 @@
+{
+  "name": "Delete Employee Role Assignment",
+  "description": "Test case for removing a specific role assignment from an employee",
+  "endpoint": "POST /api/RBAC/delete-employee-role",
+  "request": {
+    "method": "POST",
+    "url": "/api/RBAC/delete-employee-role",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "employeeId": 12345,
+      "roleId": 1,
+      "deletedBy": "admin@company.com"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Role Admin removed from employee 12345 successfully",
+    "code": 200
+  },
+  "notes": "This endpoint permanently removes the role assignment from the employee. The deletedBy field is optional and can be used for audit purposes."
+}

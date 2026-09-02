@@ -2289,6 +2289,8 @@ public partial class HRMSContext : DbContext
             entity.Property(e => e.OldStatusName)
                 .HasMaxLength(30)
                 .IsUnicode(false);
+            entity.Property(e => e.Remarks)
+                .HasMaxLength(500);
         });
 
         modelBuilder.Entity<Candidate_2025_08_05_nik>(entity =>

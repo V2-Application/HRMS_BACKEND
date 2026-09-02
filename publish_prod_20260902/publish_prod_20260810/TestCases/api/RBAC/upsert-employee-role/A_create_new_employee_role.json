@@ -1,0 +1,26 @@
+{
+  "name": "Create New Employee Role Assignment",
+  "description": "Test case for assigning a new role to an employee",
+  "endpoint": "POST /api/RBAC/upsert-employee-role",
+  "request": {
+    "method": "POST",
+    "url": "/api/RBAC/upsert-employee-role",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "employeeRoleId": 0,
+      "employeeId": 12345,
+      "roleId": 1,
+      "assignedBy": "admin@company.com",
+      "lastUpdatedBy": "admin@company.com"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Employee role assigned successfully",
+    "code": 200
+  },
+  "notes": "Set employeeRoleId to 0 for new role assignment. The system will automatically assign a new ID."
+}

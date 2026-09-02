@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "moduleName": "Employee",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 0,
+        "subModuleName": "Attendance",
+        "createdBy": "tester",
+        "actions": []
+      }
+    ]
+  }
+] 

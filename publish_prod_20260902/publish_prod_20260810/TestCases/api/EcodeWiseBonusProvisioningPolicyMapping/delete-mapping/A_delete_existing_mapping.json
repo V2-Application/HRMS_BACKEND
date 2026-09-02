@@ -1,0 +1,23 @@
+{
+  "name": "Delete Existing EcodeWise Bonus Provisioning Policy Mapping",
+  "description": "Test case for soft deleting an EcodeWise Bonus Provisioning Policy Mapping",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "id": "550e8400-e29b-41d4-a716-446655440000"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Deleted successfully",
+    "code": 200
+  },
+  "notes": "This performs a soft delete by setting IsActive = false and IsDeleted = true. The record is not physically deleted from the database."
+}
+

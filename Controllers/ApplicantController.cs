@@ -355,7 +355,17 @@ namespace HRMSAPI.Controllers
                     Message = "Candidate reopened successfully"
                 });
             }
-
+            // Validation failures ("Remarks are mandatory", "Only rejected candidates
+            // can be reopened") are the user's to fix, so return 400 with the real
+            // reason. The UI reads response.data.message and shows it.
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new
+                {
+                    Status = false,
+                    Message = ex.Message
+                });
+            }
             catch (Exception ex)
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, new Response

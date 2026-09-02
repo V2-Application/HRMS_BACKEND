@@ -1,0 +1,24 @@
+{
+  "name": "Update Existing EcodeWise Bonus Provisioning Policy Mapping",
+  "description": "Test case for updating an existing EcodeWise Bonus Provisioning Policy Mapping",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/upsert",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": {
+      "ecode": "E-001",
+      "bonusProvisioningPolicyMaster": "660e8400-e29b-41d4-a716-446655440000"
+    }
+  },
+  "expectedResponse": {
+    "status": true,
+    "message": "Upserted successfully",
+    "code": 200
+  },
+  "notes": "This will update the existing mapping if the Ecode exists with IsActive = 1 and IsDeleted = 0. UpdatedBy and UpdatedOn will be set from JWT EmployeeId claim and current timestamp respectively."
+}
+

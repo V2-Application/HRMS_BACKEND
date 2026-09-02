@@ -1,0 +1,2610 @@
+﻿{
+   "CodeGenerationMode": 4,
+   "ContextClassName": "HRMSContext",
+   "ContextNamespace": null,
+   "FilterSchemas": false,
+   "IncludeConnectionString": false,
+   "IrregularWords": null,
+   "MinimumProductVersion": "2.6.1378",
+   "ModelNamespace": null,
+   "OutputContextPath": null,
+   "OutputPath": "Data",
+   "PluralRules": null,
+   "PreserveCasingWithRegex": true,
+   "ProjectRootNamespace": "HRMSAPI",
+   "Schemas": null,
+   "SelectedHandlebarsLanguage": 2,
+   "SelectedToBeGenerated": 0,
+   "SingularRules": null,
+   "T4TemplatePath": null,
+   "Tables": [
+      {
+         "Name": "[dbo].[AbscondHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AbscondingTypes]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ActionFurtherPart]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ActionMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[activeemp_data_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[activeemp_pradeep]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AdditionalPaymentHold]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ApplicabilityMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ArticleMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AssignLocationHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AssignLocationHistory_BACKUp_12062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ATTENDANCE_PUNCH_DETAIL]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AttendanceCache]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AttendanceLatePolicy]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AttendanceRecord]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[AuditLog]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BatchSalaryStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BGTSEATAssignment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BGTSEATMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BgtSeatMaster_08102025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BGTSEATMaster_bACKUP]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BGTSEATMASTER_BACKUp_17092025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BonusAndGratutityOpening]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BonusProvisioningPolicyMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BudgetedWeekOffPolicyMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BudgetWeekoffMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BudgetWeekoffMaster_07112025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BulkEmployeeMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BulkEmployeeMasternew]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BulkEmployeeMasternewnew]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Bulkorgdata]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[BulkRegionMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Candidate]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Candidate_2025_08_05_nik]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[candidate_tracker]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[CandidateProcessStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[CandidateStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[CandidateStatus_History]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[CandidateStatusHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[CanidateDocs]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[City]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Cluster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ContractorMasterDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Country]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[datahygiene]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[DepartmentDesignationMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[DtTemp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodesForWhichNoPFNoESIC]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodesTemp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodeWiseBonusProvisioningPolicyMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodeWiseDeduction]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodeWiseWeekOffMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EcodeZoneRegionClusterMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Emp_Attendance_Format_Detail]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[emp_leave_bal]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[emp_manager]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpAttendanceMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpAttendanceMaster1]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpAttendanceViewSnapshot]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpAttendanceViewSnapshot_Daily]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpAttendanceViewSnapshot05112025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpDegreeQualification]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EMPInsert]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpJoiningReleavingDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpLeaveClosingBalance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeDateGrid]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeDateGrid_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeDocs]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeESICUpload]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeESICUploadHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeFaces]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeePayroll]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeePayrollUpload]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeePayrollUploadHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeResignationChecklistMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeResignationChecklistResponse]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeeShiftHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmployeesHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpPastExperienceDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpPersonalDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpPF]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpRevisedDeptDesgLocDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpSalaryStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpSalaryStructure]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpStatutoryDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpTDSTable]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EMPTOBEINACTIVE]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EMPWITHEREPORTINGHEADCODE]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ExcelLocationStaging]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[FNF_Additions]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[FNF_Deductions]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[FNF_Header]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[FNF_Payment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[GivenToBank]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[GroupMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[GroupWiseStoreCodeMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[hhbh]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[HO]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[HolidayMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[HR_DASHBOARD_DATA]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[InsuranceEnrollment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[InterviewApprovalLog]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[InterviewBackgroundProcess]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Interviewer]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[InterviewRounds]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[JD]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[latest_emp_stcd_20250613]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LeaveOpeningBalTable]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LeaveOpeningBalTable_dummy]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LeavingEmployee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Location_BAckup_11062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LocationAssignmentNode]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LocationCategory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LocationDesignationPolicyCategory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LocationDesignationWeeklyOffHolidayMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LocationTypeMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LoginHistories]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[LWFPolicyMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[MapNewDeptDesig]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[MarketingEmpChecklist]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ModuleMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[monthlytempdec_25]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[MonthWeekwiseAttendance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[NewDeptDesig]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[newemployeemastertemp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[newemployeemastertemps]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[NewEmpUpdare]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[OfferLetterEmailStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PaidByBank]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PaidInCash]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PAN_INDIA_OTHER_RM_APPROVED_CASES_csvsheet]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PasswordResetTokens]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PTPolicyMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[PunchRecords]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[RBACNode]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ReasonForLeaving]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[RetailEmployee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ReturnByBank]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[ReturnByBankNew]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[SalaryCyclePolicy]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[SalaryEcode]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[SalaryRunQueue]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[SepBonus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Shift_Schedule]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Staging_Employee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StagingEmployee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[State]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StateMasterWithMinWages]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreLocations]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreMasterBulk]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreRoutingMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreRoutingTransaction]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreRoutingTransactionAttachment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Stores]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreStateLinking]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[StoreToBeInserted]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[SubModuleMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Table_1]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Table_2]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Table_Temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[table3]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_30seplessactive_employees]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_30seplessactive_employees_refer]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_attendancecount]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_calculatePaybledays]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TBL_DCEMPLOYEES]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_ecipf_ecode]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_fn_GetMonthlyPunchesRange_productionnewnick_test]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_fn_GetMonthlyPunchesRange_productionnewnick_test_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_Interviewer]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_InterviewerDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_KRAKPIMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Tbl_Manual_delete_Nikhil]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_Month_salary]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tbl_rahul_esic_pf_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAbscondingReason]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceCountApproval]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceCountAttachments]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceRegularizationRequest]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceRegularizationRequest_Backup14112025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceRegularizationRequest_nc]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblAttendanceRegularizationRequest05112025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblBankTransfer]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblBlacklistReason]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblBlackListTypes]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblBonus_Upload]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblCompany]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblCompOff]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblCompOffRequest]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblContractStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblDCAttendance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblDepartment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblDesignation]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmpAttendance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmpBAckup120620251508]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmpESICData]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_2025_08_05_nik]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_Audit]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_BAckup_11062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_BAckup_12062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_Backup_18092025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_bACKUP_29092025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_Log]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_NC]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployee_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeActiveInActiveHistories]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeAttendancePayrollCalculation]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeDeductions]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeDetail_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeInActiveFiles]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeLeaveBalance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeLeaveBalancenewasperportal]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeMultiPunches]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeMultiPunches_backup_03062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeMultiPunches_Backup14112025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeMultiPunches_Cleaned]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeMultiPunches_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeePayableDays]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeePunches]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeRole]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeRole_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeSalaryAddons]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeSepration]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmployeeStroreVisibilityMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblEmpPFData]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblExperience]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblFamily]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblfinalEmployeeMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblfinalstoremaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblInActiveStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblIncentive]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblIncentiveAttachment]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblInterviewRounds]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblJobPositions]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLeavePolicy]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLeaveRequest]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLeaveType]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocation]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocation_2025_06_13]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLOcation_BAckup12062025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocation_Backup18092025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationBackup]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationBAckup120620251508]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationDepartmentMapping]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationDesignationPolicy]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationDesignationPolicyBackup_2025_02_09]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationDesignationPolicyHistory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationDesignationPolicyMonth]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblLocationType]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblNatureOfWork]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblNewCandidateApproval]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblOCRMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPaidByBank]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPaidByBank_27102025]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPaidInCash]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPayments]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPayments_temp]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblPF_Approval]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblQualification]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblQuestion]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRefrences]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRegion]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRequestTypes]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRescheduleLogs]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblResignationType]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRetention]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRetentionBonus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblReturnByBank]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblRole]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblSalaryProcess]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblScheduleInterview]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblServiceCategory]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblShiftMap]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblShiftMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblState]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblStatus]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblStoreBudget]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblStrengthsWeaknesses]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblVendorBankDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblVendorComplianceDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblVendorContactDetails]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblVendorMaster]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tblZone]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tempCandidateDocs]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TempEcodes]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TempEmpAttendance]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TempEmployeePunches]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tempTblEmployee]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tempTblExperience]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tempTblFamily]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[tempTblQualification]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TmpEmployeeUpdate]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TmpTbl]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[Trend_data_V2S]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[TREND_V2R_Emp_DATA]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[update_emp_store]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[UserTokenTable]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[EmpList]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[Emputils]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[LocationMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[Net_Payble]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[Net_Payble_Batch]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[Net_Payble_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[new_Employeeviewwithexp]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[PaybleDays]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[PaybleDays_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_AllApplicantDetails]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_AllCandidateDetails]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_BgtSalaryStructWithEmpDetails]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_BgtSalaryStructWithEmpDetails_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Bonus_Gratuity]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_calculatePaybledays]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_CandidateInterviewSchedule]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_CandidateStatusHistory]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_DiffSalaryforBGTSEATMasterForSameGroup]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format_all]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format_Amit]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format_old]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Emp_Attendance_Format_SalarySlip]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_EmployeeDetailsallView]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_EmployeeMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_EsicMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_EsicMaster_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_FNF_AccountsList]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_InterviewFormDetails]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_JD]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_LeaveMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_LeaveMaster_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_LeaveOpeningBalTable]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Month_salary]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_PfMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_PfMaster_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_PfMaster_Download1]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_PfMaster1]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_PTPolicyMaster]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_RBACHierarchy]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_RegRequest1]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_RegRequest2]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Salary_Format]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_Salary_Format_Amit]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_salarystructure]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_salarystructure_all]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_StoreWhichCanAdd]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_tblLocation_UPC]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_TotalDeduction]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[vw_TotalDeduction_Download]",
+         "ObjectType": 3
+      },
+      {
+         "Name": "[dbo].[CalculateOvertimePayment]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[dailyStoreAttRun]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[EmployeeResignationChecklistByECode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetApplicantById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetApplicantsWithPaginationAndSearch]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetAttendanceProc]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetAttendanceRecordsByEmployee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetComprehensiveSalaryStatusList]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GETEMPBONUSLIST]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetails_Amit]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetails_New]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsforexcel_Ishu]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsforexcel]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsforexcelWITHOUTFILTER]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Attendance_Automate]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Attendance_bACKUP]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Attendance_Test]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Attendance_Testt]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Attendancee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards_Test]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetEmployeeDetailsWithCards]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetHolidays]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetLeaveRequestList]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetOfferletterOnMail]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetPermissionIndexForECode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[GetVendorListWithEmployeeCount]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[INSERT_ATTENDANCE_PUNCH]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[InsertInterviewForm]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_Daily_Attendance_old]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_Daily_Attendance_range]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_Daily_Attendance_report]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_Daily_Attendance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_GetEmployeeWeekOffs]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_insertintoleavetable_monthwise_portal]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_insertintoleavetable_monthwise]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_insertintoleavetable_single_portal]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_insertintoleavetable_single]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_insertintoleavetable]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_iterate_PT_LWF_by_month]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_Pivot_Monthly_Attendance_report]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_Daily]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_ishu]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_monthwise_PT_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_monthwise]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New_Dev_FNF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New_Dev_LocationWise]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New_Dev_RH02]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New_Dev_Without_PF_ESIC_PTAX_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_New]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_single_PT_LWF_Dev_FNF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_single_PT_LWF_Dev_Without_PF_ESIC_PTAX_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_single_PT_LWF_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_single_PT_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_single]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_month_PT_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_month]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_PT_LWF_Dev_FNF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_PT_LWF_Dev_Without_PF_ESIC_PTAX_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_PT_LWF_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper_PT_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate_wrapper]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_runecode_iterate]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_RunSalary_ForLeavingEmployees]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_snapshot_vw_emp_attendance_daily]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_snapshot_vw_emp_attendance_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_StorePasswordReset]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_UpdateEmployeeFromCandidateByEcode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[prc_User_Machine_details]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[proc_BGTSEATMASTER_Pivoted]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[proc_BGTSEATMASTER]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[proc_Openings]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SearchEmployeeDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SetDeptExceptionsForStore]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SetDesigExceptionsForStoreDept]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[shrink_db]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_ApproveAllAttendanceRequestsByManager]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_BGTSeatMaster_InsertOnly_FromXml_BAckup]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_BGTSeatMaster_InsertOnly_FromXml]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_arith]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_Nik]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_nikhil]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_Old]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF_Dev_Without_PF_ESIC_PTAX_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF_Dev1]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF_nik]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF_Working]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll_PT_LWF]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_CalculateEmployeePayroll]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_dcattendance_gapreport_old]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_dcattendance_gapreport_old2]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_dcattendance_gapreport]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_EnableTemporalFor]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_BulkUpload]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_CalcGratuity]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_CalcLeaveEncashment]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_CalculateBonus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_EnsureHeader]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_GetAccountsList]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_GetEmployeesByCode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_GetFnfDetailsByEcode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_GetFnfDetailsByEcodeByGautam]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_SaveAdditions]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_SaveAll]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_SaveDeductions]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_FNF_SavePayment]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetAllBlackListDoropdown]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetAllEmployeeSalarySlipDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetAllEmployeeTransferByManagerId]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SP_GetApplicantFeedBack]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetApplicantList]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetApplicantListNew]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetApplicantListNew01]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetApplicantListWithInterviewDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeDetails_HoldList]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeLeaveBalance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeSalarySlipDetails_Backup_Ravi]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeSalarySlipDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeSalarySlipDetailsnew]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetEmployeeSeparations]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SP_GetInterviewBackgroundProcess]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetInterviewFormdataById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetJobOpenings]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetLeaveRequestsAllEmployee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetLocationAssignments]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetMonthlyAttendanceGeoSummary]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetNonNullEmployeeColumns]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetOfferletterOnMail]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetPayrollSummary]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetRegularizeRequests]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetRegularizeRequestsBulk]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetScheduledInterviews]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetScheduleInterviewById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetScheduleInterviewHeaderById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetScheduleInterviewWithRounds]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetShiftMapRecords]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetTotalDeductionByEcode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_GetUserByRefreshToken]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertArticleMasterBulk]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertAttendanceRecord]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertCandidate_1]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertCandidateDocs]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertEmailData]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertEmpAttendance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertEmployeeDocs]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertInsuranceEnrollment]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_InsertScheduleInterview]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SP_InterviewAssigned]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SP_InterviewBackgroundProcess]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SP_LP_Process_FromHO]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_MarkAbscondEmployees_Batched]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_MarkAbscondEmployees_Big]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_Merge_GratuityProvision]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_MergeEcodesPFESIC]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_MergeEmployeeDeduction]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_refreshattendance_temp]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_refreshattendance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_RescheduleInterview]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_SaveOrUpdateRefreshToken]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_SearchCandidates]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_TemporalVersioningOff]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_TemporalVersioningOn]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_TruncateReferencedTable]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpdateApplicantStatus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpdateInterviewFeedback]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpdatePayments]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpdatePFESIC]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpdateTransferApproval]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[sp_UpsertShiftMap]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SpUpsertEmployeeStore]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[SyncEmployeeLocationsFromExcel]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[UpsertOvertimeIntoPayments]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_AddServiceCategory]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_AddStoreRoutingTransaction]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ApplyScheduledShifts]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ApproveGeoAttendance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_AssignEmployeeShift]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_BulkInsertVendorEmployee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[USP_COUNTGetEmployeeDetails_Amit]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_CreateVendor]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_DeleteCandidateDoc]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_DeleteSeatsBySeries]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GenerateWeekOffCalendar]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetAttendanceRegularization]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetContractorDetailsByContractorCode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetContractStatus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetDailyAttendanceSummaryGeo]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEligibleEmployeesForSnapshot]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEmployeeChangeLog]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEmployeeMultiPunchesChangeLog]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEmployeeSeparationById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEmployeeSeparations]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetEmployeeShiftAndHistory]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetLocationByRole]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyAttendanceSummary_WithStoreRules_Single_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyAttendanceSummary_WithStoreRules_Single_Dev1]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyAttendanceSummary_WithStoreRules_Single]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyAttendanceSummary_WithStoreRules]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyPunchesRange_productionnewnick_temp]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetMonthlyPunchesRange_productionnewnick]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetNatureOfWork]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetServiceCategory]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetStoreRoutingMasters]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetStoreRoutingStatus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetStoreRoutingStatusByLocaionId]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetVendorById]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetVendorEmployeesByEcode]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetVendorEmployeesListByFilter_back]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_GetVendorEmployeesListByFilter]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_Incentive_BulkCreate]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_Incentive_Upsert]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_Incentive]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertContractorMasterDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertEmpLeaveClosingBalanceForMonth]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertEmployeeAfterInitiate]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertEmployeeAfterInitiate01]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertEmployeeAfterInitiateNew]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertMonthWeekwiseAttendance_CalendarYear]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertOrUpdateContractorWithVendorIdForJob]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_InsertVendorEmployee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_LoadContractorDetails]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_Location_UpdateGeo]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MergeEmpAttendanceFromMonthlySummary_Single_Dev]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MergeEmpAttendanceFromMonthlySummary_Single]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MergeEmpAttendanceFromMonthlySummary]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MergeEmployeeLeaveBalance_ForMonth]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MergeMonthlyPunchesRange]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MonthWeekwiseAttendance_Store]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_MonthWeekwiseAttendance]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBonusAndPayments]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBulkEmployeeData]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBulkEmployeeDataNew]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBulkEmployeeDataNews]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBulkEmployeeDataNewW]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessBulkEmployeeDataNewWs]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_ProcessRetentionBonus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[USP_SALARY_FINAL_STATUS_REPORT]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_Sync_tblLocation_FromLinkedServer]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpdateAttendanceAndPunch_FromTemp]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpdateFNFPaymentStatus]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpdateMultiPunchWithRegRequest]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpdateVendor]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpdateVendorEmployee]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpsertEmpESICData]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpsertEmpPFData_testing]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[usp_UpsertEmpPFData]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[view_attendance_data]",
+         "ObjectType": 1
+      },
+      {
+         "Name": "[dbo].[fn_CalculateGratuity]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_FormatIndianMoney]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetEmployeeWeekOffs]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetEmployeeWeekOffsByEcode]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyAttendance_NEW]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyAttendance]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunches]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_new]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_nik1]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_production]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnew]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_backup1]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_latest_backup]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_latest_shift]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_latest]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_latestnick]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_live]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_temp1]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_test_nik]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_test_test]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick_test1]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnick1]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange_productionnewnickishu]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthlyPunchesRange]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetMonthPortion]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_GetRbacHierarchyByRole]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_IsVacancyShorter]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[fn_IsVacancyShorterForEmployee]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[SatCountFromMonth]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_CalcLWPExtra]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_DeptState]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_DesigState]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_GetDesignations]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_GetEmpAttendanceSnapshot]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_GetEmpHolidayCounts_ForMonth]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_GetSaturdayCountToEOM]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_GetSaturdaysForMonth]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_IsSalaryAboveMinWage]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[ufn_StoreState]",
+         "ObjectType": 2
+      },
+      {
+         "Name": "[dbo].[WeekendCountFromMonth]",
+         "ObjectType": 2
+      }
+   ],
+   "UiHint": null,
+   "UncountableWords": null,
+   "UseAsyncStoredProcedureCalls": true,
+   "UseBoolPropertiesWithoutDefaultSql": false,
+   "UseDatabaseNames": true,
+   "UseDatabaseNamesForRoutines": true,
+   "UseDateOnlyTimeOnly": false,
+   "UseDbContextSplitting": false,
+   "UseDecimalDataAnnotationForSprocResult": true,
+   "UseFluentApiOnly": true,
+   "UseHandleBars": false,
+   "UseHierarchyId": false,
+   "UseInflector": true,
+   "UseInternalAccessModifiersForSprocsAndFunctions": false,
+   "UseLegacyPluralizer": false,
+   "UseManyToManyEntity": false,
+   "UseNoDefaultConstructor": false,
+   "UseNoNavigations": false,
+   "UseNoObjectFilter": false,
+   "UseNodaTime": false,
+   "UseNullableReferences": false,
+   "UsePrefixNavigationNaming": false,
+   "UseSchemaFolders": false,
+   "UseSchemaNamespaces": false,
+   "UseSpatial": false,
+   "UseT4": false,
+   "UseT4Split": false,
+   "UseTypedTvpParameters": true
+}

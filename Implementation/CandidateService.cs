@@ -4672,14 +4672,23 @@ OUTER APPLY (
         {
             try
             {
+                // Remarks are mandatory in the UI; enforce it here too so the API
+                // cannot be used to reopen without a reason.
+                var remarks = (dto.Remarks ?? string.Empty).Trim();
+                if (remarks.Length == 0)
+                    throw new InvalidOperationException("Remarks are mandatory to reopen a candidate.");
+                if (remarks.Length > 500)
+                    remarks = remarks.Substring(0, 500);   // column is nvarchar(500)
+
                 var candidate = await _context.Candidates
                 .FirstOrDefaultAsync(x => x.Id == dto.CandidateId && x.IsDeleted == false);
 
                 if (candidate == null)
-                    throw new Exception("Candidate not found");
+                    throw new InvalidOperationException("Candidate not found.");
 
                 if (candidate.StatusId != 2)
-                    throw new Exception("Only rejected candidates can be reopened");
+                    throw new InvalidOperationException(
+                        $"Only rejected candidates can be reopened. This candidate is currently status {candidate.StatusId}.");
 
                 string? ename = await _context.tblEmployees
                     .Where(e => e.EmployeeId.ToString() == loginDetail.EmployeeId)
@@ -4696,7 +4705,8 @@ OUTER APPLY (
                     OldStatusId = 2,
                     OldStatusName = "Rejected",
                     CreatedDate = DateTime.Now,
-                    CreatedBy = ename
+                    CreatedBy = ename,
+                    Remarks = remarks          // 2026-09-02: previously discarded
                 };
 
                 _context.CandidateStatus_Histories.Add(history);
@@ -4704,9 +4714,16 @@ OUTER APPLY (
                 await _context.SaveChangesAsync();
                 return true;
             }
+            // Validation failures carry a message the user can act on ("Only rejected
+            // candidates can be reopened"), so let them through instead of masking
+            // them with a generic string the way this used to.
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                throw new Exception("Some error occured");
+                throw new Exception($"Failed to reopen candidate {dto.CandidateId}: {ex.Message}", ex);
             }
 
         }

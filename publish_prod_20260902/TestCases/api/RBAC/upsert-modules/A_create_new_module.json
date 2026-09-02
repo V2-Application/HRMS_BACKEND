@@ -1,0 +1,28 @@
+[
+  {
+    "id": 0,
+    "moduleName": "Payroll",
+    "createdBy": "tester",
+    "subModules": [
+      {
+        "id": 0,
+        "subModuleName": "Salary",
+        "createdBy": "tester",
+        "actions": [
+          {
+            "id": 0,
+            "actionName": "Generate Slip",
+            "createdBy": "tester",
+            "furtherParts": [
+              {
+                "id": 0,
+                "actionFurtherPartName": "Preview",
+                "createdBy": "tester"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+] 

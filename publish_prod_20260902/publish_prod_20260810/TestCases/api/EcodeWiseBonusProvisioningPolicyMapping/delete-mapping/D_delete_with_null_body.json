@@ -1,0 +1,21 @@
+{
+  "name": "Delete with Null Body (Validation Error)",
+  "description": "Test case for validation error when request body is null",
+  "endpoint": "POST /api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+  "request": {
+    "method": "POST",
+    "url": "/api/EcodeWiseBonusProvisioningPolicyMapping/delete",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {your_jwt_token}"
+    },
+    "body": null
+  },
+  "expectedResponse": {
+    "status": false,
+    "message": "Valid Id is required",
+    "code": 400
+  },
+  "notes": "This test case validates that the API returns an error when the request body is null."
+}
+
