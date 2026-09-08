@@ -748,6 +748,11 @@ namespace HRMSAPI.Implementation
         public async Task<ExecuteAndReponse> UpdateEmployee(CandidateUpdate details, CandidateDocs files,string updatedBy)
         {
             try {
+                // Employee master edits are stored UPPERCASE to match the bulk-uppercased data.
+                // See UpperCaseNormalizer: passwords, document paths and the *Json list payloads
+                // are deliberately excluded (uppercasing them breaks logins / links / binding).
+                HRMSAPI.Utility.UpperCaseNormalizer.Apply(details);
+
                 var rreportHeadEcode = _context.tblEmployees
                                     .Where(a => a.EmployeeId == details.reportingHeadId)
                                     .Select(r => r.Ecode)
@@ -1725,7 +1730,15 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
+                        // Whatever case the sheet was typed in (mixed, lower, title), the employee
+                        // master is stored UPPERCASE. Applied to the whole entity rather than to
+                        // each of the ~60 assignments above, so any column added later is covered
+                        // automatically. Passwords, document paths, FaceData and audit columns are
+                        // skipped inside the normalizer -- see UpperCaseNormalizer for why.
+                        HRMSAPI.Utility.UpperCaseNormalizer.Apply(employee);
+
                         // Update audit fields - keep UpdatedBy and LastUpdatedBy in sync.
+                        // Set AFTER the uppercasing above so these keep their original casing.
                         employee.UpdatedBy = updatedBy;
                         employee.LastUpdatedBy = updatedBy;
                         employee.UpdatedOn = DateTime.UtcNow;
@@ -2081,6 +2094,11 @@ namespace HRMSAPI.Implementation
                             errors.Add($"Row {rowNum}: {rowDeptDesigErr}");
                             continue;
                         }
+
+                        // Store the employee master UPPERCASE regardless of how the sheet was
+                        // typed. Same normalizer as the update-uploader and the web forms, so
+                        // every write path produces consistent casing.
+                        HRMSAPI.Utility.UpperCaseNormalizer.Apply(emp);
 
                         await _context.tblEmployees.AddAsync(emp);
                         await _context.SaveChangesAsync();

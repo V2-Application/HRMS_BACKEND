@@ -1167,6 +1167,21 @@ namespace HRMSAPI.Implementation
         //           return new Response { Status = false, Message = ex.Message, StatusCode = HttpStatusCode.BadRequest };
         //       }
         //   }
+        /// <summary>
+        /// Reason text for a status-history row (rejection OR revert-to-Pending).
+        /// Cluster / HR / LP / SuperAdmin all carry the reviewer's typed remark in their
+        /// *ReviewedBy field (e.g. "wrong store - by MAYANK(ClusterManager)"), so take the
+        /// first one that arrived. Capped at CandidateStatus_History.Remarks (nvarchar 500).
+        /// </summary>
+        private static string? BuildActionRemark(CandidateApprovalDto obj)
+        {
+            var remark = new[] { obj.ClusterManagerReviewedBy, obj.AuditReviewedBy, obj.HRReviewedBy, obj.SuperAdminRemarks }
+                .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim();
+
+            if (string.IsNullOrWhiteSpace(remark)) return null;
+            return remark.Length > 500 ? remark.Substring(0, 500) : remark;
+        }
+
         public async Task<Response> CandidateInitiate(CandidateApprovalDto obj, JwtLoginDetailDto loginDetail)
         {
             await using var trans = await _context.Database.BeginTransactionAsync();
@@ -1204,15 +1219,48 @@ namespace HRMSAPI.Implementation
                         Message = $"No Candidate Approval Found for Id: {obj.CandidateId}"
                     };
 
+                // A "revert to Pending" is a reviewer undoing their own rejection by submitting
+                // status 4 (Pending). It approves nothing and cannot issue an ecode, so none of
+                // the pre-ecode gates below (active dept/designation, BGT seat budget, mandatory
+                // Sub-Department 1) may block it. Without this, a candidate rejected *because*
+                // the store's budget was full is trapped as Rejected forever: the same BGT gate
+                // that caused the rejection also refuses to let anyone undo it.
+                const int pendingApprovalStatusId = 4;
+                bool isRevertToPending = loginDetail.role switch
+                {
+                    "ClusterManager" => obj.ClusterManagerApprovalStatus == pendingApprovalStatusId,
+                    "Audit" => obj.AuditApprovalStatus == pendingApprovalStatusId,
+                    "HR" => obj.HRApprovalStatus == pendingApprovalStatusId,
+                    // SuperAdmin submits all three at once; treat it as a revert only when
+                    // nothing is being approved and at least one stage is going back to Pending.
+                    "SuperAdmin" => obj.ClusterManagerApprovalStatus != 1
+                                    && obj.AuditApprovalStatus != 1
+                                    && obj.HRApprovalStatus != 1
+                                    && (obj.ClusterManagerApprovalStatus == pendingApprovalStatusId
+                                        || obj.AuditApprovalStatus == pendingApprovalStatusId
+                                        || obj.HRApprovalStatus == pendingApprovalStatusId),
+                    // Store HR sits outside the Cluster/LP/HR hierarchy and has no stage of
+                    // its own, so the ONLY action it can take here is pulling a rejected
+                    // candidate back to Pending -- never an approval. The StoreHR branch
+                    // below refuses anything that is not Pending outright.
+                    "StoreHR" => obj.ClusterManagerApprovalStatus != 1
+                                 && obj.AuditApprovalStatus != 1
+                                 && obj.HRApprovalStatus != 1,
+                    _ => false
+                };
+
                 // Active-only enforcement: don't progress approval or generate an ecode for a
                 // candidate whose department or designation is inactive.
                 int.TryParse(candidate.DEPARTMENT, out var apprDeptId);
                 int.TryParse(candidate.DESIGNATION, out var apprDesigId);
-                var (apprDeptDesigOk, apprDeptDesigErr) = await ValidateDeptDesigActiveAsync(
-                    apprDeptId > 0 ? apprDeptId : (int?)null,
-                    apprDesigId > 0 ? apprDesigId : (int?)null);
-                if (!apprDeptDesigOk)
-                    return new Response { Status = false, StatusCode = HttpStatusCode.BadRequest, Message = apprDeptDesigErr };
+                if (!isRevertToPending)
+                {
+                    var (apprDeptDesigOk, apprDeptDesigErr) = await ValidateDeptDesigActiveAsync(
+                        apprDeptId > 0 ? apprDeptId : (int?)null,
+                        apprDesigId > 0 ? apprDesigId : (int?)null);
+                    if (!apprDeptDesigOk)
+                        return new Response { Status = false, StatusCode = HttpStatusCode.BadRequest, Message = apprDeptDesigErr };
+                }
 
                 // Budget freeze: re-check seat availability at approval time too (the seat
                 // situation may have changed since the candidate was first submitted).
@@ -1227,7 +1275,7 @@ namespace HRMSAPI.Implementation
                 // enforcing first-come-first-served at the moment of ecode issuance rather than
                 // blocking everyone up front just because the pipeline is oversubscribed.
                 int.TryParse(candidate.LOCATION, out var apprLocId);
-                if (apprLocId > 0 && apprDeptId > 0 && apprDesigId > 0)
+                if (!isRevertToPending && apprLocId > 0 && apprDeptId > 0 && apprDesigId > 0)
                 {
                     var apprSeatCheck = await CheckSeatAvailabilityAsync(
                         apprLocId, apprDeptId, candidate.SubDepartmentId1, candidate.SubDepartmentId2, candidate.SubDepartmentId3,
@@ -1272,7 +1320,7 @@ namespace HRMSAPI.Implementation
                 // Sub-Department 1 is mandatory at approval/ecode-generation time whenever the
                 // candidate's department actually has sub-departments defined — mirrors the
                 // candidate form's own requiredLevel1 rule as a server-side safety net.
-                if (candidate.SubDepartmentId1 == null && apprDeptId > 0)
+                if (!isRevertToPending && candidate.SubDepartmentId1 == null && apprDeptId > 0)
                 {
                     await using var subDeptConn = new SqlConnection(_context.Database.GetConnectionString());
                     await subDeptConn.OpenAsync();
@@ -1310,6 +1358,20 @@ namespace HRMSAPI.Implementation
                 {
                     throw new InvalidOperationException("Candidate approval record already exists.");
                 }
+
+                // Set by the Store HR branch, which logs its own (richer) Rejected -> Pending
+                // history row. The generic cascade below must not add a second, blanker one.
+                bool revertHistoryAlreadyLogged = false;
+
+                // Status-history rows identify people by ECODE. The cascade below used to store
+                // loginDetail.EmployeeId (e.g. "117665"), which is untraceable for whoever reads
+                // the log later — and inconsistent with the older rows in the same table, which
+                // already hold ecodes (V46611, V09562). Resolve once and reuse.
+                var actorEcode = await _context.tblEmployees
+                    .Where(e => e.EmployeeId.ToString() == loginDetail.EmployeeId)
+                    .Select(e => e.Ecode)
+                    .FirstOrDefaultAsync();
+                if (string.IsNullOrWhiteSpace(actorEcode)) actorEcode = loginDetail.EmployeeId;
 
                 // Handle CLUSTER role updates
                 if (loginDetail.role == "ClusterManager")
@@ -1489,6 +1551,173 @@ namespace HRMSAPI.Implementation
                     candidateApproval.UpdatedOn = DateTime.UtcNow;
                     candidateApproval.LastUpdatedBy = loginDetail.EmployeeId;
                 }
+                // Handle STORE HR — revert-to-Pending ONLY
+                else if (loginDetail.role == "StoreHR")
+                {
+                    // Store HR is not part of the Cluster/LP/HR approval hierarchy, so it has
+                    // no stage of its own to approve or reject. The one action it gets is
+                    // pulling a rejected candidate back into the pipeline: EVERY stage that is
+                    // currently Rejected goes back to Pending, which cascades the candidate's
+                    // overall status to Pending in the block below. Stages already Approved are
+                    // left alone — undoing a genuine approval would force a needless re-review.
+                    const int rejectedCandidateStatusId = 2;
+
+                    // Belt and braces: the UI only ever offers "Move to Pending" to Store HR,
+                    // but the endpoint is reachable directly, so refuse an approve/reject here
+                    // rather than silently letting a store approve its own candidate.
+                    if ((obj.ClusterManagerApprovalStatus.HasValue && obj.ClusterManagerApprovalStatus != pendingApprovalStatusId) ||
+                        (obj.AuditApprovalStatus.HasValue && obj.AuditApprovalStatus != pendingApprovalStatusId) ||
+                        (obj.HRApprovalStatus.HasValue && obj.HRApprovalStatus != pendingApprovalStatusId))
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.Forbidden,
+                            Message = "Store HR can only move a rejected candidate back to Pending. Approval and rejection stay with Cluster / LP / HR."
+                        };
+                    }
+
+                    if (candidate.StatusId != rejectedCandidateStatusId)
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.BadRequest,
+                            Message = "Only a rejected candidate can be moved back to Pending."
+                        };
+                    }
+
+                    // The frontend puts the typed remark into the ReviewedBy fields (same
+                    // convention as the Cluster / HR / LP paths), so take the first one that
+                    // actually arrived. Remarks are the only trace of WHY a rejection was
+                    // undone, so require them here too — not just in the UI.
+                    var storeHrRemark = new[] { obj.ClusterManagerReviewedBy, obj.AuditReviewedBy, obj.HRReviewedBy, obj.SuperAdminRemarks }
+                        .FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim();
+
+                    if (string.IsNullOrWhiteSpace(storeHrRemark))
+                    {
+                        return new Response
+                        {
+                            Status = false,
+                            StatusCode = HttpStatusCode.BadRequest,
+                            Message = "Remarks are mandatory to move a candidate back to Pending."
+                        };
+                    }
+
+                    var storeHrActor = actorEcode;
+                    var revertedOn = DateTime.Now;   // local time, matches the *ApprovedOn convention
+
+                    // The REJECTOR's ecode is nowhere in tblNewCandidateApproval — the *ReviewBy
+                    // columns hold the remark text with a first name ("no naps - by Bhawani(...)"),
+                    // never an ecode. Recover it from the status-history row written when the
+                    // candidate was rejected; rows written before this change stored the raw
+                    // EmployeeId there, so resolve that to an ecode as well.
+                    var rejectedByEcode = await _context.CandidateStatus_Histories
+                        .Where(h => h.ApplicantId == obj.CandidateId && h.NewStatusId == rejectedCandidateStatusId)
+                        .OrderByDescending(h => h.HistoryId)
+                        .Select(h => h.CreatedBy)
+                        .FirstOrDefaultAsync();
+
+                    if (!string.IsNullOrWhiteSpace(rejectedByEcode) && long.TryParse(rejectedByEcode, out var rejectorEmpId))
+                    {
+                        var resolved = await _context.tblEmployees
+                            .Where(e => e.EmployeeId == rejectorEmpId)
+                            .Select(e => e.Ecode)
+                            .FirstOrDefaultAsync();
+                        if (!string.IsNullOrWhiteSpace(resolved)) rejectedByEcode = resolved;
+                    }
+
+                    // Archive each rejection BEFORE overwriting it. tblNewCandidateApproval only
+                    // ever holds the LATEST value per stage, so resetting the stage would
+                    // otherwise erase who rejected the candidate, when, and why.
+                    void ArchiveRejection(string stage, DateTime? rejectedOn, string rejectedBy, string rejectionRemarks)
+                    {
+                        // CreatedDate is the REJECTION's own timestamp, not the archive time —
+                        // that is the fact being preserved. The revert row written afterwards
+                        // carries the revert timestamp.
+                        var detail = $"{stage} REJECTION (ARCHIVED ON STORE HR MOVE TO PENDING BY {storeHrActor} ON {revertedOn:dd-MMM-yyyy HH:mm}) | REJECTED BY ECODE: {(string.IsNullOrWhiteSpace(rejectedByEcode) ? "-" : rejectedByEcode)} | REJECTION REMARKS: {(string.IsNullOrWhiteSpace(rejectionRemarks) ? (string.IsNullOrWhiteSpace(rejectedBy) ? "-" : rejectedBy.Trim()) : rejectionRemarks.Trim())}";
+                        if (detail.Length > 500) detail = detail.Substring(0, 500);   // column is nvarchar(500)
+
+                        _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                        {
+                            ApplicantId = (int)obj.CandidateId,
+                            OldStatusId = pendingApprovalStatusId,
+                            OldStatusName = "Pending",
+                            NewStatusId = rejectedCandidateStatusId,
+                            NewStatusName = "Rejected",
+                            CreatedDate = rejectedOn ?? revertedOn,
+                            // The rejector owns this row (it records a rejection), not the Store
+                            // HR who archived it — that is named in the text above.
+                            CreatedBy = string.IsNullOrWhiteSpace(rejectedByEcode) ? storeHrActor : rejectedByEcode,
+                            Remarks = detail
+                        });
+                    }
+
+                    var stagesReset = new List<string>();
+
+                    if (candidateApproval.ClusterManagerApprovalStatus == rejectedCandidateStatusId)
+                    {
+                        ArchiveRejection("CLUSTER", candidateApproval.ClusterManagerApprovedOn,
+                            candidateApproval.ClusterManagerReviewBy, candidateApproval.ClusterManagerRemarks);
+
+                        candidateApproval.ClusterManagerApprovalStatus = pendingApprovalStatusId;
+                        candidateApproval.ClusterManagerReviewBy = storeHrRemark;
+                        candidateApproval.ClusterManagerRemarks = storeHrRemark;
+                        candidateApproval.ClusterManagerApprovedOn = revertedOn;
+                        stagesReset.Add("CLUSTER");
+                    }
+
+                    if (candidateApproval.AuditApprovalStatus == rejectedCandidateStatusId)
+                    {
+                        ArchiveRejection("LP", candidateApproval.AuditApprovedOn,
+                            candidateApproval.AuditReviewedBy, candidateApproval.AuditRemarks);
+
+                        candidateApproval.AuditApprovalStatus = pendingApprovalStatusId;
+                        candidateApproval.AuditReviewedBy = storeHrRemark;
+                        candidateApproval.AuditRemarks = storeHrRemark;
+                        candidateApproval.AuditApprovedOn = revertedOn;
+                        stagesReset.Add("LP");
+                    }
+
+                    if (candidateApproval.HRApprovalStatus == rejectedCandidateStatusId)
+                    {
+                        ArchiveRejection("HR", candidateApproval.HRApprovedOn,
+                            candidateApproval.HRReviewedBy, candidateApproval.HRRemarks);
+
+                        candidateApproval.HRApprovalStatus = pendingApprovalStatusId;
+                        candidateApproval.HRReviewedBy = storeHrRemark;
+                        candidateApproval.HRRemarks = storeHrRemark;
+                        candidateApproval.HRApprovedOn = revertedOn;
+                        stagesReset.Add("HR");
+                    }
+
+                    // A candidate can be Rejected with all three stages still Pending (rejected
+                    // at the applicant stage rather than by the hierarchy). Nothing to reset
+                    // then, but the overall status must still come back to Pending — the
+                    // cascade below handles it, so this is NOT an error.
+                    candidateApproval.UpdatedOn = DateTime.UtcNow;
+                    candidateApproval.LastUpdatedBy = loginDetail.EmployeeId;
+
+                    // Revert row: who moved it back, when, and why. Written here (rather than
+                    // leaning on the generic cascade row) so the acting ecode and the stages
+                    // that were reset are both recorded.
+                    var revertDetail = $"MOVED TO PENDING BY STORE HR {storeHrActor} ON {revertedOn:dd-MMM-yyyy HH:mm} | STAGES RESET: {(stagesReset.Count == 0 ? "NONE (candidate was rejected outside the Cluster/LP/HR stages)" : string.Join(", ", stagesReset))} | REMARKS: {storeHrRemark}";
+                    if (revertDetail.Length > 500) revertDetail = revertDetail.Substring(0, 500);
+
+                    _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                    {
+                        ApplicantId = (int)obj.CandidateId,
+                        OldStatusId = rejectedCandidateStatusId,
+                        OldStatusName = "Rejected",
+                        NewStatusId = pendingApprovalStatusId,
+                        NewStatusName = "Pending",
+                        CreatedDate = revertedOn,
+                        CreatedBy = storeHrActor,
+                        Remarks = revertDetail
+                    });
+
+                    revertHistoryAlreadyLogged = true;
+                }
                 else
                 {
                     return new Response
@@ -1535,8 +1764,13 @@ namespace HRMSAPI.Implementation
                             OldStatusName = statusBeforeCascade == pendingStatusId ? "Pending" : statusBeforeCascade.ToString(),
                             NewStatusId = rejectedStatusId,
                             NewStatusName = "Rejected",
+                            // Rejection date, rejector's ECODE and rejection remarks — all three
+                            // were missing here: the date was recorded, but CreatedBy held the
+                            // internal EmployeeId and Remarks was left NULL, so every rejection
+                            // reason typed by a reviewer was discarded.
                             CreatedDate = DateTime.Now,
-                            CreatedBy = loginDetail.EmployeeId
+                            CreatedBy = actorEcode,
+                            Remarks = BuildActionRemark(obj)
                         });
                     }
                     else if (!anyLevelRejected && candidateForStatusCascade.StatusId == rejectedStatusId)
@@ -1546,16 +1780,25 @@ namespace HRMSAPI.Implementation
                         candidateForStatusCascade.UpdatedBy = loginDetail.EmployeeId;
                         _context.Candidates.Update(candidateForStatusCascade);
 
-                        _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                        // Store HR already logged this transition with the acting ecode, the
+                        // stages it reset and the remark, so don't duplicate it here.
+                        if (!revertHistoryAlreadyLogged)
                         {
-                            ApplicantId = (int)obj.CandidateId,
-                            OldStatusId = rejectedStatusId,
-                            OldStatusName = "Rejected",
-                            NewStatusId = pendingStatusId,
-                            NewStatusName = "Pending",
-                            CreatedDate = DateTime.Now,
-                            CreatedBy = loginDetail.EmployeeId
-                        });
+                            _context.CandidateStatus_Histories.Add(new CandidateStatus_History
+                            {
+                                ApplicantId = (int)obj.CandidateId,
+                                OldStatusId = rejectedStatusId,
+                                OldStatusName = "Rejected",
+                                NewStatusId = pendingStatusId,
+                                NewStatusName = "Pending",
+                                CreatedDate = DateTime.Now,
+                                CreatedBy = actorEcode,
+                                // Reason the rejection was undone. Cluster / HR / LP put the
+                                // typed remark in their ReviewedBy field, same as the approval
+                                // path; without this the row said only "Rejected -> Pending".
+                                Remarks = BuildActionRemark(obj)
+                            });
+                        }
                     }
                 }
 
@@ -4004,6 +4247,11 @@ OUTER APPLY (
             using var trans = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Every newly submitted candidate/applicant form is stored UPPERCASE so new
+                // records match the existing data (see UpperCaseNormalizer for what is skipped
+                // and why -- passwords, document paths and *Json payloads must NOT be touched).
+                HRMSAPI.Utility.UpperCaseNormalizer.Apply(candidateUpdate);
+
                 var rreportHeadEcode = _context.tblEmployees
                                   .Where(a => a.EmployeeId == candidateUpdate.reportingHeadId)
                                   .Select(r => r.Ecode)

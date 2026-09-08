@@ -21,6 +21,30 @@ namespace HRMSAPI.Data
                 if (entry.State != EntityState.Added && entry.State != EntityState.Modified)
                     continue;
 
+                // Every text field on these entities is stored UPPERCASE, not just PAN/bank.
+                // Doing it here rather than at each call site means EVERY write path is covered
+                // -- web forms, employee-master uploader, applicant uploader, approval flow,
+                // bulk insert -- including any future one, with no chance of missing a site.
+                //
+                // Passwords, document paths/URLs, FaceData, RawText, *Json payloads and audit
+                // columns are skipped inside UpperCaseNormalizer; see that class for why each
+                // one would break if uppercased.
+                switch (entry.Entity)
+                {
+                    case tblEmployee:
+                    case Candidate:
+                    case tempTblEmployee:
+                    case tblExperience:
+                    case tblQualification:
+                    case tempTblExperience:
+                    case tempTblQualification:
+                    case tblEmployee_MedicalCard:
+                        Utility.UpperCaseNormalizer.Apply(entry.Entity);
+                        break;
+                }
+
+                // PAN / bank are additionally TRIMMED (the normalizer only changes case), so
+                // keep these explicit — they were the original reason this hook exists.
                 switch (entry.Entity)
                 {
                     case tblEmployee e:

@@ -270,6 +270,12 @@ namespace HRMSAPI.Implementation
                 var applicantSequence = ExtractApplicantSequence(lastApplicantId);
                 var processedRows = BuildCandidates(parsedRows, locationMap, departmentMap, designationMap, statusMap, interviewerMap, ref applicantSequence, uploadedBy);
 
+                // Uploaded applicants are stored UPPERCASE whatever case the sheet used, matching
+                // the web forms and the employee-master uploader. Passwords, document paths and
+                // audit columns are skipped inside the normalizer.
+                foreach (var processed in processedRows)
+                    HRMSAPI.Utility.UpperCaseNormalizer.Apply(processed.Candidate);
+
                 await _context.Candidates.AddRangeAsync(processedRows.Select(r => r.Candidate));
                 await _context.SaveChangesAsync();
 

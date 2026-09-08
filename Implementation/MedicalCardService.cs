@@ -1,10 +1,10 @@
 using System.Globalization;
-using System.IO.Compression;
 using System.Text.RegularExpressions;
 using HRMSAPI.Data;
 using HRMSAPI.Interfaces;
 using HRMSAPI.Models;
 using Microsoft.EntityFrameworkCore;
+using SharpCompress.Archives;
 using UglyToad.PdfPig;
 
 namespace HRMSAPI.Implementation;
@@ -104,10 +104,10 @@ public class MedicalCardService : IMedicalCardService
         var incoming = files.Where(f => f != null && f.Length > 0).ToList();
         if (incoming.Count == 0) { result.Errors.Add("No non-empty files in the upload."); return result; }
 
-        // Flatten: PDFs pass through; ZIPs are expanded to their .pdf entries.
-        // ZIP entries are streamed to per-entry temp files up-front (during
-        // ZipArchive enumeration) because the IFormFile request stream is
-        // not seekable — opening entries lazily later throws
+        // Flatten: PDFs pass through; archives are expanded to their .pdf entries.
+        // Archive entries are streamed to per-entry temp files up-front (while the
+        // archive is still open) because the IFormFile request stream is not
+        // seekable — opening entries lazily later throws
         // InvalidOperationException("inner stream position changed").
         var entries = new List<(string fileName, Func<Stream> openStream)>();
         var tempFilesToDelete = new List<string>();
@@ -116,53 +116,74 @@ public class MedicalCardService : IMedicalCardService
             foreach (var f in incoming)
             {
                 var name = f.FileName ?? "(unnamed)";
-                if (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Spool the ZIP to a temp file first — gives us a seekable
-                    // stream that ZipArchive can read without surprise.
-                    var zipTempPath = Path.Combine(Path.GetTempPath(), $"mc-zip-{Guid.NewGuid():N}.zip");
-                    tempFilesToDelete.Add(zipTempPath);
-                    try
-                    {
-                        using (var fs = new FileStream(zipTempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                            await f.CopyToAsync(fs);
 
-                        using var seekable = new FileStream(zipTempPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                        using var zip = new ZipArchive(seekable, ZipArchiveMode.Read, leaveOpen: false);
-
-                        var pdfEntries = zip.Entries
-                            .Where(e => e.Length > 0 &&
-                                        !string.IsNullOrEmpty(e.Name) &&
-                                        e.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                            .ToList();
-                        if (pdfEntries.Count == 0)
-                            result.Errors.Add($"{name}: ZIP contains no .pdf entries.");
-
-                        // Drain each entry into its own temp file *now* while
-                        // the archive is open. Closure captures the path only.
-                        foreach (var entry in pdfEntries)
-                        {
-                            var entryTemp = Path.Combine(Path.GetTempPath(), $"mc-pdf-{Guid.NewGuid():N}.pdf");
-                            tempFilesToDelete.Add(entryTemp);
-                            using (var es = entry.Open())
-                            using (var ts = new FileStream(entryTemp, FileMode.Create, FileAccess.Write, FileShare.None))
-                                await es.CopyToAsync(ts);
-
-                            var entryName = entry.Name;
-                            var captured = entryTemp;
-                            entries.Add((entryName, () => new FileStream(captured, FileMode.Open, FileAccess.Read, FileShare.Read)));
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        result.Errors.Add($"{name}: failed to read ZIP - {ex.Message}");
-                        _log.LogError(ex, "Failed to read ZIP {File}", name);
-                    }
-                }
-                else
+                // Anything that is not a PDF gets spooled to a temp file and
+                // sniffed. Extension alone is not trustworthy: the insurer's
+                // archives arrive from a download portal with mangled names like
+                // "Ms V2 Retails Limited.7z_1787849793866 (1).7z", and a plain
+                // ".zip" check would have to be repeated for every new format.
+                // Magic bytes settle it, and SharpCompress reads zip / 7z / rar /
+                // tar / gz through one interface.
+                if (name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
                     var captured = f;
                     entries.Add((name, () => captured.OpenReadStream()));
+                    continue;
+                }
+
+                var archiveTempPath = Path.Combine(Path.GetTempPath(), $"mc-arch-{Guid.NewGuid():N}.bin");
+                tempFilesToDelete.Add(archiveTempPath);
+                try
+                {
+                    using (var fs = new FileStream(archiveTempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        await f.CopyToAsync(fs);
+
+                    var kind = DetectFileKind(archiveTempPath);
+                    if (kind == UploadKind.Pdf)
+                    {
+                        // A PDF that arrived without a .pdf extension.
+                        var captured = archiveTempPath;
+                        entries.Add((name, () => new FileStream(captured, FileMode.Open, FileAccess.Read, FileShare.Read)));
+                        continue;
+                    }
+                    if (kind == UploadKind.Unknown)
+                    {
+                        result.Errors.Add($"{name}: not a PDF and not a readable archive (zip / 7z / rar / tar / gz).");
+                        continue;
+                    }
+
+                    var pdfCount = 0;
+                    using (var archive = ArchiveFactory.Open(new FileInfo(archiveTempPath)))
+                    {
+                        foreach (var entry in archive.Entries)
+                        {
+                            if (entry.IsDirectory || entry.Size <= 0) continue;
+                            // Key is the entry's own basename — archives from the
+                            // insurer nest everything under a folder
+                            // ("Ms V2 Retails Limited\V00362_family.pdf").
+                            var entryName = Path.GetFileName((entry.Key ?? string.Empty).Replace('\\', '/'));
+                            if (string.IsNullOrEmpty(entryName) ||
+                                !entryName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) continue;
+
+                            var entryTemp = Path.Combine(Path.GetTempPath(), $"mc-pdf-{Guid.NewGuid():N}.pdf");
+                            tempFilesToDelete.Add(entryTemp);
+                            using (var es = entry.OpenEntryStream())
+                            using (var ts = new FileStream(entryTemp, FileMode.Create, FileAccess.Write, FileShare.None))
+                                await es.CopyToAsync(ts);
+
+                            var captured = entryTemp;
+                            entries.Add((entryName, () => new FileStream(captured, FileMode.Open, FileAccess.Read, FileShare.Read)));
+                            pdfCount++;
+                        }
+                    }
+
+                    if (pdfCount == 0)
+                        result.Errors.Add($"{name}: {kind} archive contains no .pdf entries.");
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add($"{name}: failed to read archive - {ex.Message}");
+                    _log.LogError(ex, "Failed to read archive {File}", name);
                 }
             }
 
@@ -174,18 +195,25 @@ public class MedicalCardService : IMedicalCardService
                 return result;
             }
 
-            // Pre-load valid ecodes once so we don't query the DB per file.
+            // Pre-load valid ecodes once so we don't query the DB per file. Each
+            // filename yields SEVERAL candidate ecodes (see EcodeCandidates), so
+            // ask for all of them in one go and let the per-file loop pick.
             var requestedEcodes = entries
-                .Select(e => Path.GetFileNameWithoutExtension(e.fileName)?.Trim())
-                .Where(e => !string.IsNullOrEmpty(e))
+                .SelectMany(e => EcodeCandidates(e.fileName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var validEcodes = await _context.tblEmployees
-                .Where(e => requestedEcodes.Contains(e.Ecode))
-                .Select(e => e.Ecode)
-                .ToListAsync();
-            var validSet = new HashSet<string>(validEcodes, StringComparer.OrdinalIgnoreCase);
+            // Chunked: a single IN (...) of 1,800+ literals is where SQL Server's
+            // 2,100-parameter limit starts to bite on a full-company import.
+            var validSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var chunk in requestedEcodes.Chunk(1000))
+            {
+                var found = await _context.tblEmployees
+                    .Where(e => chunk.Contains(e.Ecode))
+                    .Select(e => e.Ecode)
+                    .ToListAsync();
+                foreach (var ec in found) validSet.Add(ec);
+            }
 
             var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
             var touchedEcodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -195,22 +223,31 @@ public class MedicalCardService : IMedicalCardService
                 var item = new MedicalCardBulkUploadItem { FileName = fileName };
                 try
                 {
-                    var ecode = Path.GetFileNameWithoutExtension(fileName)?.Trim();
+                    var candidates = EcodeCandidates(fileName);
+                    if (candidates.Count == 0)
+                    {
+                        item.Error = "Filename contains no ecode-shaped token.";
+                        result.SkippedCount++;
+                        result.Items.Add(item);
+                        continue;
+                    }
+
+                    var ecode = candidates.FirstOrDefault(c => validSet.Contains(c));
+                    if (ecode == null)
+                    {
+                        // Name the candidates tried, otherwise "not found" gives
+                        // whoever is importing nothing to act on.
+                        item.Ecode = candidates[0];
+                        item.Error = $"No employee matches any ecode in this filename (tried: {string.Join(", ", candidates)}).";
+                        result.SkippedCount++;
+                        result.Items.Add(item);
+                        continue;
+                    }
+
+                    // Use the DB's own casing, not the filename's — MedicalCardUrl
+                    // becomes a folder path and the cards table keys off Ecode.
+                    ecode = validSet.TryGetValue(ecode, out var canonical) ? canonical : ecode;
                     item.Ecode = ecode;
-                    if (string.IsNullOrEmpty(ecode))
-                    {
-                        item.Error = "Filename has no ecode prefix.";
-                        result.SkippedCount++;
-                        result.Items.Add(item);
-                        continue;
-                    }
-                    if (!validSet.Contains(ecode))
-                    {
-                        item.Error = $"Ecode '{ecode}' not found in tblEmployee.";
-                        result.SkippedCount++;
-                        result.Items.Add(item);
-                        continue;
-                    }
 
                     var folder = Path.Combine(webRoot, "MedicalCard", ecode);
                     Directory.CreateDirectory(folder);
@@ -278,6 +315,87 @@ public class MedicalCardService : IMedicalCardService
         }
     }
 
+    private enum UploadKind { Unknown, Pdf, Zip, SevenZip, Rar, Tar, GZip }
+
+    // Identify an upload by its leading bytes. The insurer's portal renames its
+    // downloads ("... .7z_1787849793866 (1).7z"), so trusting the extension is how
+    // a whole batch silently gets rejected.
+    private static UploadKind DetectFileKind(string path)
+    {
+        Span<byte> head = stackalloc byte[8];
+        int read;
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            read = fs.Read(head);
+
+        if (read >= 4 && head[0] == 0x25 && head[1] == 0x50 && head[2] == 0x44 && head[3] == 0x46) return UploadKind.Pdf;   // %PDF
+        if (read >= 4 && head[0] == 0x50 && head[1] == 0x4B) return UploadKind.Zip;                                          // PK
+        if (read >= 6 && head[0] == 0x37 && head[1] == 0x7A && head[2] == 0xBC &&
+            head[3] == 0xAF && head[4] == 0x27 && head[5] == 0x1C) return UploadKind.SevenZip;                               // 7z
+        if (read >= 4 && head[0] == 0x52 && head[1] == 0x61 && head[2] == 0x72 && head[3] == 0x21) return UploadKind.Rar;     // Rar!
+        if (read >= 2 && head[0] == 0x1F && head[1] == 0x8B) return UploadKind.GZip;
+
+        // TAR has no leading magic — "ustar" sits at offset 257.
+        try
+        {
+            using var fs2 = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (fs2.Length > 262)
+            {
+                fs2.Position = 257;
+                var ustar = new byte[5];
+                if (fs2.Read(ustar, 0, 5) == 5 &&
+                    System.Text.Encoding.ASCII.GetString(ustar) == "ustar") return UploadKind.Tar;
+            }
+        }
+        catch { /* fall through to Unknown */ }
+
+        return UploadKind.Unknown;
+    }
+
+    // A medical-card PDF is matched to an employee by the ecode in its filename.
+    // The insurer does not hold that format still: cards used to arrive as
+    // "V00362.pdf" and the August 2026 batch arrives as "V00362_family.pdf", which
+    // made every one of 1,813 files fail as "ecode not found". So instead of
+    // assuming one shape, return every ecode-shaped token the name could yield,
+    // most-specific first, and let the caller keep whichever one a real employee
+    // has. Adding a suffix on the insurer's side no longer breaks the import.
+    //
+    // Ecode-shaped = letters/digits only, containing at least one digit
+    // (V00362, V2S006, E0277). That drops descriptive words like "family" and
+    // "self" without needing a list of them.
+    internal static List<string> EcodeCandidates(string fileName)
+    {
+        var candidates = new List<string>();
+        var baseName = Path.GetFileNameWithoutExtension(fileName ?? string.Empty)?.Trim();
+        if (string.IsNullOrEmpty(baseName)) return candidates;
+
+        void Add(string s)
+        {
+            s = s?.Trim();
+            if (string.IsNullOrEmpty(s)) return;
+            if (!Regex.IsMatch(s, @"^[A-Za-z0-9]+$")) return;
+            if (!s.Any(char.IsDigit)) return;
+            if (!candidates.Contains(s, StringComparer.OrdinalIgnoreCase)) candidates.Add(s);
+        }
+
+        // 1. The whole name — keeps plain "V00362.pdf" working exactly as before,
+        //    and wins over any token if an ecode ever contains a separator.
+        Add(baseName);
+
+        // 2. Each separator-delimited token, left to right. "V00362_family" -> V00362.
+        //    Left-to-right so "V00362_family" and a hypothetical "family_V00362"
+        //    both resolve.
+        foreach (var token in baseName.Split(new[] { '_', '-', ' ', '.', '(', ')', '+', '#' },
+                                             StringSplitOptions.RemoveEmptyEntries))
+            Add(token);
+
+        // 3. Last resort: any embedded ecode-looking run, for names with no
+        //    separator at all ("V00362family").
+        foreach (Match m in Regex.Matches(baseName, @"[A-Za-z]+\d+[A-Za-z0-9]*"))
+            Add(m.Value);
+
+        return candidates;
+    }
+
     private async Task<MedicalCardReparseResult> ReparseInternalAsync(string updatedBy, string ecodeFilter, bool dryRun)
     {
         var result = new MedicalCardReparseResult();
@@ -314,10 +432,19 @@ public class MedicalCardService : IMedicalCardService
                     continue;
                 }
 
-                // Preserve any user-entered SumAssured: keyed by (EmployeeId, CardOrder).
+                // Preserve any user-entered SumAssured. Keyed by the card's own
+                // member/UHID number first: CardOrder used to be the page number
+                // and is now a per-member counter, so on the first re-parse of a
+                // Volo card matching by order alone would move a hand-entered sum
+                // onto a different family member. Order stays as the fallback for
+                // legacy cards, which have no member id.
                 var existing = await _context.tblEmployee_MedicalCards
                     .Where(c => c.EmployeeId == emp.EmployeeId)
                     .ToListAsync();
+                var sumByUhid = existing
+                    .Where(c => !string.IsNullOrWhiteSpace(c.UhidNo) && c.SumAssured != null)
+                    .GroupBy(c => c.UhidNo.Trim(), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().SumAssured, StringComparer.OrdinalIgnoreCase);
                 var sumByOrder = existing.ToDictionary(c => c.CardOrder, c => c.SumAssured);
 
                 _context.tblEmployee_MedicalCards.RemoveRange(existing);
@@ -327,7 +454,9 @@ public class MedicalCardService : IMedicalCardService
                     p.EmployeeId = emp.EmployeeId;
                     p.CreatedBy = updatedBy;
                     p.CreatedOn = DateTime.UtcNow;
-                    if (sumByOrder.TryGetValue(p.CardOrder, out var prevSum))
+                    if (!string.IsNullOrWhiteSpace(p.UhidNo) && sumByUhid.TryGetValue(p.UhidNo.Trim(), out var sumForMember))
+                        p.SumAssured = sumForMember;
+                    else if (sumByOrder.TryGetValue(p.CardOrder, out var prevSum))
                         p.SumAssured = prevSum;
                     _context.tblEmployee_MedicalCards.Add(p);
                 }
@@ -351,46 +480,166 @@ public class MedicalCardService : IMedicalCardService
         int order = 0;
         foreach (var page in doc.GetPages())
         {
-            order++;
             var raw = page.Text ?? string.Empty;
-            // Header section is everything before "TERMS AND CONDITIONS" (which always follows).
-            var headerEnd = raw.IndexOf("TERMS AND CONDITIONS", StringComparison.OrdinalIgnoreCase);
-            var header = headerEnd > 0 ? raw.Substring(0, headerEnd) : raw;
 
-            var card = new tblEmployee_MedicalCard
+            // TWO card layouts are in circulation, so the layout is detected per
+            // page rather than assumed:
+            //
+            //   LEGACY  United India Insurance / FHPL TPA. Labelled fields
+            //           ("UHID No", "Plan Period", ...), exactly ONE card per page.
+            //           Still the only format for every card uploaded before
+            //           Aug 2026, so Re-parse all must keep understanding it.
+            //
+            //   VOLO    Aditya Birla Health Insurance / Volo Health TPA, from the
+            //           Aug-2026 batch onwards. Different labels AND several
+            //           members per page, so a page is no longer one card.
+            //
+            // CardOrder therefore counts CARDS across the whole PDF, not pages.
+            var pageCards = raw.IndexOf("Member ID:", StringComparison.OrdinalIgnoreCase) >= 0
+                ? ParseVoloPage(raw)
+                : new List<tblEmployee_MedicalCard> { ParseLegacyPage(raw) };
+
+            foreach (var card in pageCards)
             {
-                Ecode = ecode,
-                CardOrder = order,
-                SourcePdfUrl = sourceUrl,
-                RawText = raw.Length > 4000 ? raw.Substring(0, 4000) : raw,
-            };
+                order++;
+                card.Ecode = ecode;
+                card.CardOrder = order;
+                card.SourcePdfUrl = sourceUrl;
+                card.RawText = TrimTo(card.RawText ?? raw, 4000);
 
-            // Field markers appear in fixed order; each value runs until the next marker.
-            // Markers: "UHID No", "Name", "Age", "EmployeeID", "Plan Period", "Policy No", "Organisation"
-            card.UhidNo       = Between(header, "UHID No",      "Name");
-            card.HolderName   = Between(header, "Name",         "Age");
-            var ageGender     = Between(header, "Age",          "EmployeeID");
-            var planPeriod    = Between(header, "Plan Period",  "Policy No");
-            card.PolicyNo     = Between(header, "Policy No",    "Organisation");
-            card.Organisation = Between(header, "Organisation", null);
+                // Trim oversize values defensively (DB caps).
+                card.UhidNo       = TrimTo(card.UhidNo,       50);
+                card.HolderName   = TrimTo(card.HolderName,   200);
+                card.PolicyNo     = TrimTo(card.PolicyNo,     100);
+                card.Organisation = TrimTo(card.Organisation, 200);
+                card.Insurer      = TrimTo(card.Insurer,      200);
+                card.Tpa          = TrimTo(card.Tpa,          200);
 
-            (card.Age, card.Gender) = ParseAgeGender(ageGender);
-            (card.PlanValidFrom, card.PlanValidTo) = ParsePlanPeriod(planPeriod);
-
-            card.Insurer = DeriveInsurer(card.UhidNo);
-            card.Tpa     = DeriveTpa(raw);
-
-            // Trim oversize values defensively (DB caps).
-            card.UhidNo       = TrimTo(card.UhidNo,       50);
-            card.HolderName   = TrimTo(card.HolderName,   200);
-            card.PolicyNo     = TrimTo(card.PolicyNo,     100);
-            card.Organisation = TrimTo(card.Organisation, 200);
-            card.Insurer      = TrimTo(card.Insurer,      200);
-            card.Tpa          = TrimTo(card.Tpa,          200);
-
-            cards.Add(card);
+                cards.Add(card);
+            }
         }
         return cards;
+    }
+
+    private static tblEmployee_MedicalCard ParseLegacyPage(string raw)
+    {
+        // Header section is everything before "TERMS AND CONDITIONS" (which always follows).
+        var headerEnd = raw.IndexOf("TERMS AND CONDITIONS", StringComparison.OrdinalIgnoreCase);
+        var header = headerEnd > 0 ? raw.Substring(0, headerEnd) : raw;
+
+        var card = new tblEmployee_MedicalCard { RawText = raw };
+
+        // Field markers appear in fixed order; each value runs until the next marker.
+        // Markers: "UHID No", "Name", "Age", "EmployeeID", "Plan Period", "Policy No", "Organisation"
+        card.UhidNo       = Between(header, "UHID No",      "Name");
+        card.HolderName   = Between(header, "Name",         "Age");
+        var ageGender     = Between(header, "Age",          "EmployeeID");
+        var planPeriod    = Between(header, "Plan Period",  "Policy No");
+        card.PolicyNo     = Between(header, "Policy No",    "Organisation");
+        card.Organisation = Between(header, "Organisation", null);
+
+        (card.Age, card.Gender) = ParseAgeGender(ageGender);
+        (card.PlanValidFrom, card.PlanValidTo) = ParsePlanPeriod(planPeriod);
+
+        card.Insurer = DeriveInsurer(card.UhidNo);
+        card.Tpa     = DeriveTpa(raw);
+
+        return card;
+    }
+
+    // One Volo e-card, as PdfPig flattens it (no separators between fields):
+    //
+    //   Pappu KumarMember ID: VOLO06480101Gender: Male D.O.B.: 15-01-1984
+    //   Relation: EMPLOYEE  Validity: 02-08-2026 - 01-08-2027
+    //   Employer: Ms V2 Retails LimitedEmployee ID: V00362
+    //   Insurer: Aditya Birla Health Insurance Co. LimitedTPA: Volo Health ...
+    //   Customer support :...DISCLAIMER :...benefits details
+    //
+    // A page carries between one and three of these back to back. The holder's
+    // name has no label of its own — it is whatever sits in front of "Member ID:" —
+    // so blocks are cut at that anchor and the name taken from the preceding gap.
+    private static readonly Regex VoloBlock = new(
+        @"Member\sID:\s*(?<mid>[A-Za-z0-9\-\/]+)\s*" +
+        @"Gender:\s*(?<gender>[A-Za-z]+)\s*" +
+        @"D\.O\.B\.:\s*(?<dob>\d{2}-\d{2}-\d{4})\s*" +
+        @"Relation:\s*(?<relation>[A-Za-z \-]+?)\s+" +
+        @"Validity:\s*(?<from>\d{2}-\d{2}-\d{4})\s*-\s*(?<to>\d{2}-\d{2}-\d{4})\s*" +
+        @"Employer:\s*(?<employer>.*?)" +
+        @"Employee\sID:\s*(?<empid>[A-Za-z0-9]+)\s*" +
+        @"Insurer:\s*(?<insurer>.*?)" +
+        @"TPA:\s*(?<tpa>.*?)" +
+        @"(?=Customer\ssupport|DISCLAIMER|$)",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+
+    private static List<tblEmployee_MedicalCard> ParseVoloPage(string raw)
+    {
+        var cards = new List<tblEmployee_MedicalCard>();
+        var matches = VoloBlock.Matches(raw);
+        int previousBlockEnd = 0;
+
+        foreach (Match m in matches)
+        {
+            // Text between the end of the last block and this "Member ID:" is the
+            // holder's name, preceded by the previous card's disclaimer paragraph.
+            var gap = raw.Substring(previousBlockEnd, m.Index - previousBlockEnd);
+            var cut = gap.LastIndexOf("benefits details", StringComparison.OrdinalIgnoreCase);
+            if (cut >= 0) gap = gap.Substring(cut + "benefits details".Length);
+            var name = gap.Trim();
+
+            var from = TryParseDate(m.Groups["from"].Value, "dd-MM-yyyy");
+            var to   = TryParseDate(m.Groups["to"].Value,   "dd-MM-yyyy");
+            var dob  = TryParseDate(m.Groups["dob"].Value,  "dd-MM-yyyy");
+
+            cards.Add(new tblEmployee_MedicalCard
+            {
+                // Volo's "Member ID" is this format's per-person identifier, so it
+                // goes where the UHID used to — that is what the portal shows.
+                UhidNo        = m.Groups["mid"].Value.Trim(),
+                HolderName    = string.IsNullOrWhiteSpace(name) ? null : name,
+                Gender        = NormalizeGender(m.Groups["gender"].Value),
+                // The Volo card prints a date of birth, not an age. Age is derived
+                // against the plan start (not today) so a re-parse next year does
+                // not silently change what the card says.
+                Age           = AgeAt(dob, from),
+                PlanValidFrom = from,
+                PlanValidTo   = to,
+                // Volo cards carry no policy number at all — left null rather than
+                // filled with something that is not on the card.
+                PolicyNo      = null,
+                Organisation  = NullIfBlank(m.Groups["employer"].Value),
+                Insurer       = NullIfBlank(m.Groups["insurer"].Value),
+                Tpa           = NullIfBlank(m.Groups["tpa"].Value),
+                RawText       = m.Value,
+            });
+
+            previousBlockEnd = m.Index + m.Length;
+        }
+
+        return cards;
+    }
+
+    private static string NullIfBlank(string s)
+        => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string NormalizeGender(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        // Legacy cards stored "M"/"F"; keep that so the column stays consistent.
+        return s.Trim().ToUpperInvariant() switch
+        {
+            "MALE" or "M" => "M",
+            "FEMALE" or "F" => "F",
+            _ => s.Trim().ToUpperInvariant()
+        };
+    }
+
+    private static int? AgeAt(DateOnly? dob, DateOnly? asOf)
+    {
+        if (dob == null) return null;
+        var on = asOf ?? DateOnly.FromDateTime(DateTime.Today);
+        var age = on.Year - dob.Value.Year;
+        if (on < dob.Value.AddYears(age)) age--;
+        return age >= 0 && age < 130 ? age : null;
     }
 
     private static string Between(string src, string startMarker, string endMarker)
@@ -426,8 +675,10 @@ public class MedicalCardService : IMedicalCardService
         return (f, t);
     }
 
-    private static DateOnly? TryParseDmy(string s)
-        => DateOnly.TryParseExact(s, "dd/MM/yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+    private static DateOnly? TryParseDmy(string s) => TryParseDate(s, "dd/MM/yyyy");
+
+    private static DateOnly? TryParseDate(string s, string format)
+        => DateOnly.TryParseExact(s, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
            ? d : (DateOnly?)null;
 
     private static string DeriveInsurer(string uhid)

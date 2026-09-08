@@ -4194,6 +4194,61 @@ WHERE EXISTS (
                 }
             }
 
+            // GeoAttendanceApproval.ManagerApproverId / MasterApproverId store the approver's
+            // EmployeeId (e.g. "149733"), but the report columns are labelled "Manager Approver"
+            // / "Master Approver" and readers expect an ecode. Resolve them to ecodes in a single
+            // round-trip on the connection we already have open.
+            //
+            // Anything that does not parse as a number is left untouched (already an ecode), and
+            // an id that resolves to nothing keeps its original value rather than going blank --
+            // losing the raw id would make the row impossible to trace back.
+            var approverIds = rows
+                .SelectMany(r => new[] { r.ManagerApproverId, r.MasterApproverId })
+                .Where(s => !string.IsNullOrWhiteSpace(s) && long.TryParse(s, out _))
+                .Select(s => long.Parse(s!))
+                .Distinct()
+                .ToList();
+
+            if (approverIds.Count > 0)
+            {
+                var ecodeById = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                await using (var ecodeCmd = conn.CreateCommand())
+                {
+                    // Parameterised IN list -- ids are already proven numeric by TryParse above,
+                    // but keep them as parameters so this can never become string-concatenated SQL.
+                    var names = new List<string>(approverIds.Count);
+                    for (int i = 0; i < approverIds.Count; i++)
+                    {
+                        var p = $"@apr{i}";
+                        names.Add(p);
+                        ecodeCmd.Parameters.Add(new SqlParameter(p, SqlDbType.BigInt) { Value = approverIds[i] });
+                    }
+
+                    ecodeCmd.CommandText =
+                        $"SELECT EmployeeId, Ecode FROM dbo.tblEmployee WHERE EmployeeId IN ({string.Join(",", names)})";
+                    ecodeCmd.CommandType = CommandType.Text;
+
+                    await using var ecodeReader = await ecodeCmd.ExecuteReaderAsync(ct);
+                    while (await ecodeReader.ReadAsync(ct))
+                    {
+                        if (ecodeReader.IsDBNull(1)) continue;
+                        ecodeById[ecodeReader.GetInt64(0).ToString()] = ecodeReader.GetString(1);
+                    }
+                }
+
+                string? ToEcode(string? approverId) =>
+                    !string.IsNullOrWhiteSpace(approverId) && ecodeById.TryGetValue(approverId!, out var ec)
+                        ? ec
+                        : approverId;
+
+                foreach (var r in rows)
+                {
+                    r.ManagerApproverId = ToEcode(r.ManagerApproverId);
+                    r.MasterApproverId = ToEcode(r.MasterApproverId);
+                }
+            }
+
             // Proof files are static content under the API's own wwwroot, so links are
             // built off the request host -- the same assumption the on-screen Geofence
             // "Proof" column makes (it uses the axios baseURL). Set

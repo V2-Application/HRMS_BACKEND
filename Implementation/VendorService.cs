@@ -909,7 +909,7 @@ namespace HRMSAPI.Implementation
                 var (panExists, aadhaarExists, emailExist, mobileExists, aadhaarEcode) = await CheckDuplicatesAsync2(request, connection, transaction);
 
                 if (panExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"PAN already exists: {request.PANNo}" };
-                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar number already exists for Ecode {aadhaarEcode}: {request.AadharNo}" };
+                if (aadhaarExists) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Aadhaar number already belongs to ACTIVE employee {aadhaarEcode}: {request.AadharNo}" };
                 if (emailExist) return new Response { Status = false, StatusCode = HttpStatusCode.Conflict, Message = $"Email already exists: {request.Email}" };
                 // Mobile uniqueness check intentionally skipped — mobile is optional and not enforced as unique on add/bulk.
 
@@ -1039,13 +1039,24 @@ namespace HRMSAPI.Implementation
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
+            // Aadhaar blocks ONLY when an ACTIVE employee holds it — a person who has left may
+            // be re-uploaded (rejoining vendor worker). This method is reached only from
+            // InsertVendorEmployee2, which only the bulk importer calls, so the single-add path
+            // (CheckDuplicatesAsync) keeps its stricter any-match rule untouched.
+            //
+            // The reported ecode must come from an ACTIVE row too, otherwise the error would
+            // name a left employee while the real blocker is somebody else: 1,286 Aadhaars on
+            // prod are held by an active and an inactive row at the same time.
             command.CommandText = @"
              SELECT
              SUM(CASE WHEN [PAN NO] = @PAN THEN 1 ELSE 0 END),
-             SUM(CASE WHEN [AADHAR NO] = @AADHAR THEN 1 ELSE 0 END),
+             SUM(CASE WHEN [AADHAR NO] = @AADHAR
+                       AND ISNULL([IsActive], 0) = 1 AND ISNULL([IsDeleted], 0) = 0 THEN 1 ELSE 0 END),
              SUM(CASE WHEN LOWER(LTRIM(RTRIM([EMAIL ADDRESS]))) = LOWER(@Email) THEN 1 ELSE 0 END),
              SUM(CASE WHEN [MOBILE] = @Mobile THEN 1 ELSE 0 END),
-             (SELECT TOP 1 [Ecode] FROM tblEmployee WHERE [AADHAR NO] = @AADHAR) AS AadhaarEcode
+             (SELECT TOP 1 [Ecode] FROM tblEmployee
+              WHERE [AADHAR NO] = @AADHAR
+                AND ISNULL([IsActive], 0) = 1 AND ISNULL([IsDeleted], 0) = 0) AS AadhaarEcode
              FROM tblEmployee";
 
             command.Parameters.Add(new SqlParameter("@PAN", request.PANNo));
@@ -1712,6 +1723,10 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
             // Read data from the Excel file into a list of VendorEmployeeRequestDTOBulk objects
             var employees = await ReadExcel(file, contractorCode);
 
+            // Rows whose Aadhaar matches an employee who has LEFT — permitted, and reported
+            // back on success so it is visible that a re-upload happened against an old record.
+            var allowedInactiveMatches = new List<object>();
+
             // Pre-scan: report ALL Aadhaar duplicates in one shot (with both the Excel-side
             // data and the existing-employee data) so the user can resolve them together.
             var aadhaarByRow = employees
@@ -1736,13 +1751,27 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                 var paramNames = distinctAadhaars.Select((_, i) => $"@a{i}").ToArray();
 
                 using var preCmd = preConn.CreateCommand();
-                preCmd.CommandText = $@"SELECT [AADHAR NO], [Ecode], [FirstName], [MiddleName], [LastName], [ContractorCode], [MOBILE]
+                // IsActive / IsDeleted decide whether a match actually blocks: a person who
+                // has LEFT may be re-uploaded (rejoining vendor worker), only a CURRENTLY
+                // employed one may not. Both columns are nullable bits, so ISNULL them --
+                // treating NULL IsActive as "active" would keep blocking rows that carry no
+                // flag at all. Same convention as the ecode-generation check in CandidateService.
+                preCmd.CommandText = $@"SELECT [AADHAR NO], [Ecode], [FirstName], [MiddleName], [LastName], [ContractorCode], [MOBILE],
+                                               CAST(CASE WHEN ISNULL([IsActive], 0) = 1 AND ISNULL([IsDeleted], 0) = 0
+                                                         THEN 1 ELSE 0 END AS int) AS IsCurrentlyEmployed
                                         FROM tblEmployee
                                         WHERE [AADHAR NO] IN ({string.Join(",", paramNames)})";
                 for (int i = 0; i < distinctAadhaars.Count; i++)
                     preCmd.Parameters.Add(new SqlParameter(paramNames[i], distinctAadhaars[i]));
 
-                var existing = new Dictionary<string, (string Ecode, string Name, string ContractorCode, string Mobile)>(StringComparer.Ordinal);
+                // One Aadhaar can sit on SEVERAL employee rows -- on prod 1,286 Aadhaars are
+                // held by an active AND an inactive row at the same time. The previous code
+                // kept whichever row the reader returned last, so "is the match inactive?"
+                // would have been decided arbitrarily and could have waved through someone
+                // who is actively employed. Keep the two groups apart and let ANY active
+                // holder win.
+                var activeHolders = new Dictionary<string, (string Ecode, string Name, string ContractorCode, string Mobile)>(StringComparer.Ordinal);
+                var inactiveHolders = new Dictionary<string, (string Ecode, string Name, string ContractorCode, string Mobile)>(StringComparer.Ordinal);
                 using (var rdr = await preCmd.ExecuteReaderAsync())
                 {
                     while (await rdr.ReadAsync())
@@ -1755,17 +1784,21 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                         var ln = rdr.IsDBNull(4) ? null : rdr.GetString(4).Trim();
                         var cc = rdr.IsDBNull(5) ? null : rdr.GetString(5).Trim();
                         var mb = rdr.IsDBNull(6) ? null : rdr.GetString(6).Trim();
+                        var isCurrentlyEmployed = rdr.GetInt32(7) == 1;
                         var fullName = string.Join(" ", new[] { fn, mn, ln }
                             .Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
-                        existing[ad] = (ec, fullName, cc, mb);
+
+                        var target = isCurrentlyEmployed ? activeHolders : inactiveHolders;
+                        if (!target.ContainsKey(ad)) target[ad] = (ec, fullName, cc, mb);
                     }
                 }
 
+                // Blocked ONLY where an active employee holds the Aadhaar.
                 var duplicates = aadhaarByRow
-                    .Where(x => existing.ContainsKey(x.Aadhaar))
+                    .Where(x => activeHolders.ContainsKey(x.Aadhaar))
                     .Select(x =>
                     {
-                        var e = existing[x.Aadhaar];
+                        var e = activeHolders[x.Aadhaar];
                         return new
                         {
                             row = x.Row,
@@ -1776,10 +1809,30 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                             existingEcode = e.Ecode,
                             existingName = e.Name,
                             existingContractorCode = e.ContractorCode,
-                            existingMobile = e.Mobile
+                            existingMobile = e.Mobile,
+                            existingStatus = "Active"
                         };
                     })
                     .ToList();
+
+                // Allowed through despite a match, because every holder has left. Surfaced in
+                // the success response so the upload is not silently overwriting history.
+                allowedInactiveMatches = aadhaarByRow
+                    .Where(x => !activeHolders.ContainsKey(x.Aadhaar) && inactiveHolders.ContainsKey(x.Aadhaar))
+                    .Select(x =>
+                    {
+                        var e = inactiveHolders[x.Aadhaar];
+                        return new
+                        {
+                            row = x.Row,
+                            aadhaar = x.Aadhaar,
+                            excelName = x.ExcelName,
+                            existingEcode = e.Ecode,
+                            existingName = e.Name,
+                            existingStatus = "Inactive / Left"
+                        };
+                    })
+                    .ToList<object>();
 
                 if (duplicates.Count > 0)
                 {
@@ -1787,7 +1840,7 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     {
                         Status = false,
                         StatusCode = HttpStatusCode.Conflict,
-                        Message = $"{duplicates.Count} Aadhaar number(s) already exist in the database.",
+                        Message = $"{duplicates.Count} Aadhaar number(s) already belong to an ACTIVE employee.",
                         Data = new { duplicates }
                     };
                 }
@@ -1822,6 +1875,18 @@ CheckDuplicatesForUpdateAsync(UpdateVendorEmployeeRequestDTO request, string eco
                     return new Response { Status = false, Message = ex.Message };
                 }
 
+            }
+
+            // Name the rows that went in against an Aadhaar an ex-employee still holds, so a
+            // re-upload against an old record is visible rather than silent.
+            if (allowedInactiveMatches.Count > 0)
+            {
+                return new Response
+                {
+                    Status = true,
+                    Message = $"Successfully Uploaded Employees. {allowedInactiveMatches.Count} row(s) matched an Aadhaar belonging to an inactive (left) employee and were allowed.",
+                    Data = new { allowedInactiveMatches }
+                };
             }
 
             return new Response { Status = true, Message = "Successfully Uploaded Employees." };
