@@ -61,7 +61,10 @@ namespace HRMSAPI.Controllers
 
         /// <summary>
         /// SuperAdmin-only export: regularize requests for a date range, optionally filtered by status.
-        /// Combine managerStatus=Approved + lpStatus=Pending for "Approved by Manager, Pending by LP".
+        /// Combine managerStatus=Approved + lpStatus=Approved + hrStatus=Pending for
+        /// "cleared by Manager and LP, waiting on HR".
+        /// hrStatus=Pending also matches requests with no HR entry at all, which is
+        /// every request raised before the HR layer existed.
         /// </summary>
         [HttpGet("ExportAttendanceRegularization")]
         public async Task<IActionResult> ExportAttendanceRegularization(
@@ -69,7 +72,8 @@ namespace HRMSAPI.Controllers
             [FromQuery] DateTime endDate,
             [FromQuery] string? status = null,
             [FromQuery] string? managerStatus = null,
-            [FromQuery] string? lpStatus = null)
+            [FromQuery] string? lpStatus = null,
+            [FromQuery] string? hrStatus = null)
         {
             try
             {
@@ -102,7 +106,7 @@ namespace HRMSAPI.Controllers
                 }
 
                 var result = await _attendanceRegularizationService.ExportAttendanceRegularizationByRangeAsync(
-                    startDate, endDate, status, managerStatus, lpStatus);
+                    startDate, endDate, status, managerStatus, lpStatus, hrStatus);
 
                 if (result.Status == true && result.Data is byte[] bytes)
                 {

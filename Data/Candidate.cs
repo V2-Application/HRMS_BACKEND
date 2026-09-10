@@ -238,6 +238,20 @@ public partial class Candidate
 
     public int? ShiftID { get; set; }
 
+    /// <summary>
+    /// Unused. Added earlier for a portal-role experiment and superseded by
+    /// RoleMasterId below; every row is NULL and nothing reads or writes it.
+    /// Safe to drop whenever convenient.
+    /// </summary>
+    public int? RoleId { get; set; }
+
+    /// <summary>
+    /// The candidate's HR role (dbo.tblRoleMaster), picked on the candidate page.
+    /// Optional; copied onto tblEmployee.RoleMasterId when the candidate is
+    /// converted into an employee.
+    /// </summary>
+    public int? RoleMasterId { get; set; }
+
     public bool? IsAadharBackAttachmentUploaded { get; set; }
 
     public string Source { get; set; }

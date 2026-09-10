@@ -86,6 +86,7 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IEmployeeService, EmployeeService>();
             services.AddScoped<IEmployeeServiceNew, EmployeeServiceNew>();
             services.AddScoped<IMedicalCardService, MedicalCardService>();
+            services.AddScoped<IApplicantResumeService, ApplicantResumeService>();
             services.AddScoped<IDropDownService, DropDownService>();
             services.AddScoped<IDepartmentService, DepartmentService>();
             services.AddScoped<IDesignationService, DesignationService>();
@@ -139,6 +140,7 @@ namespace HRMSAPI.Extensions
             services.AddScoped<IEmployeeRoleService, EmployeeRoleService>();
             services.AddScoped<IJDService, JDService>();
             services.AddScoped<IShiftMasterService, ShiftMasterService>();
+            services.AddScoped<IRoleMasterService, RoleMasterService>();
             services.AddScoped<IFnfService, FnfService>();
             services.AddScoped<IGeoService, GeoService>();
             services.AddScoped<IIncentiveService, IncentiveService>();

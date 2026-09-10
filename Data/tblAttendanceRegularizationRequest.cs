@@ -73,6 +73,19 @@ public partial class tblAttendanceRegularizationRequest
 
     public string LpRemarks { get; set; }
 
+    // ----- Third approval layer: HR (IT Superadmin) -----------------------
+    // HR approval is the final authority: it stamps Manager + LP as well, and
+    // only an HR approval turns the overall StatusId into Approved. NULL on
+    // every request created before the layer existed, which reads as "no HR
+    // entry yet" rather than Pending.
+    public int? HrApprovalStatusId { get; set; }
+
+    public long? HrApproverId { get; set; }
+
+    public DateTime? HrApprovalOn { get; set; }
+
+    public string HrRemarks { get; set; }
+
     public virtual tblEmployee Employee { get; set; }
 
     public virtual tblStatus LpApprovalStatus { get; set; }

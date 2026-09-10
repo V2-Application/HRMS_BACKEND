@@ -25,6 +25,20 @@ namespace HRMSAPI.DTO
         public string? LpApprovalStatus { get; set; }
         public DateTime? LpApprovalOn { get; set; }
         public string? LpRemarks { get; set; }
+
+        // Who actually approved at each layer. RM_ECODE above is the employee's
+        // reporting manager on record, which is not always the person who acted.
+        public string? ManagerApproverEcode { get; set; }
+        public string? ManagerApproverName { get; set; }
+        public string? LpApproverEcode { get; set; }
+        public string? LpApproverName { get; set; }
+
+        // Third approval layer (HR / IT Superadmin).
+        public string? HrApprovalStatus { get; set; }
+        public DateTime? HrApprovalOn { get; set; }
+        public string? HrRemarks { get; set; }
+        public string? HrApproverEcode { get; set; }
+        public string? HrApproverName { get; set; }
     }
 }
 

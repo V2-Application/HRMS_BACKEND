@@ -87,6 +87,13 @@ namespace HRMSAPI.DTO
         public string LocationName { get; set; } = "NA";
         public string? LpEcode { get; set; }
         public string? ManagerEcode { get; set; }
+
+        // Third approval layer (HR / IT Superadmin). Null means HR has not acted.
+        public int? HrApprovalStatusId { get; set; }
+        public long? HrApproverId { get; set; }
+        public DateTime? HrApprovalOn { get; set; }
+        public string? HrRemarks { get; set; }
+        public string? HrEcode { get; set; }
     }
 
     public class UpdateAttendanceRequestDto

@@ -17,6 +17,18 @@ public partial class tblShiftMaster
 
     public bool IsActive { get; set; }
 
+    /// <summary>
+    /// Day this shift timing starts applying. NULL on rows created before the
+    /// column existed, which reads as "always effective".
+    /// </summary>
+    public DateTime? EffectiveFrom { get; set; }
+
+    /// <summary>
+    /// Last day this shift timing applies. NULL = open ended, same convention
+    /// as EmployeeShiftHistory.EffectiveTo.
+    /// </summary>
+    public DateTime? EffectiveTo { get; set; }
+
     public string CreatedBy { get; set; }
 
     public DateTime CreatedOn { get; set; }

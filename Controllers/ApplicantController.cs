@@ -31,9 +31,105 @@ namespace HRMSAPI.Controllers
     public class ApplicantController : ControllerBase
     {
         public readonly ICandidateService _candidateService;
-        public ApplicantController(ICandidateService candidateService)
+        private readonly IApplicantResumeService _resumeService;
+        public ApplicantController(ICandidateService candidateService, IApplicantResumeService resumeService)
         {
             _candidateService = candidateService;
+            _resumeService = resumeService;
+        }
+
+        // Resume bulk download is cut into parts of this size. Applicant resumes total
+        // ~6.4 GB on prod, and a single download that big is one dropped connection away
+        // from starting over; ~500 MB parts each retry on their own.
+        private const long ResumePartSizeBytes = 500L * 1024 * 1024;
+
+        /// <summary>
+        /// GET api/Applicant/ResumeZipEstimate — what a resume download would contain.
+        /// Database-only (no file is opened), so it is cheap enough to call on every
+        /// filter change and lets the UI show the size before starting a big transfer.
+        /// Dates are the APPLIED date and are inclusive of both days.
+        /// </summary>
+        [HttpGet("ResumeZipEstimate"), Authorize, RequirePageAccess("/applicant/list")]
+        public async Task<IActionResult> ResumeZipEstimate(
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null,
+            [FromQuery] bool allDates = false,
+            [FromQuery] int statusId = 0,
+            [FromQuery] string searchTerm = "",
+            CancellationToken cancellationToken = default)
+        {
+            var identity = HttpContext.User.Identity as ClaimsIdentity;
+            var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
+            if (userClaims == null || string.IsNullOrEmpty(userClaims.EmployeeId))
+                return BadRequest(new { Status = false, Message = "Invalid user credentials." });
+
+            if (!allDates && (fromDate == null || toDate == null))
+                return BadRequest(new { Status = false, Message = "Provide both fromDate and toDate, or set allDates=true." });
+            if (!allDates && fromDate > toDate)
+                return BadRequest(new { Status = false, Message = "fromDate cannot be after toDate." });
+
+            var plan = await _resumeService.BuildPlanAsync(userClaims, statusId, searchTerm,
+                fromDate, toDate, allDates, ResumePartSizeBytes, cancellationToken);
+
+            return Ok(new { Status = true, Data = plan });
+        }
+
+        /// <summary>
+        /// GET api/Applicant/DownloadResumesZip — streams ONE part of the resume download.
+        /// Call ResumeZipEstimate first to learn how many parts there are, then request
+        /// part=1..N. Applicants whose file is missing on disk are skipped, not fatal, and
+        /// every part carries a _manifest.csv explaining exactly what it holds.
+        /// </summary>
+        [HttpGet("DownloadResumesZip"), Authorize, RequirePageAccess("/applicant/list")]
+        public async Task<IActionResult> DownloadResumesZip(
+            [FromQuery] DateTime? fromDate = null,
+            [FromQuery] DateTime? toDate = null,
+            [FromQuery] bool allDates = false,
+            [FromQuery] int statusId = 0,
+            [FromQuery] string searchTerm = "",
+            [FromQuery] int part = 1,
+            CancellationToken cancellationToken = default)
+        {
+            var identity = HttpContext.User.Identity as ClaimsIdentity;
+            var userClaims = AuthenticUserDetails.GetCurrentUserDetails(identity);
+            if (userClaims == null || string.IsNullOrEmpty(userClaims.EmployeeId))
+                return BadRequest(new { Status = false, Message = "Invalid user credentials." });
+
+            if (!allDates && (fromDate == null || toDate == null))
+                return BadRequest(new { Status = false, Message = "Provide both fromDate and toDate, or set allDates=true." });
+            if (!allDates && fromDate > toDate)
+                return BadRequest(new { Status = false, Message = "fromDate cannot be after toDate." });
+
+            // Built on disk in the OS temp folder, then streamed with DeleteOnClose, so a
+            // multi-hundred-MB ZIP never sits in memory. Same shape as the punches export.
+            var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"Resumes_{Guid.NewGuid():N}.zip");
+            try
+            {
+                var result = await _resumeService.WritePartAsync(userClaims, statusId, searchTerm,
+                    fromDate, toDate, allDates, ResumePartSizeBytes, part, tempPath, cancellationToken);
+
+                // Counts travel in headers so the UI can report skips without opening the ZIP.
+                // NOTE: HttpContext.Response, not ControllerBase.Response — the project has
+                // its own `Response` DTO type which shadows the property in this namespace.
+                HttpContext.Response.Headers["X-Resume-Part"] = $"{result.partNumber}/{result.partCount}";
+                HttpContext.Response.Headers["X-Resume-Files-Written"] = result.filesWritten.ToString();
+                HttpContext.Response.Headers["X-Resume-Files-Missing"] = result.filesMissingOnDisk.ToString();
+
+                var stream = new System.IO.FileStream(tempPath, System.IO.FileMode.Open, System.IO.FileAccess.Read,
+                    System.IO.FileShare.Read, 81920,
+                    System.IO.FileOptions.DeleteOnClose | System.IO.FileOptions.Asynchronous);
+                return File(stream, "application/zip", result.fileName);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentOutOfRangeException)
+            {
+                if (System.IO.File.Exists(tempPath)) { try { System.IO.File.Delete(tempPath); } catch { } }
+                return BadRequest(new { Status = false, Message = ex.Message });
+            }
+            catch
+            {
+                if (System.IO.File.Exists(tempPath)) { try { System.IO.File.Delete(tempPath); } catch { } }
+                throw;
+            }
         }
 
         [HttpPost]  

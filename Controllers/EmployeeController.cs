@@ -201,6 +201,39 @@ WHERE l.rn = 1";
 
         // Builds a map of Ecode -> (subDept1, subDept2, subDept3) names from tblEmployee +
         // tblSubDepartment. Read-only; used to enrich Employee Master report downloads.
+        /// <summary>
+        /// Ecode -> HR role name (dbo.tblRoleMaster via tblEmployee.RoleMasterId),
+        /// for the "HR Role" column in the employee master export.
+        ///
+        /// This is NOT the portal/RBAC role. The proc already returns that one as
+        /// "Role Name" (with "Employee Role ID"); the two are different things and
+        /// the export carries both.
+        /// </summary>
+        private async Task<Dictionary<string, string>> GetEmployeeHrRoleNameMapByEcode(System.Data.Common.DbConnection conn)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT e.Ecode, rm.RoleName
+                FROM dbo.tblEmployee e
+                JOIN dbo.tblRoleMaster rm ON rm.RoleMasterId = e.RoleMasterId
+                WHERE e.Ecode IS NOT NULL";
+            cmd.CommandTimeout = 0;
+
+            using var rdr = await cmd.ExecuteReaderAsync();
+            while (await rdr.ReadAsync())
+            {
+                var ec = (rdr["Ecode"] as string)?.Trim();
+                var roleName = (rdr["RoleName"] as string)?.Trim();
+                if (string.IsNullOrWhiteSpace(ec) || string.IsNullOrWhiteSpace(roleName)) continue;
+
+                result[ec] = roleName;
+            }
+
+            return result;
+        }
+
         private async Task<Dictionary<string, (string? n1, string? n2, string? n3)>> GetSubDeptNameMapByEcode(System.Data.Common.DbConnection conn)
         {
             var result = new Dictionary<string, (string?, string?, string?)>(StringComparer.OrdinalIgnoreCase);
@@ -324,24 +357,27 @@ WHERE l.rn = 1;";
                 await using var detailsConn = new SqlConnection(connStr);
                 await using var subDeptConn = new SqlConnection(connStr);
                 await using var punchConn = new SqlConnection(connStr);
+                await using var roleConn = new SqlConnection(connStr);
 
                 await Task.WhenAll(
                     mainConn.OpenAsync(), approverConn.OpenAsync(), detailsConn.OpenAsync(),
-                    subDeptConn.OpenAsync(), punchConn.OpenAsync());
+                    subDeptConn.OpenAsync(), punchConn.OpenAsync(), roleConn.OpenAsync());
 
                 var dataTableTask = LoadEmployeeExcelDataTableAsync(mainConn, isActive, allEmployee, companyId);
                 var approverMapTask = GetResignationApproverMap(approverConn);
                 var resignationDetailsMapTask = GetResignationDetailsMap(detailsConn);
                 var subDeptMapTask = GetSubDeptNameMapByEcode(subDeptConn);
                 var punchLocationMapTask = GetLastPunchLocationMap(punchConn);
+                var hrRoleNameMapTask = GetEmployeeHrRoleNameMapByEcode(roleConn);
 
-                await Task.WhenAll(dataTableTask, approverMapTask, resignationDetailsMapTask, subDeptMapTask, punchLocationMapTask);
+                await Task.WhenAll(dataTableTask, approverMapTask, resignationDetailsMapTask, subDeptMapTask, punchLocationMapTask, hrRoleNameMapTask);
 
                 var dataTable = dataTableTask.Result;
                 var approverMap = approverMapTask.Result;
                 var resignationDetailsMap = resignationDetailsMapTask.Result;
                 var subDeptMap = subDeptMapTask.Result;
                 var punchLocationMap = punchLocationMapTask.Result;
+                var hrRoleNameMap = hrRoleNameMapTask.Result;
 
                 // Always show Bank Name / IFSC Code / PAN No. in UPPERCASE in the export.
                 foreach (var colName in new[] { "Name of Bank", "IFSC Code", "PAN No." })
@@ -409,6 +445,34 @@ WHERE l.rn = 1;";
                             row["Notice Period"] = rd.NoticePeriod ?? (object)DBNull.Value;
                             row["Is Absconding"] = rd.IsAbscond ?? (object)DBNull.Value;
                         }
+                    }
+                }
+
+                // HR role (dbo.tblRoleMaster, maintained by HR on Masters -> Role
+                // Master). Adds "HR Role" right after Designation, where the other
+                // official fields sit.
+                //
+                // The proc's existing "Role Name" / "Employee Role ID" columns are the
+                // PORTAL/RBAC role and are deliberately left exactly where and as they
+                // were - the two roles are different things and the export shows both.
+                if (ecodeColumn != null)
+                {
+                    if (!dataTable.Columns.Contains("HR Role"))
+                        dataTable.Columns.Add("HR Role", typeof(string));
+
+                    foreach (DataRow row in dataTable.Rows)
+                    {
+                        var ec = row[ecodeColumn]?.ToString();
+                        if (!string.IsNullOrEmpty(ec) && hrRoleNameMap.TryGetValue(ec.Trim(), out var hrRoleName))
+                            row["HR Role"] = hrRoleName;
+                    }
+
+                    var desgCol = dataTable.Columns.Cast<DataColumn>().FirstOrDefault(c =>
+                        c.ColumnName.IndexOf("Designation", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (desgCol != null)
+                    {
+                        dataTable.Columns["HR Role"].SetOrdinal(
+                            Math.Min(desgCol.Ordinal + 1, dataTable.Columns.Count - 1));
                     }
                 }
 

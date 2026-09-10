@@ -126,6 +126,13 @@ namespace HRMSAPI.DTO
 
         public bool? DifferentlyAbled { get; set; }
         public int? ShiftID { get; set; }
+
+        /// <summary>
+        /// HR role (dbo.tblRoleMaster) chosen in the "Role" field. Optional -
+        /// nothing about the portal/RBAC role is affected by this.
+        /// </summary>
+        public int? RoleMasterId { get; set; }
+
         public string? Source { get; set; }
         public string? ReferenceEmployee { get; set; }
         public string? PreferredLocation { get; set; }

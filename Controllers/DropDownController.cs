@@ -380,6 +380,40 @@ namespace HRMSAPI.Controllers
                 });
             }
         }
+        /// <summary>
+        /// Active HR roles (dbo.tblRoleMaster) for the Role dropdown on the employee
+        /// profile and the candidate page. Lives here rather than on
+        /// RoleMasterController because that controller is gated on the Role Master
+        /// page, which only IT Superadmin holds - HR still has to be able to PICK a
+        /// role even though only IT Superadmin can maintain the list.
+        ///
+        /// Not the portal/RBAC roles: those come from /api/Auth/Roles.
+        /// </summary>
+        [HttpGet("GetRoleMaster")]
+        public async Task<IActionResult> GetRoleMaster([FromServices] IRoleMasterService roleMasterService)
+        {
+            try
+            {
+                var result = await roleMasterService.GetActiveRolesAsync();
+                return StatusCode((int)result.Code, new
+                {
+                    Status = result.Status,
+                    Message = result.Message,
+                    Data = result.Data
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching HR roles");
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    Status = false,
+                    Message = "An error occurred",
+                    Error = ex.Message
+                });
+            }
+        }
+
         [HttpGet("GetLocationDesignationPolicyCategory")]
         public async Task<IActionResult> GetLocationDesignationPolicyCategory()
         {

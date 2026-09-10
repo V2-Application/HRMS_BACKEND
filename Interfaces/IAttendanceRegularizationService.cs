@@ -12,7 +12,8 @@ namespace HRMSAPI.Interfaces
             DateTime endDate,
             string? status,
             string? managerStatus,
-            string? lpStatus);
+            string? lpStatus,
+            string? hrStatus = null);
     }
 }
 

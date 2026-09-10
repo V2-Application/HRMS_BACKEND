@@ -805,8 +805,15 @@ WHERE w.IsActive = 1 AND CAST(w.AccessDate AS date) = CAST(@d AS date)
                 var req = wrapper.Request;
                 var roleLower = role?.Trim().ToLowerInvariant();
                 var isCallerSuperAdmin = roleLower == "superadmin" || roleLower == "it superadmin" || roleLower == "master";
-                // Regularize HR = final-authority approver: approving finalizes the whole request
-                // (acts like SuperAdmin for regularize), regardless of Manager/LP. Old flow unchanged.
+                // ===== Third layer: HR =====
+                // EVERY request ends up here: the overall StatusId cannot become
+                // Approved until HR has approved, so nothing is finalized without
+                // passing through this layer.
+                //
+                // HR is IT Superadmin, and ONLY IT Superadmin. SuperAdmin, Master and
+                // Regularize HR all behave the same way as each other: they stamp
+                // Manager + LP and the request then waits for HR.
+                var isCallerHr = roleLower == "it superadmin";
                 var isCallerRegularizeHr = roleLower == "regularize hr" || roleLower == "regularizehr" || roleLower == "regularize-hr";
                 var isCallerLp = isCallerSuperAdmin || roleLower == "lp" || roleLower == "audit";
                 var isCallerReportingManager = req.ReportingManagerId == callerEmployeeId;
@@ -815,9 +822,30 @@ WHERE w.IsActive = 1 AND CAST(w.AccessDate AS date) = CAST(@d AS date)
                 var trimmedRemarks = dto.Remarks?.Trim();
 
                 // ===== Role-based logic =====
-                if (isCallerSuperAdmin || isCallerRegularizeHr || callerEmployeeId==10)
+                if (isCallerHr)
                 {
-                    // SuperAdmin / Regularize HR (final authority) updates both → finalizes the request
+                    // HR decision is enough on its own: stamp all three layers so no
+                    // other approval is needed, whatever state Manager / LP were in.
+                    req.HrApprovalStatusId = dto.StatusId;
+                    req.HrApproverId = callerEmployeeId;
+                    req.HrApprovalOn = now;
+                    req.HrRemarks = trimmedRemarks;
+
+                    req.ManagerApprovalStatusId = dto.StatusId;
+                    req.ManagerApproverId = callerEmployeeId;
+                    req.ManagerApprovalOn = now;
+                    req.ManagerRemarks = trimmedRemarks;
+
+                    req.LpApprovalStatusId = dto.StatusId;
+                    req.LpApproverId = callerEmployeeId;
+                    req.LpApprovalOn = now;
+                    req.LpRemarks = trimmedRemarks;
+                }
+                else if (isCallerSuperAdmin || isCallerRegularizeHr || callerEmployeeId == 10)
+                {
+                    // SuperAdmin / Master / Regularize HR: all clear Manager + LP in one
+                    // go, but the HR layer is left untouched, so finalStatus below stays
+                    // Pending until IT Superadmin acts.
                     req.ManagerApprovalStatusId = dto.StatusId;
                     req.ManagerApproverId = callerEmployeeId;
                     req.ManagerApprovalOn = now;
@@ -873,13 +901,21 @@ WHERE w.IsActive = 1 AND CAST(w.AccessDate AS date) = CAST(@d AS date)
                 }
 
                 // ===== Final Status =====
+                // Three layers now: Manager -> LP -> HR.
+                //   * any layer rejecting finalizes the request as Rejected (unchanged);
+                //   * Approved requires the HR layer to have approved. Manager + LP
+                //     approvals on their own leave the request Pending, waiting on HR.
+                // HR NULL means HR has not acted, so it counts as Pending.
                 int manager = req.ManagerApprovalStatusId ?? AttendanceStatuses.Pending;
                 int lp = req.LpApprovalStatusId ?? AttendanceStatuses.Pending;
+                int hr = req.HrApprovalStatusId ?? AttendanceStatuses.Pending;
 
                 int finalStatus =
-                    (manager == AttendanceStatuses.Rejected || lp == AttendanceStatuses.Rejected)
+                    (manager == AttendanceStatuses.Rejected
+                     || lp == AttendanceStatuses.Rejected
+                     || hr == AttendanceStatuses.Rejected)
                         ? AttendanceStatuses.Rejected
-                        : (manager == AttendanceStatuses.Approved && lp == AttendanceStatuses.Approved)
+                        : (hr == AttendanceStatuses.Approved)
                             ? AttendanceStatuses.Approved
                             : AttendanceStatuses.Pending;
 
@@ -1061,13 +1097,19 @@ WHERE EXISTS (
         on r.LpApproverId equals lp.EmployeeId into lps
     from lpEmp in lps.DefaultIfEmpty()
 
+        // HR LEFT JOIN (third approval layer)
+    join hr in _context.tblEmployees.AsNoTracking()
+        on r.HrApproverId equals hr.EmployeeId into hrs
+    from hrEmp in hrs.DefaultIfEmpty()
+
     select new
     {
         request = r,
         employee = e,
         location,
         manager,
-        lpEmp
+        lpEmp,
+        hrEmp
     };
 
                 var roleNorm = role.Trim().ToLowerInvariant();
@@ -1080,23 +1122,22 @@ WHERE EXISTS (
                     .FirstOrDefaultAsync();
 
                 // === Pending tab: limit to current attendance cycle (26th of prev month → today inclusive) for all roles ===
-                if (statusId == 4)
+                // EXCEPT the HR layer (IT Superadmin). Every request has to reach HR to be
+                // finalized, so HR's Pending tab is not date-limited at all -- otherwise a
+                // request that ages past the cycle boundary would become invisible to the
+                // only role that can close it, and sit Pending for good.
+                var roleNormForWindow = role.Trim().ToLowerInvariant();
+                bool isHrLayerRole = roleNormForWindow == "it superadmin";
+
+                if (statusId == 4 && !isHrLayerRole)
                 {
                     var today = DateTime.Today;
                     var prevMonth = today.AddMonths(-1);
                     var cycleFrom = new DateTime(prevMonth.Year, prevMonth.Month, 26);
 
-                    // Regularize HR (final approver) gets a wider Pending window: one extra cycle back
-                    // (starts at the 26th two months prior — e.g. on 01-Jul-2026 it starts 26-May-2026)
-                    // so nothing pending is missed across cycle boundaries.
-                    var roleNormForWindow = role.Trim().ToLowerInvariant();
-                    bool isRegularizeHrWindow = roleNormForWindow == "regularize hr" || roleNormForWindow == "regularizehr" || roleNormForWindow == "regularize-hr";
-                    if (isRegularizeHrWindow)
-                    {
-                        var back2 = today.AddMonths(-2);
-                        cycleFrom = new DateTime(back2.Year, back2.Month, 26);
-                    }
-
+                    // Regularize HR gets the same window as SuperAdmin now that it no longer
+                    // finalizes requests; the extra cycle it used to get belonged to the
+                    // final-approver role, which is IT Superadmin.
                     var cycleToExclusive = today.AddDays(1); // today inclusive
 
                     // ADDITIVE: also surface requests that an admin has opened for approval via a
@@ -1122,7 +1163,12 @@ WHERE EXISTS (
                 //    overall request.StatusId.
                 bool isSuperAdmin = roleNorm == "superadmin";
                 // Regularize HR sees ALL requests org-wide (like SuperAdmin), filtered by overall status.
-                bool isRegularizeHr = roleNorm == "regularize hr" || roleNorm == "regularizehr" || roleNorm == "regularize-hr";
+                // IT Superadmin holds the third (HR) approval layer, so it needs the same
+                // org-wide view -- otherwise the requests waiting on HR would never be
+                // visible to the only role that can finalize them (it used to fall through
+                // to the default "my reportees" branch).
+                bool isRegularizeHr = roleNorm == "regularize hr" || roleNorm == "regularizehr" || roleNorm == "regularize-hr"
+                                   || roleNorm == "it superadmin";
                 bool isApprovedOrRejectedView = statusId == AttendanceStatuses.Approved || statusId == AttendanceStatuses.Rejected;
                 bool isPendingView = statusId == AttendanceStatuses.Pending;
 
@@ -1266,6 +1312,13 @@ WHERE EXISTS (
                     LpRemarks = x.request.LpRemarks,
                     LpEcode = x.lpEmp != null ? x.lpEmp.Ecode ?? "Unknown" : "Unknown",
                     ManagerEcode = x.manager != null ? x.manager.Ecode ?? "Unknown" : "Unknown",
+
+                    // third layer (HR)
+                    HrApprovalStatusId = x.request.HrApprovalStatusId,
+                    HrApproverId = x.request.HrApproverId,
+                    HrApprovalOn = x.request.HrApprovalOn,
+                    HrRemarks = x.request.HrRemarks,
+                    HrEcode = x.hrEmp != null ? x.hrEmp.Ecode ?? "Unknown" : "Unknown",
                 }).ToListAsync();
 
                 return new PagedResult<AttendanceRegularizationRequestDto>(result, totalRecords);
@@ -1335,7 +1388,14 @@ WHERE EXISTS (
                         LpApprovalStatusId = x.request.LpApprovalStatusId,
                         LpApproverId = x.request.LpApproverId,
                         LpApprovalOn = x.request.LpApprovalOn,
-                        LpRemarks = x.request.LpRemarks
+                        LpRemarks = x.request.LpRemarks,
+
+                        // third layer (HR) so the employee's own view shows where the
+                        // request actually stands
+                        HrApprovalStatusId = x.request.HrApprovalStatusId,
+                        HrApproverId = x.request.HrApproverId,
+                        HrApprovalOn = x.request.HrApprovalOn,
+                        HrRemarks = x.request.HrRemarks
                     })
                     .OrderByDescending(x => x.AttendanceRequestId)
                     .ToListAsync();

@@ -1,4 +1,7 @@
-﻿CREATE OR ALTER PROCEDURE dbo.usp_LastPunchAfterSeparationGapReport
+﻿/* PROD definition of dbo.usp_LastPunchAfterSeparationGapReport as it stood on 2026-09-08, BEFORE the
+   F&F-pending change. Rollback: run this file (change CREATE to CREATE OR ALTER). */
+
+CREATE   PROCEDURE dbo.usp_LastPunchAfterSeparationGapReport
     @AsOfDate DATE = NULL    -- kept for signature compatibility (not used)
 AS
 BEGIN
@@ -59,13 +62,11 @@ BEGIN
     LEFT JOIN dbo.tblSubDepartment sd2 WITH (NOLOCK) ON sd2.SubDepartmentId = e.SubDepartmentId2
     LEFT JOIN dbo.tblSubDepartment sd3 WITH (NOLOCK) ON sd3.SubDepartmentId = e.SubDepartmentId3
     WHERE e.IsActive = 0                              -- separated (from Employee Master)
-      AND EXISTS (                                -- F&F PENDING ONLY.
-            -- Single source of truth: dbo.fn_FnFPendingEmployees mirrors the FNF
-            -- screen's Pending branch. It replaced a local copy that treated
-            -- 'Transfered' as still pending, which showed 10,328 already-settled
-            -- employees in this report. See DatabaseScripts/fn_FnFPendingEmployees.sql.
-            SELECT 1 FROM dbo.fn_FnFPendingEmployees(ISNULL(@AsOfDate, CAST(GETDATE() AS date))) f
-            WHERE f.EmployeeId = e.EmployeeId
+      AND NOT EXISTS (                                -- exclude F&F Completed (Pending/Processing stay)
+            SELECT 1 FROM dbo.FNF_Header h WITH (NOLOCK)
+            JOIN dbo.FNF_Payment pmt WITH (NOLOCK) ON pmt.FNFId = h.FNFId
+            WHERE h.EmployeeId = e.EmployeeId
+              AND (pmt.Status IN ('Paid','FNF DONE') OR pmt.AmountPaid > 0)
           )
       AND lp.LastPunchDt IS NOT NULL
       AND sep.SeparationDate IS NOT NULL
@@ -75,4 +76,5 @@ BEGIN
 
     SET NOCOUNT OFF;
 END;
+
 

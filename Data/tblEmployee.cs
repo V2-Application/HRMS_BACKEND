@@ -288,6 +288,13 @@ public partial class tblEmployee
 
     public int? ShiftID { get; set; }
 
+    /// <summary>
+    /// The employee's HR role (dbo.tblRoleMaster), set from the "Role" field on
+    /// the employee profile. Optional. Unrelated to the portal/RBAC role, which
+    /// lives in tblEmployeeRole -> tblRole.
+    /// </summary>
+    public int? RoleMasterId { get; set; }
+
     public bool? IsAadharBackAttachmentUploaded { get; set; }
 
     public bool? IsUANRegistered { get; set; }

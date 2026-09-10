@@ -9,6 +9,16 @@ namespace HRMSAPI.Models.Abstract
         public string? Source { get; set; }
         public string? ReferenceEmployee { get; set; }
         public int? ShiftID { get; set; }
+
+        /// <summary>
+        /// Optional HR role (dbo.tblRoleMaster) for the candidate / employee.
+        /// Parked on the candidate row and copied onto tblEmployee.RoleMasterId
+        /// when the candidate is converted. Null = not chosen.
+        ///
+        /// Nothing to do with the portal/RBAC role, which is not editable from
+        /// these forms.
+        /// </summary>
+        public int? RoleMasterId { get; set; }
         public string? differentlyAbledRemarks { get; set; }
         public bool? differentlyAbled { get; set; }
         public string? differentlyAbledReason { get; set; }

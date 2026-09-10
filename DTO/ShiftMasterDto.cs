@@ -12,6 +12,10 @@ namespace HRMSAPI.DTO
 
         public TimeSpan EndTime { get; set; }
 
+        public DateTime? EffectiveFrom { get; set; }
+
+        public DateTime? EffectiveTo { get; set; }
+
         public bool IsActive { get; set; }
 
         public string CreatedBy { get; set; }

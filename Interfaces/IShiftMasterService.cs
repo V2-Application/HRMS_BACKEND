@@ -10,6 +10,7 @@ namespace HRMSAPI.Interfaces
         Task<ExecuteAndReponse> UpdateShiftAsync(int shiftId, ShiftMasterUpsertDto shiftDto, string updatedBy);
         Task<FetchAndResponse> GetAllShiftsAsync();
         Task<FetchAndResponse> GetShiftByIdAsync(int shiftId);
+        Task<FetchAndResponse> GetShiftHistoryAsync(int shiftId);
         Task<ExecuteAndReponse> DeleteShiftAsync(int shiftId);
         Task<ExecuteAndReponse> ToggleShiftStatusAsync(int shiftId, string updatedBy);
     }

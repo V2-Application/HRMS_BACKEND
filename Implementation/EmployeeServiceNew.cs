@@ -634,6 +634,10 @@ namespace HRMSAPI.Implementation
                     candidate.differentlyAbledRemarks = candidateEntity?.DifferentlyAbledRemarks ?? "";
                     candidate.skillType = candidateEntity?.SkillType ?? "";
                     candidate.ShiftID = employeeEntity?.ShiftID ?? candidateEntity?.ShiftID ?? 0;
+                    // HR role: the employee's own value wins; falls back to whatever was
+                    // picked while they were still a candidate. Null stays null so the
+                    // optional dropdown shows empty.
+                    candidate.RoleMasterId = employeeEntity?.RoleMasterId ?? candidateEntity?.RoleMasterId;
 
                     var idToPass = employeeEntity.CandidateId>0 ?employeeEntity.CandidateId:employeeEntity.EmployeeId;
                     var familyData = await _context.tblFamilies.AsNoTracking()
@@ -873,6 +877,7 @@ namespace HRMSAPI.Implementation
                         DifferentlyAbledReason = details.differentlyAbledReason ?? "",
                         DifferentlyAbledRemarks = details.differentlyAbledRemarks ?? "",
                         ShiftID = details.ShiftID ?? 1,
+                        RoleMasterId = details.RoleMasterId,
                         Source = details.Source ?? "",
                         ReferenceEmployee = details.ReferenceEmployee ?? "",
                         title = details.title ?? "",
@@ -1028,6 +1033,9 @@ namespace HRMSAPI.Implementation
                 employeeData.ESICApplicable = employee.candidateInfo.esicApplicable;
                 employeeData.ReportHeadEcode = employee.candidateInfo.reportHeadEcode;
                 employeeData.ShiftID = employee.candidateInfo.ShiftID ?? 1;
+                // HR role: optional, so no fallback - a cleared dropdown clears the
+                // stored role rather than silently keeping the old one.
+                employeeData.RoleMasterId = employee.candidateInfo.RoleMasterId;
                 employeeData.IsUANRegistered = employee.candidateInfo.isUanRegistered ?? false;
                 employeeData.AOCode = employee.candidateInfo.AoCode ?? "";
 
@@ -1358,8 +1366,33 @@ namespace HRMSAPI.Implementation
                     // "Last Working Day" is OPTIONAL too and always sits in the LAST column, so an
                     // existing file (with or without sub-departments) keeps uploading unchanged.
                     const string lastWorkingDayHeader = "Last Working Day";
+                    // "HR Role" is OPTIONAL too and must be the very LAST column, so
+                    // every existing file (with or without sub-departments / Last Working
+                    // Day) keeps uploading unchanged. It sets tblEmployee.RoleMasterId
+                    // from the HR Role Master list -- NOT the portal/RBAC role.
+                    const string hrRoleHeader = "HR Role";
                     var headerRow = worksheet.Row(1);
                     int cellCount = headerRow.CellsUsed().Count();
+
+                    int hrRoleCol = 0;
+                    foreach (var hc in headerRow.CellsUsed())
+                    {
+                        if (string.Equals(hc.GetValue<string>()?.Trim(), hrRoleHeader, StringComparison.OrdinalIgnoreCase))
+                        {
+                            hrRoleCol = hc.Address.ColumnNumber;
+                            break;
+                        }
+                    }
+                    if (hrRoleCol > 0 && hrRoleCol != cellCount)
+                    {
+                        return BuildExecuteErrorResponse(
+                            $"'{hrRoleHeader}' must be the last column (found at column {hrRoleCol} of {cellCount}). Move it to the end and upload again.",
+                            HttpStatusCode.BadRequest);
+                    }
+                    // Everything below counts columns positionally, so hide the extra
+                    // HR Role column from those checks.
+                    if (hrRoleCol > 0) cellCount--;
+
                     int baseCols = expectedHeaders.Length;
                     int subDeptCols = subDeptHeaders.Length;
 
@@ -1399,6 +1432,18 @@ namespace HRMSAPI.Implementation
                     var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
                     var subDeptErrors = new List<string>();
                     var dateErrors = new List<string>();
+
+                    // HR role lookup by name, loaded once. Inactive roles are accepted on
+                    // upload (a bulk correction should not be blocked by a role that was
+                    // retired after the fact); only unknown names are reported.
+                    Dictionary<string, int> hrRoleByName = null;
+                    var hrRoleErrors = new List<string>();
+                    if (hrRoleCol > 0)
+                    {
+                        hrRoleByName = await _context.tblRoleMasters
+                            .AsNoTracking()
+                            .ToDictionaryAsync(r => r.RoleName.Trim(), r => r.RoleMasterId, StringComparer.OrdinalIgnoreCase);
+                    }
                     int excelRowNo = 1; // header is row 1; first data row = 2
                     var rows = worksheet.RowsUsed().Skip(1); // Skip header row
 
@@ -1730,6 +1775,21 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
+                        // Optional last column: HR Role (dbo.tblRoleMaster). Blank leaves the
+                        // employee's current role alone, so a sheet that does not care about
+                        // roles can still be uploaded with the column present.
+                        if (hrRoleCol > 0)
+                        {
+                            var hrRoleRaw = row.Cell(hrRoleCol).GetValue<string>()?.Trim();
+                            if (!string.IsNullOrWhiteSpace(hrRoleRaw))
+                            {
+                                if (hrRoleByName != null && hrRoleByName.TryGetValue(hrRoleRaw, out var roleMasterId))
+                                    employee.RoleMasterId = roleMasterId;
+                                else
+                                    hrRoleErrors.Add($"Row {excelRowNo} ({empCode}): HR Role '{hrRoleRaw}' does not exist in Role Master");
+                            }
+                        }
+
                         // Whatever case the sheet was typed in (mixed, lower, title), the employee
                         // master is stored UPPERCASE. Applied to the whole entity rather than to
                         // each of the ~60 assignments above, so any column added later is covered
@@ -1752,6 +1812,8 @@ namespace HRMSAPI.Implementation
                         updMsg += $". Note: {subDeptErrors.Count} sub-department value(s) could not be applied: {string.Join(" | ", subDeptErrors.Take(20))}";
                     if (dateErrors.Count > 0)
                         updMsg += $". Note: {dateErrors.Count} date value(s) could not be applied: {string.Join(" | ", dateErrors.Take(20))}";
+                    if (hrRoleErrors.Count > 0)
+                        updMsg += $". Note: {hrRoleErrors.Count} HR Role value(s) could not be applied: {string.Join(" | ", hrRoleErrors.Take(20))}";
                     return BuildExecuteSuccessResponse(updMsg);
                 }
             }

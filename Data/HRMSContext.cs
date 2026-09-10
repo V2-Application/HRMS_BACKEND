@@ -575,6 +575,11 @@ public partial class HRMSContext : DbContext
 
     public virtual DbSet<tblShiftMaster> tblShiftMasters { get; set; }
 
+    public virtual DbSet<tblShiftMasterHistory> tblShiftMasterHistories { get; set; }
+
+    /// <summary>HR-maintained role list. Separate from tblRoles (portal/RBAC roles).</summary>
+    public virtual DbSet<tblRoleMaster> tblRoleMasters { get; set; }
+
     public virtual DbSet<tblState> tblStates { get; set; }
 
     public virtual DbSet<tblStatus> tblStatuses { get; set; }
@@ -7779,6 +7784,11 @@ public partial class HRMSContext : DbContext
                 .HasDefaultValue(4)
                 .HasAnnotation("Relational:DefaultConstraintName", "DF_tblARR_LpApprovalStatusId");
             entity.Property(e => e.LpRemarks).HasMaxLength(500);
+            // Third layer (HR / IT Superadmin). Deliberately NO default of 4:
+            // an untouched request must stay NULL so "never seen by HR" is
+            // distinguishable from "HR set it back to Pending".
+            entity.Property(e => e.HrApprovalOn).HasColumnType("datetime");
+            entity.Property(e => e.HrRemarks).HasMaxLength(500);
             entity.Property(e => e.ManagerApprovalOn).HasColumnType("datetime");
             entity.Property(e => e.ManagerApprovalStatusId)
                 .HasDefaultValue(4)
@@ -13447,6 +13457,11 @@ public partial class HRMSContext : DbContext
                 .HasMaxLength(50)
                 .IsUnicode(false);
             entity.Property(e => e.CreatedOn).HasColumnType("datetime");
+            // Effective window of the shift timing, matching
+            // EmployeeShiftHistory.EffectiveFrom / EffectiveTo on the Emp Shift
+            // Alignment side: plain dates, EffectiveTo NULL = open ended.
+            entity.Property(e => e.EffectiveFrom).HasColumnType("date");
+            entity.Property(e => e.EffectiveTo).HasColumnType("date");
             entity.Property(e => e.LastUpdatedBy)
                 .HasMaxLength(50)
                 .IsUnicode(false);
@@ -13455,6 +13470,58 @@ public partial class HRMSContext : DbContext
                 .IsRequired()
                 .HasMaxLength(50)
                 .IsUnicode(false);
+        });
+
+        modelBuilder.Entity<tblRoleMaster>(entity =>
+        {
+            entity.HasKey(e => e.RoleMasterId).HasName("PK_tblRoleMaster");
+
+            entity.ToTable("tblRoleMaster");
+
+            entity.HasIndex(e => e.RoleName, "UQ_tblRoleMaster_RoleName").IsUnique();
+
+            entity.Property(e => e.RoleName)
+                .IsRequired()
+                .HasMaxLength(100)
+                .IsUnicode(false);
+            entity.Property(e => e.Description)
+                .HasMaxLength(500)
+                .IsUnicode(false);
+            entity.Property(e => e.CreatedBy)
+                .HasMaxLength(100)
+                .IsUnicode(false);
+            entity.Property(e => e.CreatedOn).HasColumnType("datetime");
+            entity.Property(e => e.LastUpdatedBy)
+                .HasMaxLength(100)
+                .IsUnicode(false);
+            entity.Property(e => e.LastUpdatedOn).HasColumnType("datetime");
+        });
+
+        modelBuilder.Entity<tblShiftMasterHistory>(entity =>
+        {
+            entity.HasKey(e => e.ShiftHistoryId).HasName("PK_tblShiftMasterHistory");
+
+            entity.ToTable("tblShiftMasterHistory");
+
+            entity.HasIndex(e => new { e.ShiftID, e.EffectiveFrom, e.ShiftHistoryId },
+                            "IX_tblShiftMasterHistory_ShiftID");
+
+            entity.Property(e => e.ShiftName)
+                .IsRequired()
+                .HasMaxLength(50)
+                .IsUnicode(false);
+            entity.Property(e => e.EffectiveFrom).HasColumnType("date");
+            entity.Property(e => e.EffectiveTo).HasColumnType("date");
+            entity.Property(e => e.Remarks).HasMaxLength(200);
+            entity.Property(e => e.ChangeType)
+                .IsRequired()
+                .HasMaxLength(20)
+                .IsUnicode(false);
+            entity.Property(e => e.ChangedBy)
+                .IsRequired()
+                .HasMaxLength(50)
+                .IsUnicode(false);
+            entity.Property(e => e.ChangedOn).HasColumnType("datetime");
         });
 
         modelBuilder.Entity<tblState>(entity =>

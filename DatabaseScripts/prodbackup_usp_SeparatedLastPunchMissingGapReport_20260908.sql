@@ -1,16 +1,18 @@
-﻿CREATE OR ALTER PROCEDURE dbo.usp_LastPunchAfterSeparationGapReport
+﻿/* PROD definition of dbo.usp_SeparatedLastPunchMissingGapReport as it stood on 2026-09-08, BEFORE the
+   F&F-pending change. Rollback: run this file (change CREATE to CREATE OR ALTER). */
+
+CREATE   PROCEDURE dbo.usp_SeparatedLastPunchMissingGapReport
     @AsOfDate DATE = NULL    -- kept for signature compatibility (not used)
 AS
 BEGIN
     SET NOCOUNT ON;
 
     /*
-      LOC.-EMP. LAST PUNCHING SHOWS AFTER SEPARATION  (read-only)
-      MASTER-DRIVEN: SEPARATED employees (tblEmployee.IsActive = 0) whose LAST actual punch is AFTER
-      their separation date. SEPERATION DATE = same source as the Employee Master report
+      SEPARATED BUT LAST PUNCH DT MISSING  (read-only)
+      MASTER-DRIVEN: every SEPARATED employee (tblEmployee.IsActive = 0) who has NO last punch date.
+      SEPERATION DATE = same source as the Employee Master report
       (MAX(UpdatedOn) in tblEmployeeActiveInActiveHistories where ActionPerformed='False', by EmployeeId).
-        PUNCH AGEING AFTER SEPERATION = DATEDIFF(day, SEPERATION DATE, L.PUNCH DATE)  (only > 0 shown)
-      Sorted by ageing desc.
+      Store-login accounts excluded.
     */
 
     ;WITH Separation AS (
@@ -41,8 +43,7 @@ BEGIN
         dg.DesignationName    AS [DESGN.],
         CASE WHEN e.IsActive = 0 THEN 'Separated' ELSE 'Active' END AS [EMP. STATUS ( ACT/INACT)],
         CAST(sep.SeparationDate AS date) AS [SEPERATION DATE],
-        lp.LastPunchDt AS [L.PUNCH DATE],
-        DATEDIFF(DAY, CAST(sep.SeparationDate AS date), lp.LastPunchDt) AS [PUNCH AGEING AFTER SEPERATION]
+        lp.LastPunchDt AS [L.PUNCH DATE]
     FROM dbo.tblEmployee e WITH (NOLOCK)
     OUTER APPLY (
         SELECT MAX(x.AttendanceDate) AS LastPunchDt
@@ -59,20 +60,17 @@ BEGIN
     LEFT JOIN dbo.tblSubDepartment sd2 WITH (NOLOCK) ON sd2.SubDepartmentId = e.SubDepartmentId2
     LEFT JOIN dbo.tblSubDepartment sd3 WITH (NOLOCK) ON sd3.SubDepartmentId = e.SubDepartmentId3
     WHERE e.IsActive = 0                              -- separated (from Employee Master)
-      AND EXISTS (                                -- F&F PENDING ONLY.
-            -- Single source of truth: dbo.fn_FnFPendingEmployees mirrors the FNF
-            -- screen's Pending branch. It replaced a local copy that treated
-            -- 'Transfered' as still pending, which showed 10,328 already-settled
-            -- employees in this report. See DatabaseScripts/fn_FnFPendingEmployees.sql.
-            SELECT 1 FROM dbo.fn_FnFPendingEmployees(ISNULL(@AsOfDate, CAST(GETDATE() AS date))) f
-            WHERE f.EmployeeId = e.EmployeeId
-          )
-      AND lp.LastPunchDt IS NOT NULL
-      AND sep.SeparationDate IS NOT NULL
-      AND lp.LastPunchDt > CAST(sep.SeparationDate AS date)   -- last punch AFTER separation (the gap)
+      AND lp.LastPunchDt IS NULL                      -- last punch date missing (the gap)
       AND NOT EXISTS (SELECT 1 FROM dbo.tblLocation lx WITH (NOLOCK) WHERE lx.STCode = e.ECode)
-    ORDER BY [PUNCH AGEING AFTER SEPERATION] DESC, l.STCode, e.ECode;
+      AND NOT EXISTS (                                -- exclude F&F Completed (Pending/Processing stay)
+            SELECT 1 FROM dbo.FNF_Header h WITH (NOLOCK)
+            JOIN dbo.FNF_Payment pmt WITH (NOLOCK) ON pmt.FNFId = h.FNFId
+            WHERE h.EmployeeId = e.EmployeeId
+              AND (pmt.Status IN ('Paid','FNF DONE') OR pmt.AmountPaid > 0)
+          )
+    ORDER BY [SEPERATION DATE] DESC, l.STCode, e.ECode;
 
     SET NOCOUNT OFF;
 END;
+
 

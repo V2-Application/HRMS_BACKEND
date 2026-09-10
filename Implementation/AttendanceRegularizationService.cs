@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using HRMSAPI.Data;
 using HRMSAPI.DTO;
 using HRMSAPI.Interfaces;
@@ -85,12 +85,92 @@ namespace HRMSAPI.Implementation
             }
         }
 
+        /// <summary>
+        /// Column names present in the current result set. The HR-layer columns only
+        /// exist once Add_RegularizeHrApprovalLayer_20260910.sql has been applied, so
+        /// the export reads them defensively instead of throwing on a database where
+        /// the procs have not been updated yet.
+        /// </summary>
+        private static HashSet<string> GetColumnNames(System.Data.Common.DbDataReader reader)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                names.Add(reader.GetName(i));
+            }
+            return names;
+        }
+
+        private static string? ReadString(System.Data.Common.DbDataReader reader, HashSet<string> cols, string name)
+        {
+            if (!cols.Contains(name)) return null;
+            var ord = reader.GetOrdinal(name);
+            return reader.IsDBNull(ord) ? null : reader.GetString(ord);
+        }
+
+        private static DateTime? ReadDateTime(System.Data.Common.DbDataReader reader, HashSet<string> cols, string name)
+        {
+            if (!cols.Contains(name)) return null;
+            var ord = reader.GetOrdinal(name);
+            return reader.IsDBNull(ord) ? null : reader.GetDateTime(ord);
+        }
+
+        /// <summary>
+        /// One export row. Shared by the month export and the date-range export so
+        /// the two reports can never drift apart.
+        /// </summary>
+        private static AttendanceRegularizationResultDto MapRegularizationRow(
+            System.Data.Common.DbDataReader reader, HashSet<string> cols)
+        {
+            return new AttendanceRegularizationResultDto
+            {
+                Ecode = ReadString(reader, cols, "Ecode"),
+                EmpName = ReadString(reader, cols, "EmpName"),
+                STCode = ReadString(reader, cols, "STCode"),
+                LocationName = ReadString(reader, cols, "LocationName"),
+                DepartmentName = ReadString(reader, cols, "DepartmentName"),
+                DesignationName = ReadString(reader, cols, "DesignationName"),
+                RequestDate = ReadDateTime(reader, cols, "RequestDate") ?? DateTime.MinValue,
+                Reason = ReadString(reader, cols, "Reason"),
+                RM_ECODE = ReadString(reader, cols, "RM_ECODE"),
+                ReportManagerName = ReadString(reader, cols, "ReportManagerName"),
+                PunchIn = reader.GetNullableTimeSpan("PunchIn"),
+                PunchOut = reader.GetNullableTimeSpan("PunchOut"),
+                StatusName = ReadString(reader, cols, "StatusName"),
+                FileUrl = ReadString(reader, cols, "FileUrl"),
+                PunchTypeId = cols.Contains("PunchTypeId") && !reader.IsDBNull(reader.GetOrdinal("PunchTypeId"))
+                    ? reader.GetInt32(reader.GetOrdinal("PunchTypeId"))
+                    : null,
+                RequestTypeName = ReadString(reader, cols, "RequestTypeName"),
+                EmployeeRemarks = ReadString(reader, cols, "EmployeeRemarks"),
+
+                ManagerStatus = ReadString(reader, cols, "ManagerStatus"),
+                ManagerApprovalOn = ReadDateTime(reader, cols, "ManagerApprovalOn"),
+                ManagerRemarks = ReadString(reader, cols, "ManagerRemarks"),
+                ManagerApproverEcode = ReadString(reader, cols, "ManagerApproverEcode"),
+                ManagerApproverName = ReadString(reader, cols, "ManagerApproverName"),
+
+                LpApprovalStatus = ReadString(reader, cols, "LpApprovalStatus"),
+                LpApprovalOn = ReadDateTime(reader, cols, "LpApprovalOn"),
+                LpRemarks = ReadString(reader, cols, "LpRemarks"),
+                LpApproverEcode = ReadString(reader, cols, "LpApproverEcode"),
+                LpApproverName = ReadString(reader, cols, "LpApproverName"),
+
+                HrApprovalStatus = ReadString(reader, cols, "HrApprovalStatus"),
+                HrApprovalOn = ReadDateTime(reader, cols, "HrApprovalOn"),
+                HrRemarks = ReadString(reader, cols, "HrRemarks"),
+                HrApproverEcode = ReadString(reader, cols, "HrApproverEcode"),
+                HrApproverName = ReadString(reader, cols, "HrApproverName")
+            };
+        }
+
         public async Task<FetchAndResponse> ExportAttendanceRegularizationByRangeAsync(
             DateTime startDate,
             DateTime endDate,
             string? status,
             string? managerStatus,
-            string? lpStatus)
+            string? lpStatus,
+            string? hrStatus = null)
         {
             try
             {
@@ -116,7 +196,7 @@ namespace HRMSAPI.Implementation
                     };
                 }
 
-                var data = await GetAttendanceRegularizationByRangeDataAsync(startDate, endDate, status, managerStatus, lpStatus);
+                var data = await GetAttendanceRegularizationByRangeDataAsync(startDate, endDate, status, managerStatus, lpStatus, hrStatus);
                 var label = $"{startDate:yyyyMMdd}_{endDate:yyyyMMdd}";
                 var excelBytes = await GenerateExcelAsync(data, label);
 
@@ -146,7 +226,8 @@ namespace HRMSAPI.Implementation
             DateTime endDate,
             string? status,
             string? managerStatus,
-            string? lpStatus)
+            string? lpStatus,
+            string? hrStatus)
         {
             var results = new List<AttendanceRegularizationResultDto>();
 
@@ -171,36 +252,16 @@ namespace HRMSAPI.Implementation
             {
                 Value = string.IsNullOrWhiteSpace(lpStatus) ? (object)DBNull.Value : lpStatus
             });
+            command.Parameters.Add(new SqlParameter("@HrStatus", SqlDbType.VarChar, 50)
+            {
+                Value = string.IsNullOrWhiteSpace(hrStatus) ? (object)DBNull.Value : hrStatus
+            });
 
             using var reader = await command.ExecuteReaderAsync();
+            var cols = GetColumnNames(reader);
             while (await reader.ReadAsync())
             {
-                results.Add(new AttendanceRegularizationResultDto
-                {
-                    Ecode = reader.IsDBNull(reader.GetOrdinal("Ecode")) ? null : reader.GetString("Ecode"),
-                    EmpName = reader.IsDBNull(reader.GetOrdinal("EmpName")) ? null : reader.GetString("EmpName"),
-                    STCode = reader.IsDBNull(reader.GetOrdinal("STCode")) ? null : reader.GetString("STCode"),
-                    LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString("LocationName"),
-                    DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? null : reader.GetString("DepartmentName"),
-                    DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? null : reader.GetString("DesignationName"),
-                    RequestDate = reader.IsDBNull(reader.GetOrdinal("RequestDate")) ? DateTime.MinValue : reader.GetDateTime("RequestDate"),
-                    Reason = reader.IsDBNull(reader.GetOrdinal("Reason")) ? null : reader.GetString("Reason"),
-                    RM_ECODE = reader.IsDBNull(reader.GetOrdinal("RM_ECODE")) ? null : reader.GetString("RM_ECODE"),
-                    ReportManagerName = reader.IsDBNull(reader.GetOrdinal("ReportManagerName")) ? null : reader.GetString("ReportManagerName"),
-                    PunchIn = reader.GetNullableTimeSpan("PunchIn"),
-                    PunchOut = reader.GetNullableTimeSpan("PunchOut"),
-                    StatusName = reader.IsDBNull(reader.GetOrdinal("StatusName")) ? null : reader.GetString("StatusName"),
-                    FileUrl = reader.IsDBNull(reader.GetOrdinal("FileUrl")) ? null : reader.GetString("FileUrl"),
-                    PunchTypeId = reader.IsDBNull(reader.GetOrdinal("PunchTypeId")) ? null : reader.GetInt32("PunchTypeId"),
-                    RequestTypeName = reader.IsDBNull(reader.GetOrdinal("RequestTypeName")) ? null : reader.GetString("RequestTypeName"),
-                    EmployeeRemarks = reader.IsDBNull(reader.GetOrdinal("EmployeeRemarks")) ? null : reader.GetString("EmployeeRemarks"),
-                    ManagerStatus = reader.IsDBNull(reader.GetOrdinal("ManagerStatus")) ? null : reader.GetString("ManagerStatus"),
-                    ManagerApprovalOn = reader.IsDBNull(reader.GetOrdinal("ManagerApprovalOn")) ? null : (DateTime?)reader.GetDateTime("ManagerApprovalOn"),
-                    ManagerRemarks = reader.IsDBNull(reader.GetOrdinal("ManagerRemarks")) ? null : reader.GetString("ManagerRemarks"),
-                    LpApprovalStatus = reader.IsDBNull(reader.GetOrdinal("LpApprovalStatus")) ? null : reader.GetString("LpApprovalStatus"),
-                    LpApprovalOn = reader.IsDBNull(reader.GetOrdinal("LpApprovalOn")) ? null : (DateTime?)reader.GetDateTime("LpApprovalOn"),
-                    LpRemarks = reader.IsDBNull(reader.GetOrdinal("LpRemarks")) ? null : reader.GetString("LpRemarks")
-                });
+                results.Add(MapRegularizationRow(reader, cols));
             }
 
             return results;
@@ -230,34 +291,10 @@ namespace HRMSAPI.Implementation
 
                         using (var reader = await command.ExecuteReaderAsync())
                         {
+                            var cols = GetColumnNames(reader);
                             while (await reader.ReadAsync())
                             {
-                                results.Add(new AttendanceRegularizationResultDto
-                                {
-                                    Ecode = reader.IsDBNull(reader.GetOrdinal("Ecode")) ? null : reader.GetString("Ecode"),
-                                    EmpName = reader.IsDBNull(reader.GetOrdinal("EmpName")) ? null : reader.GetString("EmpName"),
-                                    STCode = reader.IsDBNull(reader.GetOrdinal("STCode")) ? null : reader.GetString("STCode"),
-                                    LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString("LocationName"),
-                                    DepartmentName = reader.IsDBNull(reader.GetOrdinal("DepartmentName")) ? null : reader.GetString("DepartmentName"),
-                                    DesignationName = reader.IsDBNull(reader.GetOrdinal("DesignationName")) ? null : reader.GetString("DesignationName"),
-                                    RequestDate = reader.IsDBNull(reader.GetOrdinal("RequestDate")) ? DateTime.MinValue : reader.GetDateTime("RequestDate"),
-                                    Reason = reader.IsDBNull(reader.GetOrdinal("Reason")) ? null : reader.GetString("Reason"),
-                                    RM_ECODE = reader.IsDBNull(reader.GetOrdinal("RM_ECODE")) ? null : reader.GetString("RM_ECODE"),
-                                    ReportManagerName = reader.IsDBNull(reader.GetOrdinal("ReportManagerName")) ? null : reader.GetString("ReportManagerName"),
-                                    PunchIn = reader.GetNullableTimeSpan("PunchIn"),
-                                    PunchOut = reader.GetNullableTimeSpan("PunchOut"),
-                                    StatusName = reader.IsDBNull(reader.GetOrdinal("StatusName")) ? null : reader.GetString("StatusName"),
-                                    FileUrl = reader.IsDBNull(reader.GetOrdinal("FileUrl")) ? null : reader.GetString("FileUrl"),
-                                    PunchTypeId = reader.IsDBNull(reader.GetOrdinal("PunchTypeId")) ? null : reader.GetInt32("PunchTypeId"),
-                                    RequestTypeName = reader.IsDBNull(reader.GetOrdinal("RequestTypeName")) ? null : reader.GetString("RequestTypeName"),
-                                    EmployeeRemarks = reader.IsDBNull(reader.GetOrdinal("EmployeeRemarks")) ? null : reader.GetString("EmployeeRemarks"),
-                                    ManagerStatus = reader.IsDBNull(reader.GetOrdinal("ManagerStatus")) ? null : reader.GetString("ManagerStatus"),
-                                    ManagerApprovalOn = reader.IsDBNull(reader.GetOrdinal("ManagerApprovalOn")) ? null : (DateTime?)reader.GetDateTime("ManagerApprovalOn"),
-                                    ManagerRemarks = reader.IsDBNull(reader.GetOrdinal("ManagerRemarks")) ? null : reader.GetString("ManagerRemarks"),
-                                    LpApprovalStatus = reader.IsDBNull(reader.GetOrdinal("LpApprovalStatus")) ? null : reader.GetString("LpApprovalStatus"),
-                                    LpApprovalOn = reader.IsDBNull(reader.GetOrdinal("LpApprovalOn")) ? null : (DateTime?)reader.GetDateTime("LpApprovalOn"),
-                                    LpRemarks = reader.IsDBNull(reader.GetOrdinal("LpRemarks")) ? null : reader.GetString("LpRemarks")
-                                });
+                                results.Add(MapRegularizationRow(reader, cols));
                             }
                         }
                     }
@@ -272,6 +309,7 @@ namespace HRMSAPI.Implementation
             return results;
         }
 
+
         private async Task<byte[]> GenerateExcelAsync(List<AttendanceRegularizationResultDto> data, string monthYear)
         {
             try
@@ -280,13 +318,18 @@ namespace HRMSAPI.Implementation
                 var worksheet = workbook.Worksheets.Add("AttendanceRegularization");
 
                 // Add headers
+                // "Status" is the FINAL status, which now only turns Approved once the
+                // HR layer has approved. The three per-layer blocks below show how a
+                // request got there, and who signed off at each layer.
                 var headers = new[]
                 {
                     "Ecode", "Employee Name", "ST Code", "Location Name", "Department Name", "Designation Name",
                     "Request Date", "Reason", "RM Ecode", "Report Manager Name",
-                    "Punch In", "Punch Out", "Status", "File Url", "Punch Type Id", "Request Type Name",
-                    "Employee Remarks", "Manager Status", "Manager Approval On", "Manager Remarks",
-                    "LP Approval Status", "LP Approval On", "LP Remarks"
+                    "Punch In", "Punch Out", "Final Status", "File Url", "Punch Type Id", "Request Type Name",
+                    "Employee Remarks",
+                    "Manager Status", "Manager Approval On", "Manager Remarks", "Manager Approver Ecode", "Manager Approver Name",
+                    "LP Approval Status", "LP Approval On", "LP Remarks", "LP Approver Ecode", "LP Approver Name",
+                    "HR Approval Status", "HR Approval On", "HR Remarks", "HR Approver Ecode", "HR Approver Name"
                 };
 
                 for (int i = 0; i < headers.Length; i++)
@@ -322,9 +365,19 @@ namespace HRMSAPI.Implementation
                     worksheet.Cell(row, 18).Value = item.ManagerStatus ?? "";
                     worksheet.Cell(row, 19).Value = item.ManagerApprovalOn.HasValue ? item.ManagerApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
                     worksheet.Cell(row, 20).Value = item.ManagerRemarks ?? "";
-                    worksheet.Cell(row, 21).Value = item.LpApprovalStatus ?? "";
-                    worksheet.Cell(row, 22).Value = item.LpApprovalOn.HasValue ? item.LpApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
-                    worksheet.Cell(row, 23).Value = item.LpRemarks ?? "";
+                    worksheet.Cell(row, 21).Value = item.ManagerApproverEcode ?? "";
+                    worksheet.Cell(row, 22).Value = item.ManagerApproverName ?? "";
+                    worksheet.Cell(row, 23).Value = item.LpApprovalStatus ?? "";
+                    worksheet.Cell(row, 24).Value = item.LpApprovalOn.HasValue ? item.LpApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                    worksheet.Cell(row, 25).Value = item.LpRemarks ?? "";
+                    worksheet.Cell(row, 26).Value = item.LpApproverEcode ?? "";
+                    worksheet.Cell(row, 27).Value = item.LpApproverName ?? "";
+                    // A blank HR status means HR has not acted on the request yet.
+                    worksheet.Cell(row, 28).Value = item.HrApprovalStatus ?? "Pending";
+                    worksheet.Cell(row, 29).Value = item.HrApprovalOn.HasValue ? item.HrApprovalOn.Value.ToString("yyyy-MM-dd HH:mm:ss") : "";
+                    worksheet.Cell(row, 30).Value = item.HrRemarks ?? "";
+                    worksheet.Cell(row, 31).Value = item.HrApproverEcode ?? "";
+                    worksheet.Cell(row, 32).Value = item.HrApproverName ?? "";
                 }
 
                 // Auto-fit columns for better readability

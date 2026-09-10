@@ -108,6 +108,23 @@ namespace HRMSAPI.Controllers
             });
         }
 
+        /// <summary>
+        /// Shift as it stands now plus every recorded timing, for the Shift
+        /// Master detail panel (the Shift Master equivalent of the Emp Shift
+        /// Alignment history table).
+        /// </summary>
+        [HttpGet("History/{shiftId}")]
+        public async Task<IActionResult> GetShiftHistory(int shiftId)
+        {
+            var result = await _shiftMasterService.GetShiftHistoryAsync(shiftId);
+            return StatusCode((int)result.Code, new ApiFetchAndResponse
+            {
+                Status = result.Status,
+                Message = result.Message,
+                Data = result.Data
+            });
+        }
+
         [HttpDelete("Delete/{shiftId}"), Authorize]
         public async Task<IActionResult> DeleteShift(int shiftId)
         {

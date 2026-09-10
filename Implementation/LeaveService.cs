@@ -247,9 +247,22 @@ namespace HRMSAPI.Implementation
                     var currentMonth = DateTime.Now.ToString("MMM-yy");
                     var leaveBalance = await _context.GetProcedures().sp_GetEmployeeLeaveBalanceAsync(dtoObject.EmployeeId, currentMonth);
 
-                    if (leaveBalance == null)
+                    // Running out of leave — or having no balance record at all — must NOT
+                    // stop an application. sp_GetEmployeeLeaveBalance reads the PREVIOUS
+                    // month's row from vw_Emp_Attendance_Format, so it returns nothing for
+                    // anyone that month missed: on prod that is 2,279 of 15,039 active
+                    // employees (mostly new joiners), and every one of them used to be
+                    // refused with "Leave balance not found for the employee."
+                    //
+                    // The balance is only ever READ here (the sufficiency check and the
+                    // deduction below have long been commented out), so an absent or
+                    // exhausted balance simply means there is nothing to report — it is not
+                    // a reason to reject the request. Deliberately no throw.
+                    if (leaveBalance == null || leaveBalance.Count == 0)
                     {
-                        throw new InvalidOperationException("Leave balance not found for the employee.");
+                        _logger.LogInformation(
+                            "No leave balance row for EmployeeId {EmployeeId} in {Month}; allowing the application anyway (over-quota / no-balance leave is permitted).",
+                            dtoObject.EmployeeId, currentMonth);
                     }
 
                     // Check sufficient balance
@@ -1024,60 +1037,25 @@ namespace HRMSAPI.Implementation
                     throw new ArgumentException($"Invalid status ID: {updateDto.StatusId}", nameof(updateDto.StatusId));
                 }
 
-                // Fetch leave balance
-                var leaveBalance = await _context.tblEmployeeLeaveBalancenewasperportals
-                    .FirstOrDefaultAsync(b => b.EmployeeId == request.EmployeeId)
-                    .ConfigureAwait(false);
-
-                if (leaveBalance == null)
-                {
-                    throw new InvalidOperationException("Leave balance not found for the employee.");
-                }
-
-                // Calculate leave days
-                decimal leaveDays = CalculateLeaveDays(request);
-
-                // Handle balance adjustments
-                if (request.StatusId == 4) // Current status is Pending
-                {
-                    if (updateDto.StatusId == 1) // Approved
-                    {
-                        // Update the Used fields
-                        switch (request.LeaveTypeId)
-                        {
-                            case 7: // CompOff
-                                leaveBalance.CompOffUsed += leaveDays;
-                                break;
-                            case 15: // Casual Leave
-                                leaveBalance.CasualLeaveUsed += leaveDays;
-                                break;
-                            case 17: // Earned Leave
-                                leaveBalance.EarnedLeaveUsed += leaveDays;
-                                break;
-                            default:
-                                throw new ArgumentException($"Invalid LeaveTypeId: {request.LeaveTypeId}");
-                        }
-                    }
-                    else if (updateDto.StatusId == 2) // Rejected
-                    {
-                        // Restore the balance
-                        switch (request.LeaveTypeId)
-                        {
-                            case 7: // CompOff
-                                leaveBalance.CompOffBalance += leaveDays;
-                                break;
-                            case 15: // Casual Leave
-                                leaveBalance.CasualLeaveBalance += leaveDays;
-                                break;
-                            case 17: // Earned Leave
-                                leaveBalance.EarnedLeaveBalance += leaveDays;
-                                break;
-                            default:
-                                throw new ArgumentException($"Invalid LeaveTypeId: {request.LeaveTypeId}");
-                        }
-                    }
-                    _context.tblEmployeeLeaveBalancenewasperportals.Update(leaveBalance);
-                }
+                // MANAGER APPROVAL FOLLOWS THE SAME RULE AS APPLYING: a missing or
+                // exhausted balance must not block the decision, and approving or
+                // rejecting must not move the leave ledger.
+                //
+                // What used to happen here, and why it is gone:
+                //   * "Leave balance not found for the employee." was thrown when the
+                //     employee had no tblEmployeeLeaveBalancenewasperportal row — so a
+                //     leave that had been applied for successfully could not then be
+                //     actioned, leaving it stuck in Pending for good.
+                //   * Approving added leaveDays to CasualLeaveUsed / EarnedLeaveUsed /
+                //     CompOffUsed, and rejecting ADDED leaveDays back to the *Balance
+                //     columns. Applying never deducts anything (that code is commented
+                //     out further up), so the reject branch was inflating balances by the
+                //     length of every rejected leave — days the employee never had.
+                //
+                // The opening and closing balances are therefore left exactly as the
+                // monthly attendance snapshot computed them. Attendance is still marked
+                // below, so the leave itself is recorded; only the balance ledger is
+                // untouched.
 
                 // Fetch employee Ecode
                 var ecode = await _context.tblEmployees
