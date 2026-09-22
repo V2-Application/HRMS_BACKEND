@@ -169,7 +169,8 @@ namespace HRMSAPI.Controllers
                     return BuildFileValidationErrorResponse(validationError);
                 }
 
-                var result = await _uow.UpdateEmployee(details, files, updatedBy);
+                // loginDetail.role gates the "V2 Parivar Role" field (IT Superadmin only).
+                var result = await _uow.UpdateEmployee(details, files, updatedBy, loginDetail?.role);
                 _logger.LogInformation("UpdateEmployee completed for employee ID: {EmployeeId} with status: {Status}, StatusCode: {StatusCode}",
                     updatedBy, result.Status, result.Code);
 
@@ -323,7 +324,8 @@ namespace HRMSAPI.Controllers
                 var updatedBy = userIdentity.FindFirst("EmployeeId")?.Value;
                 _logger.LogInformation("Processing UpdateEmployeeWithExcel for employee ID: {EmployeeId}", updatedBy);
 
-                var result = await _uow.UpdateEmployeeWithExcel(file, updatedBy);
+                // loginDetail.role gates the optional "V2 Parivar Role" column (IT Superadmin only).
+                var result = await _uow.UpdateEmployeeWithExcel(file, updatedBy, loginDetail?.role);
                 _logger.LogInformation("UpdateEmployeeWithExcel completed for employee ID: {EmployeeId} with status: {Status}, StatusCode: {StatusCode}",
                     updatedBy, result.Status, result.Code);
 
@@ -336,6 +338,81 @@ namespace HRMSAPI.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error updating employee with Excel for employee ID: {EmployeeId}", HttpContext.User.FindFirst("EmployeeId")?.Value);
+                return StatusCode(500, new { Status = false, Message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// The current NOC for an inactive employee, if one has been uploaded.
+        /// Returns HasNoc = false rather than 404 when there is none, so the UI can
+        /// show an empty state without treating it as an error.
+        /// </summary>
+        // RBAC: gated on the Employee Master page (/employees/list -> SubModule 1
+        // "Employees Master"). Anyone who can open Employee Master can read and
+        // upload an NOC; anyone who cannot gets 403. Master / SuperAdmin /
+        // IT Superadmin bypass, as they do for every other page.
+        [HttpGet]
+        [Route("GetInactiveEmployeeNoc"), Authorize]
+        [RequirePageAccess("/employees/list")]
+        public async Task<IActionResult> GetInactiveEmployeeNoc([FromQuery] long employeeId)
+        {
+            try
+            {
+                if (employeeId <= 0)
+                    return BadRequest(new { Status = false, Message = "employeeId is required" });
+
+                var result = await _uow.GetInactiveEmployeeNocAsync(employeeId);
+                return StatusCode((int)result.Code, new
+                {
+                    Status = result.Status,
+                    Message = result.Message,
+                    Data = result.Data
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching NOC for employee {EmployeeId}", employeeId);
+                return StatusCode(500, new { Status = false, Message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Upload (or replace) the NOC for an inactive employee. Available to anyone
+        /// with Employee Master access, matching the rest of the Inactive tab.
+        /// Replacing soft-deletes the previous NOC; nothing is hard-deleted.
+        /// </summary>
+        [HttpPost]
+        [Route("UploadInactiveEmployeeNoc"), Authorize]
+        [RequirePageAccess("/employees/list")]
+        // file is deliberately nullable: with <Nullable>enable</Nullable> a non-nullable
+        // IFormFile is implicitly required, so model validation would reject a missing
+        // file with an empty 400 before the service could return a readable message.
+        public async Task<IActionResult> UploadInactiveEmployeeNoc([FromForm] long employeeId, [FromForm] IFormFile? file)
+        {
+            try
+            {
+                var userIdentity = User.Identity as ClaimsIdentity;
+                if (userIdentity == null || !userIdentity.IsAuthenticated)
+                    return Unauthorized(new { Status = false, Message = "User is not authenticated" });
+
+                if (employeeId <= 0)
+                    return BadRequest(new { Status = false, Message = "employeeId is required" });
+
+                var uploadedBy = userIdentity.FindFirst("EmployeeId")?.Value;
+                var result = await _uow.UploadInactiveEmployeeNocAsync(employeeId, file, uploadedBy);
+
+                _logger.LogInformation("NOC upload for employee {EmployeeId} by {By}: {Status}",
+                    employeeId, uploadedBy, result.Status);
+
+                return StatusCode((int)result.Code, new
+                {
+                    Status = result.Status,
+                    Message = result.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading NOC for employee {EmployeeId}", employeeId);
                 return StatusCode(500, new { Status = false, Message = ex.Message });
             }
         }
@@ -354,7 +431,9 @@ namespace HRMSAPI.Controllers
                 }
 
                 var createdBy = userIdentity.FindFirst("EmployeeId")?.Value;
-                var result = await _uow.BulkInsertEmployeesWithExcel(file, createdBy);
+                // loginDetail.role gates the optional "V2 Parivar Role" column (IT Superadmin only).
+                var loginDetail = AuthenticUserDetails.GetCurrentUserDetails(userIdentity);
+                var result = await _uow.BulkInsertEmployeesWithExcel(file, createdBy, loginDetail?.role);
 
                 return StatusCode((int)result.Code, new
                 {

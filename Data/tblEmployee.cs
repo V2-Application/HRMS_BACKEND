@@ -289,11 +289,26 @@ public partial class tblEmployee
     public int? ShiftID { get; set; }
 
     /// <summary>
-    /// The employee's HR role (dbo.tblRoleMaster), set from the "Role" field on
-    /// the employee profile. Optional. Unrelated to the portal/RBAC role, which
-    /// lives in tblEmployeeRole -> tblRole.
+    /// Superseded by V2ParivarRoleId below. Pointed at the HR-created list in
+    /// dbo.tblRoleMaster, which turned out to be the wrong target for this
+    /// field. Every row is NULL and nothing reads or writes it any more; kept
+    /// only so the column and its FK stay valid. Safe to drop whenever
+    /// convenient.
     /// </summary>
     public int? RoleMasterId { get; set; }
+
+    /// <summary>
+    /// The employee's V2 Parivar role (dbo.tblRole) -- SuperAdmin, IT
+    /// Superadmin, StoreHR and so on -- set from the "V2 Parivar Role" field on
+    /// the employee profile and the employee master uploader. Optional, and
+    /// settable by IT Superadmin only.
+    ///
+    /// RECORD-ONLY: this is stored for reporting and does NOT grant access.
+    /// Real access still comes from tblEmployeeRole -> tblRole via the Role
+    /// Assignment page, and nothing that writes this column touches
+    /// tblEmployeeRole. The two can therefore legitimately differ.
+    /// </summary>
+    public int? V2ParivarRoleId { get; set; }
 
     public bool? IsAadharBackAttachmentUploaded { get; set; }
 

@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Wordprocessing;
 using HRMSAPI.Data;
@@ -202,12 +202,13 @@ WHERE l.rn = 1";
         // Builds a map of Ecode -> (subDept1, subDept2, subDept3) names from tblEmployee +
         // tblSubDepartment. Read-only; used to enrich Employee Master report downloads.
         /// <summary>
-        /// Ecode -> HR role name (dbo.tblRoleMaster via tblEmployee.RoleMasterId),
-        /// for the "HR Role" column in the employee master export.
+        /// Ecode -> HR job-role name (dbo.tblRoleMaster via tblEmployee.RoleMasterId), for the
+        /// "Role" column in the employee master export.
         ///
-        /// This is NOT the portal/RBAC role. The proc already returns that one as
-        /// "Role Name" (with "Employee Role ID"); the two are different things and
-        /// the export carries both.
+        /// This is the RECORDED choice, not the live portal/RBAC assignment. The proc
+        /// returns that one as "Role Name" (with "Employee Role ID") from
+        /// tblEmployeeRole, and the export relabels it "V2 Parivar Role"; the two can
+        /// legitimately differ, so both are carried.
         /// </summary>
         private async Task<Dictionary<string, string>> GetEmployeeHrRoleNameMapByEcode(System.Data.Common.DbConnection conn)
         {
@@ -215,9 +216,9 @@ WHERE l.rn = 1";
 
             using var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-                SELECT e.Ecode, rm.RoleName
+                SELECT e.Ecode, r.RoleName
                 FROM dbo.tblEmployee e
-                JOIN dbo.tblRoleMaster rm ON rm.RoleMasterId = e.RoleMasterId
+                JOIN dbo.tblRoleMaster r ON r.RoleMasterId = e.RoleMasterId
                 WHERE e.Ecode IS NOT NULL";
             cmd.CommandTimeout = 0;
 
@@ -271,26 +272,41 @@ WHERE l.rn = 1";
             return result;
         }
 
-        // Builds a map of (Ecode, AttendanceDate) -> (StoreCode, StoreName) for each employee's
-        // last punch of that day, resolved from tblAttendancePunchLocation (raw device location)
-        // via tblBiomaxAttendanceLocationMap (device -> STCode) and tblLocation (STCode -> name).
-        // Read-only. NOTE: coverage is limited to whatever date range tblAttendancePunchLocation
-        // has actually been loaded for — dates outside that range simply won't resolve.
-        private async Task<Dictionary<(string Ecode, DateTime Date), (string? StoreCode, string? StoreName)>> GetLastPunchLocationMap(System.Data.Common.DbConnection conn)
+        // Builds a map of Ecode -> (StoreCode, StoreName) for each employee's MOST RECENT punch,
+        // resolved from tblAttendancePunchLocation (raw device location) via
+        // tblBiomaxAttendanceLocationMap (device -> STCode) and tblLocation (STCode -> name).
+        // Read-only. One row per employee.
+        //
+        // This used to load every punch ever recorded, keyed on (Ecode, AttendanceDate):
+        // 1,116,612 entries on prod against 19,017 here, roughly 200-275 MB of dictionary. It grew
+        // daily and eventually made the employee-master export die with OutOfMemoryException at
+        // ANY scope, because the map is built regardless of how few employees are exported.
+        //
+        // Dropping the date from the key also INCREASES coverage, which is why it is keyed this
+        // way rather than date-windowed. Measured on prod:
+        //     old, full history, matched on exact (Ecode, Last Punch Date) -> 10,996 employees
+        //     new, keyed on Ecode alone                                    -> 19,017 employees
+        // The export's Last Punch Date comes from tblEmployeeMultiPunches, whose latest date often
+        // differs from this table's, so the exact-date match silently missed ~42% of employees.
+        // In practice the only date that ever matched was the newest one, so all the older rows
+        // were pure dead weight. A 60-day window was considered and rejected: it still leaves
+        // 645,466 entries (only -42%) and would blank the column for anyone who left earlier.
+        private async Task<Dictionary<string, (string? StoreCode, string? StoreName)>> GetLastPunchLocationMap(System.Data.Common.DbConnection conn)
         {
-            var result = new Dictionary<(string, DateTime), (string?, string?)>();
+            var result = new Dictionary<string, (string?, string?)>(StringComparer.OrdinalIgnoreCase);
             if (await ObjectMissingAsync(conn, "dbo.tblAttendancePunchLocation")) return result;
 
             using var cmd = conn.CreateCommand();
             cmd.CommandTimeout = 300;
             cmd.CommandText = @"
-WITH LastOfDay AS (
+WITH LastPunch AS (
     SELECT p.ECode, p.AttendanceDate, p.PunchLocation,
-           ROW_NUMBER() OVER (PARTITION BY p.ECode, p.AttendanceDate ORDER BY p.PunchTime DESC) AS rn
+           ROW_NUMBER() OVER (PARTITION BY p.ECode
+                              ORDER BY p.AttendanceDate DESC, p.PunchTime DESC) AS rn
     FROM dbo.tblAttendancePunchLocation p
 )
 SELECT l.ECode, l.AttendanceDate, m.STCode, loc.LocationName
-FROM LastOfDay l
+FROM LastPunch l
 LEFT JOIN dbo.tblBiomaxAttendanceLocationMap m ON m.IsDeleted = 0 AND m.DeviceLocation = l.PunchLocation
 LEFT JOIN dbo.tblLocation loc ON loc.STCode = m.STCode
 WHERE l.rn = 1;";
@@ -299,8 +315,7 @@ WHERE l.rn = 1;";
             {
                 var ec = rdr["ECode"] as string;
                 if (string.IsNullOrWhiteSpace(ec)) continue;
-                if (rdr["AttendanceDate"] is not DateTime dt) continue;
-                result[(ec.Trim(), dt.Date)] = (rdr["STCode"] as string, rdr["LocationName"] as string);
+                result[ec.Trim()] = (rdr["STCode"] as string, rdr["LocationName"] as string);
             }
             return result;
         }
@@ -448,33 +463,40 @@ WHERE l.rn = 1;";
                     }
                 }
 
-                // HR role (dbo.tblRoleMaster, maintained by HR on Masters -> Role
-                // Master). Adds "HR Role" right after Designation, where the other
-                // official fields sit.
+                // The HR job role recorded against the employee (dbo.tblRoleMaster via
+                // tblEmployee.RoleMasterId). Adds "Role" right after Designation,
+                // where the other official fields sit.
                 //
-                // The proc's existing "Role Name" / "Employee Role ID" columns are the
-                // PORTAL/RBAC role and are deliberately left exactly where and as they
-                // were - the two roles are different things and the export shows both.
+                // Naming, agreed with the business: this recorded pick is "Role", and
+                // the LIVE RBAC assignment the proc returns as "Role Name" is renamed
+                // to "V2 Parivar Role" below, because that is what it actually is. The
+                // two can differ, so the export deliberately carries both.
                 if (ecodeColumn != null)
                 {
-                    if (!dataTable.Columns.Contains("HR Role"))
-                        dataTable.Columns.Add("HR Role", typeof(string));
+                    if (!dataTable.Columns.Contains("Role"))
+                        dataTable.Columns.Add("Role", typeof(string));
 
                     foreach (DataRow row in dataTable.Rows)
                     {
                         var ec = row[ecodeColumn]?.ToString();
                         if (!string.IsNullOrEmpty(ec) && hrRoleNameMap.TryGetValue(ec.Trim(), out var hrRoleName))
-                            row["HR Role"] = hrRoleName;
+                            row["Role"] = hrRoleName;
                     }
 
                     var desgCol = dataTable.Columns.Cast<DataColumn>().FirstOrDefault(c =>
                         c.ColumnName.IndexOf("Designation", StringComparison.OrdinalIgnoreCase) >= 0);
                     if (desgCol != null)
                     {
-                        dataTable.Columns["HR Role"].SetOrdinal(
+                        dataTable.Columns["Role"].SetOrdinal(
                             Math.Min(desgCol.Ordinal + 1, dataTable.Columns.Count - 1));
                     }
                 }
+
+                // Rename the proc's live RBAC column to say what it is. Header text
+                // only - the column keeps its position and its values, and the proc
+                // itself is untouched so every other consumer is unaffected.
+                if (dataTable.Columns.Contains("Role Name") && !dataTable.Columns.Contains("V2 Parivar Role"))
+                    dataTable.Columns["Role Name"].ColumnName = "V2 Parivar Role";
 
                 // Enrich with sub-department name columns (read-only side query, fetched above),
                 // resolved from tblEmployee.SubDepartmentId1/2/3 via tblSubDepartment.
@@ -524,16 +546,17 @@ WHERE l.rn = 1;";
                     if (!dataTable.Columns.Contains("Last Punch Location Name"))
                         dataTable.Columns.Add("Last Punch Location Name", typeof(string));
 
+                    // Looked up by ecode alone: the map now holds each employee's most recent
+                    // punch location (see GetLastPunchLocationMap). Still gated on the row
+                    // actually having a Last Punch Date, so employees who never punched stay
+                    // blank exactly as before.
                     foreach (DataRow row in dataTable.Rows)
                     {
                         var ec = row[ecodeColumn]?.ToString();
                         var lastPunchText = row[lastPunchDateCol]?.ToString();
                         if (string.IsNullOrEmpty(ec) || string.IsNullOrWhiteSpace(lastPunchText)) continue;
 
-                        if (DateTime.TryParseExact(lastPunchText, "dd-MMM-yy",
-                                System.Globalization.CultureInfo.InvariantCulture,
-                                System.Globalization.DateTimeStyles.None, out var lastPunchDate) &&
-                            punchLocationMap.TryGetValue((ec.Trim(), lastPunchDate.Date), out var loc))
+                        if (punchLocationMap.TryGetValue(ec.Trim(), out var loc))
                         {
                             row["Last Punch Location Code"] = (object?)loc.StoreCode ?? DBNull.Value;
                             row["Last Punch Location Name"] = (object?)loc.StoreName ?? DBNull.Value;

@@ -14,11 +14,15 @@ namespace HRMSAPI.Controllers
     {
         private readonly IDropDownService _service;
         private readonly ILogger<DropDownController> _logger;
+        // Used only by GetRoleMaster, which reads the V2 Parivar role list straight
+        // from dbo.tblRole rather than going through a service.
+        private readonly HRMSContext _context;
 
-        public DropDownController(IDropDownService service, ILogger<DropDownController> logger)
+        public DropDownController(IDropDownService service, ILogger<DropDownController> logger, HRMSContext context)
         {
             _service = service;
             _logger = logger;
+            _context = context;
         }
 
         [HttpGet("GetDesignation")]
@@ -389,22 +393,40 @@ namespace HRMSAPI.Controllers
         ///
         /// Not the portal/RBAC roles: those come from /api/Auth/Roles.
         /// </summary>
+        /// <summary>
+        /// Feed for the "Role" dropdown on the employee profile and the candidate
+        /// page: the HR-maintained job-role list from dbo.tblRoleMaster, managed on
+        /// Masters -> Role Master.
+        ///
+        /// NOT the V2 Parivar portal roles (dbo.tblRole). Those are the live RBAC
+        /// assignment and are managed under Settings -> Role Assignment; this field
+        /// records a job role and grants no access.
+        ///
+        /// Active roles only, so a role HR has retired stops being offered without
+        /// disturbing the employees already holding it.
+        /// </summary>
         [HttpGet("GetRoleMaster")]
-        public async Task<IActionResult> GetRoleMaster([FromServices] IRoleMasterService roleMasterService)
+        public async Task<IActionResult> GetRoleMaster()
         {
             try
             {
-                var result = await roleMasterService.GetActiveRolesAsync();
-                return StatusCode((int)result.Code, new
+                var roles = await _context.tblRoleMasters
+                    .AsNoTracking()
+                    .Where(r => r.IsActive == true)
+                    .OrderBy(r => r.RoleName)
+                    .Select(r => new { RoleId = r.RoleMasterId, RoleName = r.RoleName })
+                    .ToListAsync();
+
+                return Ok(new
                 {
-                    Status = result.Status,
-                    Message = result.Message,
-                    Data = result.Data
+                    Status = true,
+                    Message = "Role list retrieved successfully",
+                    Data = roles
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching HR roles");
+                _logger.LogError(ex, "Error fetching roles");
                 return StatusCode(StatusCodes.Status500InternalServerError, new
                 {
                     Status = false,

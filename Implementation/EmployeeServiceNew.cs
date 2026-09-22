@@ -1,4 +1,4 @@
-﻿using ClosedXML.Excel;
+using ClosedXML.Excel;
 using DocumentFormat.OpenXml.Bibliography;
 using DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 using DocumentFormat.OpenXml.Office2016.Drawing.Charts;
@@ -634,9 +634,9 @@ namespace HRMSAPI.Implementation
                     candidate.differentlyAbledRemarks = candidateEntity?.DifferentlyAbledRemarks ?? "";
                     candidate.skillType = candidateEntity?.SkillType ?? "";
                     candidate.ShiftID = employeeEntity?.ShiftID ?? candidateEntity?.ShiftID ?? 0;
-                    // HR role: the employee's own value wins; falls back to whatever was
-                    // picked while they were still a candidate. Null stays null so the
-                    // optional dropdown shows empty.
+                    // V2 Parivar role: the employee's own value wins; falls back to
+                    // whatever was picked while they were still a candidate. Null stays
+                    // null so the optional dropdown shows empty.
                     candidate.RoleMasterId = employeeEntity?.RoleMasterId ?? candidateEntity?.RoleMasterId;
 
                     var idToPass = employeeEntity.CandidateId>0 ?employeeEntity.CandidateId:employeeEntity.EmployeeId;
@@ -749,7 +749,7 @@ namespace HRMSAPI.Implementation
             }
         }
             
-        public async Task<ExecuteAndReponse> UpdateEmployee(CandidateUpdate details, CandidateDocs files,string updatedBy)
+        public async Task<ExecuteAndReponse> UpdateEmployee(CandidateUpdate details, CandidateDocs files,string updatedBy, string callerRole = null)
         {
             try {
                 // Employee master edits are stored UPPERCASE to match the bulk-uppercased data.
@@ -1033,8 +1033,10 @@ namespace HRMSAPI.Implementation
                 employeeData.ESICApplicable = employee.candidateInfo.esicApplicable;
                 employeeData.ReportHeadEcode = employee.candidateInfo.reportHeadEcode;
                 employeeData.ShiftID = employee.candidateInfo.ShiftID ?? 1;
-                // HR role: optional, so no fallback - a cleared dropdown clears the
-                // stored role rather than silently keeping the old one.
+                // V2 Parivar role: optional, so no fallback - a cleared dropdown clears
+                // the stored value rather than silently keeping the old one. Only IT
+                // Superadmin may change it; for anyone else the stored value is left
+                // exactly as it was, so a normal profile save cannot wipe it.
                 employeeData.RoleMasterId = employee.candidateInfo.RoleMasterId;
                 employeeData.IsUANRegistered = employee.candidateInfo.isUanRegistered ?? false;
                 employeeData.AOCode = employee.candidateInfo.AoCode ?? "";
@@ -1320,7 +1322,8 @@ namespace HRMSAPI.Implementation
                 return BuildExecuteErrorResponse(ex.Message,HttpStatusCode.BadRequest);
             }
         }
-        public async Task<ExecuteAndReponse> UpdateEmployeeWithExcel(IFormFile file, string updatedBy)
+
+        public async Task<ExecuteAndReponse> UpdateEmployeeWithExcel(IFormFile file, string updatedBy, string callerRole = null)
         {
             try
             {
@@ -1366,11 +1369,16 @@ namespace HRMSAPI.Implementation
                     // "Last Working Day" is OPTIONAL too and always sits in the LAST column, so an
                     // existing file (with or without sub-departments) keeps uploading unchanged.
                     const string lastWorkingDayHeader = "Last Working Day";
-                    // "HR Role" is OPTIONAL too and must be the very LAST column, so
-                    // every existing file (with or without sub-departments / Last Working
-                    // Day) keeps uploading unchanged. It sets tblEmployee.RoleMasterId
-                    // from the HR Role Master list -- NOT the portal/RBAC role.
-                    const string hrRoleHeader = "HR Role";
+                    // "Role" is OPTIONAL too and must be the very LAST column, so every
+                    // existing file (with or without sub-departments / Last Working Day)
+                    // keeps uploading unchanged. It sets tblEmployee.RoleMasterId
+                    // from the HR Role Master list. No base header is called "Role", so matching on
+                    // the exact name cannot collide with an existing column.
+                    //
+                    // RECORD-ONLY: it does not grant access. tblEmployeeRole is never
+                    // written here, so an upload cannot escalate anyone's privileges.
+                    // Settable by IT Superadmin only.
+                    const string hrRoleHeader = "Role";
                     var headerRow = worksheet.Row(1);
                     int cellCount = headerRow.CellsUsed().Count();
 
@@ -1390,10 +1398,21 @@ namespace HRMSAPI.Implementation
                             HttpStatusCode.BadRequest);
                     }
                     // Everything below counts columns positionally, so hide the extra
-                    // HR Role column from those checks.
+                    // Role column from those checks.
                     if (hrRoleCol > 0) cellCount--;
 
-                    int baseCols = expectedHeaders.Length;
+                    // "AO Code" is the newest base column and is OPTIONAL, so every sheet
+                    // saved from the previous template (which ends at "IsExtraDayApplicable")
+                    // keeps uploading unchanged. Presence is decided by NAME rather than by
+                    // the column count: counts alone are ambiguous once a trailing column can
+                    // be missing (58 base + LWD and 59 base are both 59 columns), whereas the
+                    // header text at this position is unambiguous.
+                    int aoCodeCol = expectedHeaders.Length;   // 59 - last of the base columns
+                    bool hasAoCode = string.Equals(
+                        headerRow.Cell(aoCodeCol).GetValue<string>()?.Trim(),
+                        expectedHeaders[aoCodeCol - 1], StringComparison.OrdinalIgnoreCase);
+
+                    int baseCols = hasAoCode ? expectedHeaders.Length : expectedHeaders.Length - 1;
                     int subDeptCols = subDeptHeaders.Length;
 
                     bool hasSubDept = cellCount == baseCols + subDeptCols || cellCount == baseCols + subDeptCols + 1;
@@ -1406,7 +1425,7 @@ namespace HRMSAPI.Implementation
                     {
                         return BuildExecuteErrorResponse($"Column count mismatch: Expected {baseCols} columns, or {baseCols + 1} with '{lastWorkingDayHeader}', or {baseCols + subDeptCols} with sub-departments, or {baseCols + subDeptCols + 1} with both, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
                     }
-                    for (int i = 0; i < expectedHeaders.Length; i++)
+                    for (int i = 0; i < baseCols; i++)
                     {
                         var cellValue = headerRow.Cell(i + 1).GetValue<string>().Trim();
                         if (!string.Equals(cellValue, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
@@ -1418,9 +1437,9 @@ namespace HRMSAPI.Implementation
                     {
                         for (int i = 0; i < subDeptHeaders.Length; i++)
                         {
-                            var cv = headerRow.Cell(expectedHeaders.Length + i + 1).GetValue<string>().Trim();
+                            var cv = headerRow.Cell(baseCols + i + 1).GetValue<string>().Trim();
                             if (!string.Equals(cv, subDeptHeaders[i], StringComparison.OrdinalIgnoreCase))
-                                return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
+                                return BuildExecuteErrorResponse($"Header mismatch at column {baseCols + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
                         }
                     }
                     if (lastWorkingDayCol > 0)
@@ -1433,9 +1452,8 @@ namespace HRMSAPI.Implementation
                     var subDeptErrors = new List<string>();
                     var dateErrors = new List<string>();
 
-                    // HR role lookup by name, loaded once. Inactive roles are accepted on
-                    // upload (a bulk correction should not be blocked by a role that was
-                    // retired after the fact); only unknown names are reported.
+                    // V2 Parivar role lookup by name, loaded once from dbo.tblRole.
+                    // Unknown names are reported per row; the rest of the row still saves.
                     Dictionary<string, int> hrRoleByName = null;
                     var hrRoleErrors = new List<string>();
                     if (hrRoleCol > 0)
@@ -1728,18 +1746,25 @@ namespace HRMSAPI.Implementation
                         var extradaysApplicable = row.Cell(58).GetValue<string>();
                         if (!string.IsNullOrWhiteSpace(extradaysApplicable))
                             employee.IsExtraDayApplicable = extradaysApplicable.Trim().ToLower() == "yes";
-                        var aoCode = row.Cell(59).GetValue<string>();
-                        if (!string.IsNullOrWhiteSpace(aoCode)) employee.AOCode = aoCode;
+                        // Only read when the sheet actually carries the column; on a legacy
+                        // 58-column sheet this position belongs to the next optional block.
+                        if (hasAoCode)
+                        {
+                            var aoCode = row.Cell(aoCodeCol).GetValue<string>();
+                            if (!string.IsNullOrWhiteSpace(aoCode)) employee.AOCode = aoCode;
+                        }
 
-                        // Columns 60-62: Sub-Department 1/2/3 (optional). Resolve names under the
+                        // Sub-Department 1/2/3 (optional), immediately after the base columns.
+                        // Offsets come from baseCols because that shifts by one when the sheet
+                        // predates "AO Code". Resolve names under the
                         // employee's (possibly just-updated) department and set the matching ids.
                         // Blank cells leave the existing value unchanged (consistent with the rest
                         // of the update) — only rows that provide a value are updated.
                         if (hasSubDept && employee.DepartmentId.HasValue)
                         {
-                            var sv1 = row.Cell(60).GetValue<string>();
-                            var sv2 = row.Cell(61).GetValue<string>();
-                            var sv3 = row.Cell(62).GetValue<string>();
+                            var sv1 = row.Cell(baseCols + 1).GetValue<string>();
+                            var sv2 = row.Cell(baseCols + 2).GetValue<string>();
+                            var sv3 = row.Cell(baseCols + 3).GetValue<string>();
                             if (!string.IsNullOrWhiteSpace(sv1) || !string.IsNullOrWhiteSpace(sv2) || !string.IsNullOrWhiteSpace(sv3))
                             {
                                 var (sd1, sd2, sd3) = ResolveSubDeptChain(
@@ -1775,18 +1800,18 @@ namespace HRMSAPI.Implementation
                             }
                         }
 
-                        // Optional last column: HR Role (dbo.tblRoleMaster). Blank leaves the
-                        // employee's current role alone, so a sheet that does not care about
-                        // roles can still be uploaded with the column present.
+                        // Optional last column: Role (dbo.tblRole). Blank leaves
+                        // the employee's current value alone, so a sheet that does not care
+                        // about roles can still be uploaded with the column present.
                         if (hrRoleCol > 0)
                         {
                             var hrRoleRaw = row.Cell(hrRoleCol).GetValue<string>()?.Trim();
                             if (!string.IsNullOrWhiteSpace(hrRoleRaw))
                             {
-                                if (hrRoleByName != null && hrRoleByName.TryGetValue(hrRoleRaw, out var roleMasterId))
-                                    employee.RoleMasterId = roleMasterId;
+                                if (hrRoleByName != null && hrRoleByName.TryGetValue(hrRoleRaw, out var v2RoleId))
+                                    employee.RoleMasterId = v2RoleId;
                                 else
-                                    hrRoleErrors.Add($"Row {excelRowNo} ({empCode}): HR Role '{hrRoleRaw}' does not exist in Role Master");
+                                    hrRoleErrors.Add($"Row {excelRowNo} ({empCode}): Role '{hrRoleRaw}' does not exist in Role Master");
                             }
                         }
 
@@ -1813,17 +1838,27 @@ namespace HRMSAPI.Implementation
                     if (dateErrors.Count > 0)
                         updMsg += $". Note: {dateErrors.Count} date value(s) could not be applied: {string.Join(" | ", dateErrors.Take(20))}";
                     if (hrRoleErrors.Count > 0)
-                        updMsg += $". Note: {hrRoleErrors.Count} HR Role value(s) could not be applied: {string.Join(" | ", hrRoleErrors.Take(20))}";
+                        updMsg += $". Note: {hrRoleErrors.Count} Role value(s) could not be applied: {string.Join(" | ", hrRoleErrors.Take(20))}";
                     return BuildExecuteSuccessResponse(updMsg);
                 }
             }
             catch (Exception ex)
             {
-                return BuildExecuteErrorResponse($"Error updating employee records: {ex.Message}", HttpStatusCode.BadRequest);
+                // EF's own message is always "An error occurred while saving the entity
+                // changes. See the inner exception for details." — useless on screen. The
+                // actual cause (FK violation, truncation, CHECK constraint) is in the
+                // inner exception, so unwrap the whole chain. BulkInsertEmployeesWithExcel
+                // already does this; the update path used to swallow it.
+                var detail = ex.Message;
+                for (var inner = ex.InnerException; inner != null; inner = inner.InnerException)
+                    detail += " -> " + inner.Message;
+
+                _logger?.LogError(ex, "UpdateEmployeeWithExcel failed: {Detail}", detail);
+                return BuildExecuteErrorResponse($"Error updating employee records: {detail}", HttpStatusCode.BadRequest);
             }
         }
 
-        public async Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy)
+        public async Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy, string callerRole = null)
         {
             try
             {
@@ -1862,9 +1897,48 @@ namespace HRMSAPI.Implementation
                 string[] subDeptHeaders = new[] { "Sub-Department 1", "Sub-Department 2", "Sub-Department 3" };
                 // "Last Working Day" is OPTIONAL and always the LAST column (see UpdateEmployeeWithExcel).
                 const string lastWorkingDayHeader = "Last Working Day";
+                // "Role" is OPTIONAL too and must be the very LAST column, so every
+                // existing file (with or without sub-departments / Last Working Day)
+                // keeps uploading unchanged. It sets tblEmployee.RoleMasterId from
+                // the HR Role Master list. No base header is called "Role", so matching on the exact
+                // name cannot collide with an existing column.
+                //
+                // RECORD-ONLY: it does not grant access. The real portal role assigned to
+                // a new employee stays RoleId 3 (Employee) below, exactly as before, so a
+                // bulk sheet cannot hand out SuperAdmin. Settable by IT Superadmin only.
+                const string hrRoleHeader = "Role";
                 var headerRow = worksheet.Row(1);
                 int cellCount = headerRow.CellsUsed().Count();
-                int baseCols = expectedHeaders.Length;
+
+                int hrRoleCol = 0;
+                foreach (var hc in headerRow.CellsUsed())
+                {
+                    if (string.Equals(hc.GetValue<string>()?.Trim(), hrRoleHeader, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hrRoleCol = hc.Address.ColumnNumber;
+                        break;
+                    }
+                }
+                if (hrRoleCol > 0 && hrRoleCol != cellCount)
+                {
+                    return BuildExecuteErrorResponse(
+                        $"'{hrRoleHeader}' must be the last column (found at column {hrRoleCol} of {cellCount}). Move it to the end and upload again.",
+                        HttpStatusCode.BadRequest);
+                }
+                // Everything below counts columns positionally, so hide the extra
+                // Role column from those checks.
+                if (hrRoleCol > 0) cellCount--;
+
+                // "AO Code" is OPTIONAL here for the same reason as in the update path:
+                // sheets saved from the previous template end at "IsExtraDayApplicable".
+                // Detected by NAME, because counts alone are ambiguous once a trailing base
+                // column can be absent.
+                int aoCodeCol = expectedHeaders.Length;   // 59 - last of the base columns
+                bool hasAoCode = string.Equals(
+                    headerRow.Cell(aoCodeCol).GetValue<string>()?.Trim(),
+                    expectedHeaders[aoCodeCol - 1], StringComparison.OrdinalIgnoreCase);
+
+                int baseCols = hasAoCode ? expectedHeaders.Length : expectedHeaders.Length - 1;
                 int subDeptCols = subDeptHeaders.Length;
 
                 bool hasSubDept = cellCount == baseCols + subDeptCols || cellCount == baseCols + subDeptCols + 1;
@@ -1876,7 +1950,7 @@ namespace HRMSAPI.Implementation
                 if (cellCount != baseCols && !hasSubDept && lastWorkingDayCol == 0)
                     return BuildExecuteErrorResponse($"Column count mismatch: Expected {baseCols} columns, or {baseCols + 1} with '{lastWorkingDayHeader}', or {baseCols + subDeptCols} with sub-departments, or {baseCols + subDeptCols + 1} with both, found {cellCount}. Please follow the correct format.", HttpStatusCode.BadRequest);
 
-                for (int i = 0; i < expectedHeaders.Length; i++)
+                for (int i = 0; i < baseCols; i++)
                 {
                     var cellValue = headerRow.Cell(i + 1).GetValue<string>().Trim();
                     if (!string.Equals(cellValue, expectedHeaders[i], StringComparison.OrdinalIgnoreCase))
@@ -1886,9 +1960,9 @@ namespace HRMSAPI.Implementation
                 {
                     for (int i = 0; i < subDeptHeaders.Length; i++)
                     {
-                        var cv = headerRow.Cell(expectedHeaders.Length + i + 1).GetValue<string>().Trim();
+                        var cv = headerRow.Cell(baseCols + i + 1).GetValue<string>().Trim();
                         if (!string.Equals(cv, subDeptHeaders[i], StringComparison.OrdinalIgnoreCase))
-                            return BuildExecuteErrorResponse($"Header mismatch at column {expectedHeaders.Length + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
+                            return BuildExecuteErrorResponse($"Header mismatch at column {baseCols + i + 1}: Expected '{subDeptHeaders[i]}', found '{cv}'", HttpStatusCode.BadRequest);
                     }
                 }
                 if (lastWorkingDayCol > 0)
@@ -1898,6 +1972,17 @@ namespace HRMSAPI.Implementation
                         return BuildExecuteErrorResponse($"Header mismatch at column {lastWorkingDayCol}: Expected '{lastWorkingDayHeader}', found '{lwdHeader}'", HttpStatusCode.BadRequest);
                 }
                 var subDeptMap = hasSubDept ? await LoadSubDeptHierarchyAsync() : null;
+
+                // V2 Parivar role lookup by name, loaded once from dbo.tblRole.
+                // Unknown names are reported per row; the rest of the row still inserts.
+                Dictionary<string, int> hrRoleByName = null;
+                var hrRoleErrors = new List<string>();
+                if (hrRoleCol > 0)
+                {
+                    hrRoleByName = await _context.tblRoleMasters
+                        .AsNoTracking()
+                        .ToDictionaryAsync(r => r.RoleName.Trim(), r => r.RoleMasterId, StringComparer.OrdinalIgnoreCase);
+                }
 
                 var rows = worksheet.RowsUsed().Skip(1).ToList();
                 if (!rows.Any())
@@ -2025,7 +2110,8 @@ namespace HRMSAPI.Implementation
                             A_C_NO = Truncate(row.Cell(46).GetValue<string>()?.Trim(), 30),
                             BANK_IFSC_CODE = Truncate(row.Cell(47).GetValue<string>()?.Trim(), 15),
                             REFERENCE = Truncate(row.Cell(49).GetValue<string>()?.Trim(), 255),
-                            AOCode = Truncate(row.Cell(59).GetValue<string>()?.Trim(), 255),
+                            // Blank on a legacy sheet that stops before the "AO Code" column.
+                            AOCode = hasAoCode ? Truncate(row.Cell(aoCodeCol).GetValue<string>()?.Trim(), 255) : null,
                             CompanyId = company.CompanyId,
                             PasswordHash = hashedPassword,
                             Password = defaultPassword,
@@ -2121,7 +2207,7 @@ namespace HRMSAPI.Implementation
                         {
                             var (sd1, sd2, sd3) = ResolveSubDeptChain(
                                 subDeptMap, emp.DepartmentId.Value,
-                                row.Cell(60).GetValue<string>(), row.Cell(61).GetValue<string>(), row.Cell(62).GetValue<string>(),
+                                row.Cell(baseCols + 1).GetValue<string>(), row.Cell(baseCols + 2).GetValue<string>(), row.Cell(baseCols + 3).GetValue<string>(),
                                 rowNum, deptName, errors);
                             emp.SubDepartmentId1 = sd1;
                             emp.SubDepartmentId2 = sd2;
@@ -2146,6 +2232,21 @@ namespace HRMSAPI.Implementation
                                 }
                                 else
                                     errors.Add($"Row {rowNum}: '{lwdRaw}' is not a valid Last Working Day");
+                            }
+                        }
+
+                        // Last column (optional): Role (dbo.tblRole). Blank leaves
+                        // the new employee with no value, exactly as before this column
+                        // existed. An unknown name is reported and the row still inserts.
+                        if (hrRoleCol > 0)
+                        {
+                            var hrRoleRaw = row.Cell(hrRoleCol).GetValue<string>()?.Trim();
+                            if (!string.IsNullOrWhiteSpace(hrRoleRaw))
+                            {
+                                if (hrRoleByName != null && hrRoleByName.TryGetValue(hrRoleRaw, out var v2RoleId))
+                                    emp.RoleMasterId = v2RoleId;
+                                else
+                                    hrRoleErrors.Add($"Row {rowNum}: Role '{hrRoleRaw}' does not exist in Role Master");
                             }
                         }
 
@@ -2193,6 +2294,8 @@ namespace HRMSAPI.Implementation
                 var msg = $"{insertedCount} employee(s) created successfully.";
                 if (errors.Any())
                     msg += $" Errors in {errors.Count} row(s): {string.Join("; ", errors)}";
+                if (hrRoleErrors.Count > 0)
+                    msg += $" Note: {hrRoleErrors.Count} Role value(s) could not be applied: {string.Join(" | ", hrRoleErrors.Take(20))}";
 
                 return BuildExecuteSuccessResponse(msg);
             }
@@ -5757,6 +5860,192 @@ namespace HRMSAPI.Implementation
             catch (Exception ex)
             {
                 return BuildExecuteErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // NOC attachment for inactive employees
+        //
+        // Stored in the existing dbo.tblEmployeeInActiveFiles, tagged
+        // DocumentType = 'NOC'. Rows written before that column existed are NULL
+        // and mean "Inactivation", so they are never picked up here.
+        //
+        // One CURRENT NOC per employee: uploading a new one soft-deletes the
+        // previous (IsDeleted = 1). Nothing is ever hard-deleted and the old file
+        // is left on disk, so a replacement is fully recoverable.
+        // ---------------------------------------------------------------------
+        private const string NocDocumentType = "NOC";
+
+        public async Task<FetchAndResponse> GetInactiveEmployeeNocAsync(long employeeId)
+        {
+            try
+            {
+                var emp = await _context.tblEmployees.AsNoTracking()
+                    .Where(e => e.EmployeeId == employeeId)
+                    .Select(e => new { e.EmployeeId, e.Ecode, e.IsActive, e.IsDeleted })
+                    .FirstOrDefaultAsync();
+
+                if (emp == null)
+                    return BuildFetchErrorResponse("Employee not found.", HttpStatusCode.NotFound);
+
+                var baseUrl = _configuration["Reports:ResumeBaseUrl"] ?? string.Empty;
+
+                var noc = await _context.tblEmployeeInActiveFiles.AsNoTracking()
+                    .Where(f => f.EmpId == (int)employeeId
+                             && f.DocumentType == NocDocumentType
+                             && (f.IsDeleted == false || f.IsDeleted == null))
+                    .OrderByDescending(f => f.Id)
+                    .Select(f => new
+                    {
+                        f.Id,
+                        f.FilePath,
+                        f.CreatedOn,
+                        f.CreatedBy
+                    })
+                    .FirstOrDefaultAsync();
+
+                return BuildFetchSuccessResponse("Data Fetched Successfully", new
+                {
+                    EmployeeId = emp.EmployeeId,
+                    Ecode = emp.Ecode,
+                    HasNoc = noc != null,
+                    NocId = noc?.Id,
+                    FilePath = noc?.FilePath,
+                    // Absolute link so the UI can open it straight from the file server.
+                    FileUrl = noc == null ? null : baseUrl + noc.FilePath.Replace("\\", "/"),
+                    FileName = noc == null ? null : Path.GetFileName(noc.FilePath),
+                    UploadedOn = noc?.CreatedOn,
+                    UploadedBy = noc?.CreatedBy
+                });
+            }
+            catch (Exception ex)
+            {
+                return BuildFetchErrorResponse(ex.Message, HttpStatusCode.BadRequest);
+            }
+        }
+
+        public async Task<ExecuteAndReponse> UploadInactiveEmployeeNocAsync(long employeeId, IFormFile file, string uploadedBy)
+        {
+            try
+            {
+                if (file == null || file.Length == 0)
+                    return BuildExecuteErrorResponse("No file uploaded.", HttpStatusCode.BadRequest);
+
+                // Keep it to document formats; the NOC is a signed letter, not media.
+                var allowed = new[] { ".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx" };
+                var ext = Path.GetExtension(file.FileName)?.ToLowerInvariant() ?? string.Empty;
+                if (!allowed.Contains(ext))
+                    return BuildExecuteErrorResponse(
+                        $"Unsupported file type '{ext}'. Allowed: {string.Join(", ", allowed)}.",
+                        HttpStatusCode.BadRequest);
+
+                const long maxBytes = 10L * 1024 * 1024;
+                if (file.Length > maxBytes)
+                    return BuildExecuteErrorResponse("File is larger than 10 MB.", HttpStatusCode.BadRequest);
+
+                var emp = await _context.tblEmployees
+                    .FirstOrDefaultAsync(e => e.EmployeeId == employeeId);
+                if (emp == null)
+                    return BuildExecuteErrorResponse("Employee not found.", HttpStatusCode.NotFound);
+
+                // An NOC belongs to someone who has actually left.
+                if (emp.IsActive == true && emp.IsDeleted != true)
+                    return BuildExecuteErrorResponse(
+                        $"{emp.Ecode} is still active. An NOC can only be uploaded for an inactive employee.",
+                        HttpStatusCode.BadRequest);
+
+                // Same folder and naming convention as the inactivation attachments.
+                var rootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "Uploads", "InactiveAttachments");
+                if (!Directory.Exists(rootPath)) Directory.CreateDirectory(rootPath);
+
+                var fileName = $"{DateTime.Now:ddMMyyyyHHmmssfff}_NOC_{emp.Ecode}{ext}";
+                var fullPath = Path.Combine(rootPath, fileName);
+                var relativePath = Path.Combine("Uploads", "InactiveAttachments", fileName);
+
+                using (var stream = new FileStream(fullPath, FileMode.Create))
+                    await file.CopyToAsync(stream);
+
+                var now = DateTime.Now;
+                var by = string.IsNullOrWhiteSpace(uploadedBy) ? "System" : uploadedBy;
+
+                // Retire any existing NOC. Soft delete only - the row and the file
+                // both stay, so a mistaken replacement can be undone.
+                var existing = await _context.tblEmployeeInActiveFiles
+                    .Where(f => f.EmpId == (int)employeeId
+                             && f.DocumentType == NocDocumentType
+                             && (f.IsDeleted == false || f.IsDeleted == null))
+                    .ToListAsync();
+
+                foreach (var old in existing)
+                {
+                    old.IsDeleted = true;
+                    old.IsActive = false;
+                    old.UpdatedBy = by;
+                    old.UpdatedOn = now;
+                }
+
+                await _context.tblEmployeeInActiveFiles.AddAsync(new tblEmployeeInActiveFile
+                {
+                    EmpId = (int)employeeId,
+                    FilePath = relativePath,
+                    DocumentType = NocDocumentType,
+                    IsActive = true,
+                    IsDeleted = false,
+                    CreatedOn = now,
+                    CreatedBy = by
+                });
+
+                // The NOC must also become the document every other screen shows.
+                // FNF's "Resignation Attachment" (sp_FNF_GetFnfDetailsByEcode) reads
+                // EmployeeResignationChecklistResponse.Attachment, a different table
+                // entirely -- so without this the NOC would only ever be visible on the
+                // NOC screen and FNF would keep showing the original file.
+                //
+                // That table has no IsDeleted column, so the previous path is first
+                // copied into tblEmployeeInActiveFiles as a soft-deleted
+                // 'SupersededAttachment' row. Nothing reads those (every reader filters
+                // IsDeleted = 0), but the old value stays recoverable.
+                // EmployeeId on this table is varchar, which is why the proc uses
+                // TRY_CAST. Compared as a string here for the same reason.
+                var empIdText = employeeId.ToString();
+                var checklistRow = await _context.EmployeeResignationChecklistResponses
+                    .Where(r => r.EmployeeId == empIdText && r.Attachment != null)
+                    .OrderByDescending(r => r.LastUpdatedOn ?? r.CreatedOn)
+                    .ThenByDescending(r => r.EmployeeResignationChecklistResponseId)
+                    .FirstOrDefaultAsync();
+
+                var replacedFnfAttachment = false;
+                if (checklistRow != null && checklistRow.Attachment != relativePath)
+                {
+                    await _context.tblEmployeeInActiveFiles.AddAsync(new tblEmployeeInActiveFile
+                    {
+                        EmpId = (int)employeeId,
+                        FilePath = checklistRow.Attachment,
+                        DocumentType = "SupersededAttachment",
+                        IsActive = false,
+                        IsDeleted = true,           // never surfaces; kept only for recovery
+                        CreatedOn = now,
+                        CreatedBy = by
+                    });
+
+                    checklistRow.Attachment = relativePath;
+                    checklistRow.LastUpdatedBy = by;
+                    checklistRow.LastUpdatedOn = now;
+                    replacedFnfAttachment = true;
+                }
+
+                await _context.SaveChangesAsync();
+
+                var msg = existing.Count > 0
+                    ? $"NOC uploaded for {emp.Ecode}. The previous NOC was replaced and kept in history."
+                    : $"NOC uploaded for {emp.Ecode}.";
+                if (replacedFnfAttachment)
+                    msg += " It now also shows as the Resignation Attachment in F&F and the reports.";
+                return BuildExecuteSuccessResponse(msg);
+            }
+            catch (Exception ex)
+            {
+                return BuildExecuteErrorResponse(ex.InnerException?.Message ?? ex.Message, HttpStatusCode.BadRequest);
             }
         }
     }

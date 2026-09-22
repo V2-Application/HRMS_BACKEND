@@ -1,4 +1,4 @@
-﻿using HRMSAPI.Data;
+using HRMSAPI.Data;
 using HRMSAPI.Models.Candidate;
 
 namespace HRMSAPI.DTO
@@ -128,8 +128,9 @@ namespace HRMSAPI.DTO
         public int? ShiftID { get; set; }
 
         /// <summary>
-        /// HR role (dbo.tblRoleMaster) chosen in the "Role" field. Optional -
-        /// nothing about the portal/RBAC role is affected by this.
+        /// HR job role (dbo.tblRoleMaster) chosen in the "Role" field.
+        /// Optional and RECORD-ONLY -- the actual
+        /// portal/RBAC assignment in tblEmployeeRole is not affected by this.
         /// </summary>
         public int? RoleMasterId { get; set; }
 

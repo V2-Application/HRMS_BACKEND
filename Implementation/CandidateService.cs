@@ -1,4 +1,4 @@
-﻿using ASN.Controllers;
+using ASN.Controllers;
 using BCrypt.Net;
 using ClosedXML.Excel;
 using DocumentFormat.OpenXml.Bibliography;
@@ -2026,19 +2026,18 @@ namespace HRMSAPI.Implementation
                         newEmployee.Password = defaultPassword; // Store plain text password
                         _context.tblEmployees.Update(newEmployee);
 
-                        // Carry the HR role picked on the candidate page onto the new
-                        // employee. This is the HR role list (tblRoleMaster), NOT the
-                        // portal/RBAC role - the default portal role the conversion proc
-                        // assigns is left exactly as it is.
-                        // A role can be deactivated or renamed between the candidate
-                        // being saved and joining; only a role that still exists is
-                        // carried over.
+                        // Carry the V2 Parivar role picked on the candidate page onto the
+                        // new employee. RECORD-ONLY: the default portal/RBAC role the
+                        // conversion proc assigns in tblEmployeeRole is left exactly as it
+                        // is, so this cannot grant a new joiner any access.
+                        // A role can be renamed or removed between the candidate being
+                        // saved and joining; only a role that still exists is carried over.
                         if (candidate.RoleMasterId.HasValue && candidate.RoleMasterId.Value > 0)
                         {
-                            var hrRoleExists = await _context.tblRoleMasters
+                            var v2RoleExists = await _context.tblRoleMasters
                                 .AnyAsync(r => r.RoleMasterId == candidate.RoleMasterId.Value);
 
-                            if (hrRoleExists)
+                            if (v2RoleExists)
                             {
                                 newEmployee.RoleMasterId = candidate.RoleMasterId.Value;
                             }
@@ -2339,8 +2338,8 @@ namespace HRMSAPI.Implementation
                     ESICApplicable = candidateEntity.ESICApplicable ?? false,
                     companyId = candidateEntity.CompanyId,
                     ShiftID = candidateEntity.ShiftID ?? 0,
-                    // No ?? fallback: the Role field is optional, and null has to stay
-                    // null so the form shows it empty rather than picking a role.
+                    // No ?? fallback: the V2 Parivar Role field is optional, and null has
+                    // to stay null so the form shows it empty rather than picking a role.
                     RoleMasterId = candidateEntity.RoleMasterId,
                     IsUANRegistered = candidateEntity.IsUANRegistered ?? false,
                     PreferredLocation = candidateEntity.PreferredLocation ?? "",
@@ -4715,8 +4714,8 @@ OUTER APPLY (
             data.DifferentlyAbledRemarks = update.differentlyAbledRemarks ?? data.DifferentlyAbledRemarks;
             data.SkillType = update.skillType ?? data.SkillType;
             data.ShiftID = update.ShiftID ?? data.ShiftID;
-            // Optional HR role pick; ?? keeps the stored value when the form does not
-            // send one, matching how every other optional field here behaves.
+            // Optional V2 Parivar role pick; ?? keeps the stored value when the form
+            // does not send one, matching how every other optional field here behaves.
             data.RoleMasterId = update.RoleMasterId ?? data.RoleMasterId;
             data.Source = update.Source ?? data.Source;
             data.ReferenceEmployee = update.ReferenceEmployee ?? data.ReferenceEmployee;

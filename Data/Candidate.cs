@@ -246,11 +246,18 @@ public partial class Candidate
     public int? RoleId { get; set; }
 
     /// <summary>
-    /// The candidate's HR role (dbo.tblRoleMaster), picked on the candidate page.
-    /// Optional; copied onto tblEmployee.RoleMasterId when the candidate is
-    /// converted into an employee.
+    /// Superseded by V2ParivarRoleId below (see tblEmployee.RoleMasterId).
+    /// Every row is NULL and nothing reads or writes it any more.
     /// </summary>
     public int? RoleMasterId { get; set; }
+
+    /// <summary>
+    /// The candidate's V2 Parivar role (dbo.tblRole), picked on the candidate
+    /// page. Optional; copied onto tblEmployee.V2ParivarRoleId when the
+    /// candidate is converted into an employee. Record-only -- it does not
+    /// grant access.
+    /// </summary>
+    public int? V2ParivarRoleId { get; set; }
 
     public bool? IsAadharBackAttachmentUploaded { get; set; }
 

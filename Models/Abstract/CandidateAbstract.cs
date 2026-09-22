@@ -1,4 +1,4 @@
-﻿using HRMSAPI.Data;
+using HRMSAPI.Data;
 using System;
 using System.ComponentModel.DataAnnotations;
 
@@ -11,12 +11,13 @@ namespace HRMSAPI.Models.Abstract
         public int? ShiftID { get; set; }
 
         /// <summary>
-        /// Optional HR role (dbo.tblRoleMaster) for the candidate / employee.
-        /// Parked on the candidate row and copied onto tblEmployee.RoleMasterId
-        /// when the candidate is converted. Null = not chosen.
+        /// Optional HR job role (dbo.tblRoleMaster) for the candidate / employee.
+        /// Parked on the candidate row and copied onto
+        /// tblEmployee.RoleMasterId when the candidate is converted.
+        /// Null = not chosen.
         ///
-        /// Nothing to do with the portal/RBAC role, which is not editable from
-        /// these forms.
+        /// RECORD-ONLY: it does not grant access. The actual portal/RBAC
+        /// assignment in tblEmployeeRole is not editable from these forms.
         /// </summary>
         public int? RoleMasterId { get; set; }
         public string? differentlyAbledRemarks { get; set; }

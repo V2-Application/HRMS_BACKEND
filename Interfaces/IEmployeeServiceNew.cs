@@ -12,11 +12,14 @@ namespace HRMSAPI.Interfaces
         Task<(List<GetEmployeeDetailsResult> Employees, long TotalCount, int CurrentPageNumber)> EmployeeList(int pageNumber, int pageSize, string searchTerm = "");
         Task<FetchAndResponse> GetEmployeeOrCandidateById(int Id, bool isCandidate = true);
         //Task<ExecuteAndReponse> UpdateEmployee(UpdateEmployee employee, string updatedBy);
-        Task<ExecuteAndReponse> UpdateEmployee(CandidateUpdate details, CandidateDocs files, string updatedBy);
+        Task<ExecuteAndReponse> UpdateEmployee(CandidateUpdate details, CandidateDocs files, string updatedBy, string callerRole = null);
         Task<ExecuteAndReponse> UpdateEmployeeStatus(EmployeeStatusUpdateRequest request);
         Task<FetchAndResponse> GetInActiveStatusList();
-        Task<ExecuteAndReponse> UpdateEmployeeWithExcel(IFormFile file, string updatedBy);
-        Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy);
+        // callerRole is optional and only gates the "V2 Parivar Role" column, which
+        // IT Superadmin alone may set. Existing callers that omit it simply cannot
+        // use that column; every other column behaves exactly as before.
+        Task<ExecuteAndReponse> UpdateEmployeeWithExcel(IFormFile file, string updatedBy, string callerRole = null);
+        Task<ExecuteAndReponse> BulkInsertEmployeesWithExcel(IFormFile file, string createdBy, string callerRole = null);
         Task<ExecuteAndReponse> UpdateEmployeeStatusWithReasonAndAttachment(EmployeeStatusUpdateWithReasonAndAttachmentRequest request);
         Task<ExecuteAndReponse> BulkInactivateEmployees(BulkInactivateRequest request);
         Task<(List<GetEmployeeDetailsResult> Employees, long TotalCount, int CurrentPageNumber)> GetEmployeeDetailsByManagerIdAsync(
@@ -44,5 +47,11 @@ namespace HRMSAPI.Interfaces
         Task<List<DocumentChangeDto>> GetDocumentChangesAsync(long employeeId, long? CandidateId, long? idPass);
 
         Task<ExecuteAndReponse> UpdateEmployeeApprovedDetails(EmployeeDetailsUpdateView employeeDetailsUpdateView, long EmployeeId, string updatedBy);
+
+        // NOC attachment for an already-inactive employee. One current NOC per
+        // employee: uploading a new one soft-deletes the previous (never a hard
+        // delete), so the history stays in the table.
+        Task<FetchAndResponse> GetInactiveEmployeeNocAsync(long employeeId);
+        Task<ExecuteAndReponse> UploadInactiveEmployeeNocAsync(long employeeId, IFormFile file, string uploadedBy);
     }
 }

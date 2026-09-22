@@ -24,4 +24,15 @@ public partial class tblEmployeeInActiveFile
     public string UpdatedBy { get; set; }
 
     public DateTime? UpdatedOn { get; set; }
+
+    /// <summary>
+    /// What kind of document this file is: "Inactivation" (captured when the
+    /// employee was made inactive) or "NOC". NULL on the rows that existed
+    /// before this column was added and means the same as "Inactivation" -
+    /// every query that predates the column simply ignores it.
+    ///
+    /// Constrained in the database (CK_tblEmployeeInActiveFiles_DocumentType)
+    /// to NULL / 'Inactivation' / 'NOC'.
+    /// </summary>
+    public string DocumentType { get; set; }
 }
